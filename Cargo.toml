@@ -1,0 +1,38 @@
+[package]
+name = "crisis-graph"
+version = "0.1.0"
+edition = "2021"
+authors = ["Amal <crisisgraph@local>"]
+description = "Air-gapped emergency logistics and evacuation routing engine in Rust"
+
+[dependencies]
+# Async Runtime & Core Utilities
+tokio = { version = "1.38", features = ["full"] }
+async-trait = "0.1.80"
+thiserror = "1.0.61"
+dotenvy = "0.15.7"
+chrono = { version = "0.4.38", features = ["serde"] }
+uuid = { version = "1.8.0", features = ["v4", "serde"] }
+
+# Serialization & JSON
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = "1.0.117"
+
+# HTTP Client (for local vLLM inference process)
+reqwest = { version = "0.12.5", features = ["json"] }
+
+# Graph Database (Neo4j Bolt Async Driver)
+neo4rs = "0.8.0"
+
+# Redis Client (Async tokio connection manager)
+redis = { version = "0.26.0", features = ["tokio-comp", "connection-manager", "aio"] }
+
+# Deterministic Graph Routing Algorithms
+petgraph = "0.6.5"
+
+# Logging and Instrumentation
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio-test = "0.4.4"

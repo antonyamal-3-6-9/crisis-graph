@@ -1,0 +1,27 @@
+# Rust build output
+/target/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Downloaded or generated operational data
+/data/raw/
+/data/processed/
+/data/exports/
+
+# Logs and runtime state
+*.log
+/logs/
+/tmp/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
