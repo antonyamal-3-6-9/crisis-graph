@@ -66,9 +66,7 @@ crisis-graph/
 │   │   └── aluva-periyar-pilot.geojson
 │   └── raw/                          # ignored; downloaded/generated source datasets
 ├── docs/
-│   ├── geospatial-data-engineering.md
-│   ├── handoff-2026-09-04.md
-│   └── handoff-2026-09-05.md
+│   └── geospatial-data-engineering.md
 ├── src/
 │   ├── bin/
 │   │   ├── generate_boundary.rs       # generates pilot GeoJSON boundary
@@ -230,7 +228,7 @@ cargo run --bin load_baseline_graph -- \
 7. Before dispatch, independently verify every traversed segment against current operational state; the current verifier does not yet do this.
 8. Do not use the demo Neo4j seed graph together with the imported Aluva graph.
 9. Do not commit `.env`, raw downloaded map data, build output, or operational exports.
-10. When changing the data model or importer, update `docs/geospatial-data-engineering.md` and the current handoff document.
+10. When changing the data model or importer, update `docs/geospatial-data-engineering.md`.
 
 ## Verification baseline
 

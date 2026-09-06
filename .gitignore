@@ -11,6 +11,9 @@
 /data/processed/
 /data/exports/
 
+# Local handoff and work-in-progress notes
+docs/handoff-*.md
+
 # Logs and runtime state
 *.log
 /logs/
