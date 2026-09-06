@@ -1,7 +1,8 @@
-use std::sync::Arc;
 use chrono::{Duration, Utc};
 use neo4rs::query;
+use crate::geospatial::{AccessFlags, BaselineStatus};
 use crate::models::{AssetType, HazardReport, RoadStatus, Shelter};
+use crate::solver::RoutingEdge;
 use super::neo4j::Neo4jClient;
 
 #[derive(Clone)]
@@ -80,6 +81,123 @@ impl StateManager {
         }
 
         Ok(edges)
+    }
+
+    /// Fetch directed routing edges for a dataset from Neo4j, incorporating dynamic operational status
+    pub async fn get_passable_directed_subgraph(
+        &self,
+        dataset: &str,
+    ) -> Result<Vec<RoutingEdge>, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query(
+            "MATCH (a:Junction {dataset: $dataset})-[r:CONNECTS_TO {dataset: $dataset}]->(b:Junction {dataset: $dataset}) \
+             WHERE (r.baseline_status = 'OPEN' OR r.baseline_status = 'RESTRICTED') \
+               AND (r.operational_status IS NULL OR r.operational_status = 'OPEN' OR r.valid_until < datetime()) \
+             RETURN r.segment_id AS segment_id, \
+                    a.id AS source, \
+                    b.id AS target, \
+                    r.length_m AS length_m, \
+                    r.travel_time_s AS travel_time_s, \
+                    r.road_class AS road_class, \
+                    r.oneway AS oneway, \
+                    r.emergency AS emergency, \
+                    r.motorcar AS motorcar, \
+                    r.hgv AS hgv, \
+                    r.baseline_status AS baseline_status"
+        )
+        .param("dataset", dataset);
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let mut edges = Vec::new();
+
+        while let Some(row) = result.next().await? {
+            let segment_id: String = row.get("segment_id")?;
+            let source: String = row.get("source")?;
+            let target: String = row.get("target")?;
+            let length_m: f64 = row.get("length_m")?;
+            let travel_time_s: f64 = row.get("travel_time_s")?;
+            let road_class: String = row.get("road_class")?;
+            let oneway: bool = row.get("oneway")?;
+            let emergency: bool = row.get("emergency")?;
+            let motorcar: bool = row.get("motorcar")?;
+            let hgv: bool = row.get("hgv")?;
+            let status_str: String = row.get("baseline_status")?;
+            let baseline_status = match status_str.as_str() {
+                "OPEN" => BaselineStatus::Open,
+                "RESTRICTED" => BaselineStatus::Restricted,
+                _ => BaselineStatus::Unsuitable,
+            };
+
+            edges.push(RoutingEdge {
+                segment_id,
+                source,
+                target,
+                length_m,
+                travel_time_s,
+                road_class,
+                access: AccessFlags {
+                    motorcar,
+                    emergency,
+                    hgv,
+                },
+                baseline_status,
+                oneway,
+            });
+        }
+
+        Ok(edges)
+    }
+
+    /// Mutate a specific road segment with an operational hazard and bi-temporal expiration timestamp
+    pub async fn apply_segment_hazard(
+        &self,
+        segment_id: &str,
+        status: RoadStatus,
+        duration_hours: u32,
+    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        let status_str = match status {
+            RoadStatus::Open => "OPEN",
+            RoadStatus::Blocked => "BLOCKED",
+            RoadStatus::Flooded => "FLOODED",
+        };
+        let valid_until = (Utc::now() + Duration::hours(duration_hours as i64)).to_rfc3339();
+        let q = query(
+            "MATCH ()-[r:CONNECTS_TO {segment_id: $segment_id}]->() \
+             SET r.operational_status = $status, \
+                 r.valid_until = datetime($valid_until) \
+             RETURN count(r) AS updated"
+        )
+        .param("segment_id", segment_id)
+        .param("status", status_str)
+        .param("valid_until", valid_until);
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        if let Some(row) = result.next().await? {
+            Ok(row.get("updated")?)
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Clear all operational hazards for a dataset
+    pub async fn clear_operational_hazards(
+        &self,
+        dataset: &str,
+    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query(
+            "MATCH ()-[r:CONNECTS_TO {dataset: $dataset}]->() \
+             WHERE r.operational_status IS NOT NULL \
+             SET r.operational_status = NULL, \
+                 r.valid_until = NULL \
+             RETURN count(r) AS cleared"
+        )
+        .param("dataset", dataset);
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        if let Some(row) = result.next().await? {
+            Ok(row.get("cleared")?)
+        } else {
+            Ok(0)
+        }
     }
 
     /// Query available shelters capable of accommodating the headcount and asset requirement

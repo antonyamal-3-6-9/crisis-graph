@@ -1,7 +1,7 @@
 use chrono::Utc;
 use uuid::Uuid;
 use tracing::{info, warn, error};
-use crate::db::{PassableEdge, RedisClient, StateManager};
+use crate::db::{RedisClient, StateManager};
 use crate::ingestion::TriageExtractor;
 use crate::models::{CrisisState, DispatchStatus, TacticalBrief};
 use crate::solver::DeterministicPathfinder;

@@ -144,16 +144,303 @@ This permits competing reports, expiry, audit history, and later review. A singl
 
 ## Import pipeline
 
-1. Define and version a polygon boundary for the pilot area.
-2. Acquire and archive the matching OSM PBF input with date/version.
-3. Filter eligible road ways and relevant nodes.
-4. Split ways into directed segments at topology-changing nodes.
-5. Interpret road direction, access, and vehicle restrictions.
-6. Calculate segment length from geometry and derive base travel time where possible.
-7. Emit versioned staging artefacts: `junctions.geojson`, `road_segments.geojson`, and `import_report.json`.
-8. Validate and load the normalized graph into Neo4j.
-9. Load shelters, rescue bases, and asset metadata separately from road data.
-10. Rebuild or update the baseline graph only through this importer; apply incidents only as overlay events.
+1. Define and version a polygon boundary for the pilot area (`data/boundaries/aluva-periyar-pilot.geojson`).
+2. Acquire and archive the matching OSM input with date/version (`data/raw/osm/aluva-periyar-pilot.osm.json`).
+3. Filter eligible road ways and relevant nodes using `crisis_graph::geospatial::OsmNormalizer`.
+4. Split ways into directed segments at topology-changing nodes (intersections, way endpoints, self-loops).
+5. Interpret road direction (`oneway=yes`, `-1`, roundabouts, motorways), access, and vehicle capability restrictions (`motorcar`, `emergency`, `hgv`).
+6. Calculate segment physical length via Haversine great-circle summation and derive base travel time from speed limits or road class defaults.
+7. Emit versioned staging artefacts:
+   - `data/processed/aluva-periyar-pilot/junctions.geojson` (21,256 junctions)
+   - `data/processed/aluva-periyar-pilot/road_segments.geojson` (48,626 directed segments, 5,139 km)
+   - `data/processed/aluva-periyar-pilot/import_report.json` (provenance, network metrics, and validation report)
+8. Validate graph integrity (zero dangling endpoints, zero duplicate IDs, zero zero-length segments, validated one-way behaviour).
+9. Load the validated normalized graph into Neo4j as baseline directed road network.
+10. Load shelters, rescue bases, and asset metadata separately from road data.
+11. Rebuild or update the baseline graph only through this importer; apply incidents only as operational overlay events.
+
+### Normalization execution command
+
+```bash
+cargo run --bin normalize_osm -- \
+  --input data/raw/osm/aluva-periyar-pilot.osm.json \
+  --boundary data/boundaries/aluva-periyar-pilot.geojson \
+  --output-dir data/processed/aluva-periyar-pilot \
+  --source-version "aluva-periyar-pilot-2026-09-04" \
+  --boundary-policy intersect
+```
+
+## End-to-End Implementation Flow & Concrete Examples (Aluva Pilot)
+
+This section provides the complete reference implementation flow showing how raw coordinates and OpenStreetMap data are transformed into a validated, directed routing graph.
+
+```text
+  Phase 1               Phase 2                 Phase 3 & 4                  Phase 5
+┌─────────────┐       ┌──────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│  Boundary   │ ───>  │   Raw OSM    │ ───>  │  Normalization  │ ───>  │   Validation    │
+│ Generation  │       │ Acquisition  │       │   & Topology    │       │    & Staging    │
+└─────────────┘       └──────────────┘       └─────────────────┘       └─────────────────┘
+ [GeoJSON Poly]        [16MB Raw JSON]        [Rust Normalizer]         [Staging GeoJSON]
+```
+
+---
+
+### Step 1: Geodesic Boundary Formulation
+
+#### 1. Rationale
+Emergency response requires a strictly bounded catchment area. The pilot area is centered on **Aluva Railway Station** (`10.10816° N, 76.35651° E`) with a **10 km radius**, covering the Periyar river floodplain.
+
+#### 2. Execution Command
+```bash
+cargo run --bin generate_boundary -- \
+  --name aluva-periyar-pilot \
+  --lat 10.10816 --lon 76.35651 \
+  --radius-km 10 \
+  --output data/boundaries/aluva-periyar-pilot.geojson
+```
+
+#### 3. Mathematical Basis
+Uses WGS84 great-circle destination point equations ($R = 6,371,008.8\text{ m}$) stepping across 64 radial bearing segments ($2\pi / 64$):
+$$\phi_2 = \arcsin(\sin\phi_1 \cos\delta + \cos\phi_1 \sin\delta \cos\theta)$$
+$$\lambda_2 = \lambda_1 + \arctan2(\sin\theta \sin\delta \cos\phi_1, \cos\delta - \sin\phi_1 \sin\phi_2)$$
+
+#### 4. Concrete Boundary Output (`data/boundaries/aluva-periyar-pilot.geojson`)
+```json
+{
+  "type": "Feature",
+  "properties": {
+    "id": "aluva-periyar-pilot-v1",
+    "name": "aluva-periyar-pilot",
+    "centre": { "latitude": 10.10816, "longitude": 76.35651 },
+    "radius_km": 10.0,
+    "crs": "EPSG:4326",
+    "segments": 64
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [76.356510, 10.198092],
+        [76.365466, 10.197658],
+        [76.374336, 10.196363],
+        ...
+        [76.356510, 10.198092]
+      ]
+    ]
+  }
+}
+```
+
+---
+
+### Step 2: Raw OSM Data Extraction
+
+#### 1. Execution Command
+```bash
+cargo run --bin download_osm -- \
+  --boundary data/boundaries/aluva-periyar-pilot.geojson \
+  --output data/raw/osm/aluva-periyar-pilot.osm.json \
+  --endpoint https://overpass.kumi.systems/api/interpreter
+```
+
+#### 2. Overpass QL Query
+Targeted all vehicle-eligible highway classes intersecting the pilot radius, plus their referenced nodes:
+```text
+[out:json][timeout:180];
+way(around:10000,10.10816,76.35651)
+  ["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|service|track)$"];
+out body;
+>;
+out skel qt;
+```
+
+#### 3. Concrete Raw OSM Data Snippet (`data/raw/osm/aluva-periyar-pilot.osm.json` — 16 MB)
+Total elements: **117,396** (104,429 nodes, 12,967 ways).
+
+```json
+// Raw Node: Just geographic coordinates
+{
+  "type": "node",
+  "id": 5883279139,
+  "lat": 10.0302438,
+  "lon": 76.3100927
+}
+
+// Raw Way: An ordered sequence of 35 node IDs with tags
+{
+  "type": "way",
+  "id": 30921568,
+  "nodes": [4889497750, 343714817, 343714816, ..., 5974232533],
+  "tags": {
+    "highway": "secondary",
+    "name": "Aluva-Perumbavoor Road",
+    "oneway": "no",
+    "surface": "asphalt",
+    "maxspeed": "45"
+  }
+}
+```
+
+---
+
+### Step 3: Topology Splitting & Directional Normalization
+
+#### 1. Why Raw OSM Cannot Be Routed Directly
+- **Intermediate nodes are geometry, not junctions:** Most nodes in an OSM way define road curvature. Turning every node into a graph node explodes graph size with redundant edges and slows pathfinding.
+- **Missing graph connectivity:** If Road A and Road B cross at Node $X$, but Node $X$ is buried in the middle of both ways, graph routing cannot turn from Road A onto Road B unless both ways are split at Node $X$.
+- **Undirected representation:** OSM ways are ordered node sequences. A two-way road requires distinct directed edges ($A \to B$ and $B \to A$) with inverted coordinate geometry so GIS tools and dispatchers can visualize and route both directions independently.
+
+```text
+Raw OSM Way (30921568):
+Node 1 ─────── Node 2 ─────── Node 3 ─────── Node 4 ─────── Node 5
+(Start)        (Curve)     (Intersection)   (Curve)        (End)
+   │                             │                           │
+   ▼                             ▼                           ▼
+(:Junction 1)             (:Junction 3)               (:Junction 5)
+
+Directed Routing Edges Generated:
+- Forward Segment 0: Junction 1 -> Junction 3 (Geometry: [Node 1, Node 2, Node 3])
+- Reverse Segment 0: Junction 3 -> Junction 1 (Geometry: [Node 3, Node 2, Node 1])
+- Forward Segment 1: Junction 3 -> Junction 5 (Geometry: [Node 3, Node 4, Node 5])
+- Reverse Segment 1: Junction 5 -> Junction 3 (Geometry: [Node 5, Node 4, Node 3])
+```
+
+#### 2. Normalizer Execution
+```bash
+cargo run --bin normalize_osm -- \
+  --input data/raw/osm/aluva-periyar-pilot.osm.json \
+  --boundary data/boundaries/aluva-periyar-pilot.geojson \
+  --output-dir data/processed/aluva-periyar-pilot \
+  --source-version "aluva-periyar-pilot-2026-09-04" \
+  --boundary-policy intersect
+```
+
+#### 3. Core Processing Pipeline ([`src/geospatial/mod.rs`](file:///run/media/amal/Store/Projects/crisis-graph/src/geospatial/mod.rs))
+- **Junction Node Identification:** Nodes referenced at way endpoints, nodes referenced by $\ge 2$ ways, and self-intersecting loop nodes become `(:Junction)` instances. Out of 104,429 raw nodes, **21,256** were classified as true junctions.
+- **Physical Length Calculation:** Great-circle Haversine summation along each polyline vertex:
+  $$d = 2 R \arcsin\left(\sqrt{\sin^2(\Delta\phi/2) + \cos\phi_1\cos\phi_2\sin^2(\Delta\lambda/2)}\right)$$
+- **Base Travel Time:** Derived as $t = d / (v_{\text{speed}} \cdot \frac{1000}{3600})$, using parsed `maxspeed` or road class fallback speeds.
+- **Directional Segment Generation:**
+  - Standard two-way: Forward (`fwd`) and reverse (`rev`) segment pairs with inverted LineString geometry.
+  - `oneway=yes`, motorway, or roundabout: Forward only (`fwd`).
+  - `oneway=-1` / `reverse`: Reverse only (`rev`).
+- **Vehicle Access Filtering:** Infers permissions for `motorcar`, `emergency`, and `hgv`.
+
+---
+
+### Step 4: Staging Outputs & Schemas
+
+The normalization stage writes three versioned artifacts into `data/processed/aluva-periyar-pilot/`:
+
+#### 1. Routing Junctions (`junctions.geojson` — 8.4 MB, 21,256 features)
+```json
+{
+  "type": "Feature",
+  "id": "node/18306111",
+  "geometry": {
+    "type": "Point",
+    "coordinates": [76.3867873, 10.192707]
+  },
+  "properties": {
+    "junction_id": "node/18306111",
+    "osm_node_id": 18306111,
+    "degree": 5,
+    "in_degree": 2,
+    "out_degree": 3,
+    "inside_boundary": true
+  }
+}
+```
+
+#### 2. Directed Road Segments (`road_segments.geojson` — 61 MB, 48,626 features)
+Concrete forward segment with 5-point polyline geometry:
+```json
+{
+  "type": "Feature",
+  "id": "way/1000300905/seg/0/fwd",
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [
+      [76.3210264, 10.0342687],
+      [76.3214521, 10.0344530],
+      [76.3216001, 10.0345560],
+      [76.3216039, 10.0345937],
+      [76.3215172, 10.0348148]
+    ]
+  },
+  "properties": {
+    "segment_id": "way/1000300905/seg/0/fwd",
+    "osm_way_id": 1000300905,
+    "from_junction_id": "node/5755272548",
+    "to_junction_id": "node/9233321223",
+    "road_class": "unclassified",
+    "road_name": null,
+    "oneway": false,
+    "direction": "forward",
+    "length_m": 101.3,
+    "speed_kph": 30.0,
+    "maxspeed_kph": null,
+    "base_travel_time_s": 12.16,
+    "surface": null,
+    "bridge": false,
+    "tunnel": false,
+    "lanes": null,
+    "access": {
+      "emergency": true,
+      "hgv": true,
+      "motorcar": true
+    },
+    "baseline_status": "OPEN",
+    "source_version": "aluva-periyar-pilot-2026-09-04"
+  }
+}
+```
+
+*(Its two-way counterpart `way/1000300905/seg/0/rev` was simultaneously created with `from: node/9233321223`, `to: node/5755272548`, and reversed coordinates).*
+
+#### 3. Audit Report (`import_report.json` — 2.5 KB)
+```json
+{
+  "report_generated_at": "2026-09-05T18:13:03.350618340+00:00",
+  "source_version": "aluva-periyar-pilot-2026-09-04",
+  "raw_elements_count": 117396,
+  "total_junctions_count": 21256,
+  "total_directed_segments_count": 48626,
+  "forward_segments_count": 24861,
+  "reverse_segments_count": 23765,
+  "oneway_segment_count": 1098,
+  "twoway_segment_pair_count": 23764,
+  "total_network_length_km": 5139.27,
+  "mean_segment_length_m": 105.7,
+  "validation": {
+    "dangling_endpoints_count": 0,
+    "duplicate_segment_ids_count": 0,
+    "zero_length_segments_count": 0,
+    "self_loops_count": 45,
+    "known_oneway_validated": true,
+    "passed": true
+  }
+}
+```
+
+---
+
+### Step 5: Automated Integrity & Ground-Truth Validation
+
+[`tests/geospatial_tests.rs`](file:///run/media/amal/Store/Projects/crisis-graph/tests/geospatial_tests.rs) verifies graph invariants against the actual generated staging files:
+
+1. **Topology Invariants:**
+   - Every `from_junction_id` and `to_junction_id` across all 48,626 segments exists in `junctions.geojson` (**0 dangling endpoints**).
+   - Zero duplicate segment IDs.
+   - Zero zero-length segments.
+2. **Local Ground-Truth Validation:**
+   - **Airport Road (`way/53020815`):** Tagged `oneway=yes`. Test confirms **only forward segments** exist in the graph.
+   - **Kizhakkambalam Bus Stand road (`way/623556453`):** Tagged `oneway=-1`. Test confirms **only reverse segments** exist in the graph.
+3. **Execution:**
+   ```bash
+   cargo test --test geospatial_tests
+   # 1 passed; 0 failed; finished in 1.5s
+   ```
 
 ## Required validation
 

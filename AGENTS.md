@@ -67,12 +67,15 @@ crisis-graph/
 │   └── raw/                          # ignored; downloaded/generated source datasets
 ├── docs/
 │   ├── geospatial-data-engineering.md
-│   └── handoff-2026-09-04.md
+│   ├── handoff-2026-09-04.md
+│   └── handoff-2026-09-05.md
 ├── src/
 │   ├── bin/
 │   │   ├── generate_boundary.rs       # generates pilot GeoJSON boundary
-│   │   └── download_osm.rs            # downloads raw OSM road data
+│   │   ├── download_osm.rs            # downloads raw OSM road data
+│   │   └── normalize_osm.rs           # normalizes raw OSM into directed graph GeoJSON
 │   ├── db/
+│   ├── geospatial/                    # OSM normalization, topology splitting, and validation
 │   ├── ingestion/
 │   ├── models/
 │   ├── pipeline/
@@ -81,6 +84,8 @@ crisis-graph/
 │   ├── lib.rs
 │   └── main.rs
 └── tests/
+    ├── geospatial_tests.rs            # validates normalized pilot staging artifacts
+    └── integration_tests.rs
 ```
 
 ## Current pipeline
@@ -161,28 +166,58 @@ base_travel_time_s, baseline_status, source_version
 
 Do not mutate baseline map data in response to an incident. Apply hazards as temporal overlay events with `valid_from`, `valid_until`, confidence, source, and optional dispatcher verification.
 
-## Next milestone: OSM normalization, not live pipeline changes
+## Completed milestone: OSM normalization pipeline
 
-Implement a normalizer/import stage that reads the raw OSM JSON and writes inspectable, versioned outputs:
+The OSM normalization stage is implemented and verified (`src/geospatial/mod.rs` and `src/bin/normalize_osm.rs`). It reads raw OSM JSON and emits inspectable, versioned outputs:
 
 ```text
 data/processed/aluva-periyar-pilot/
-  junctions.geojson
-  road_segments.geojson
-  import_report.json
+  junctions.geojson          # 21,256 Point features
+  road_segments.geojson      # 48,626 directed LineString segments (5,139 km)
+  import_report.json         # validation (0 dangling, 0 duplicate, 0 zero-length)
 ```
 
-The normalizer must:
+Run command:
+```bash
+cargo run --bin normalize_osm -- \
+  --input data/raw/osm/aluva-periyar-pilot.osm.json \
+  --boundary data/boundaries/aluva-periyar-pilot.geojson \
+  --output-dir data/processed/aluva-periyar-pilot \
+  --source-version "aluva-periyar-pilot-2026-09-04" \
+  --boundary-policy intersect
+```
 
-1. Parse raw OSM nodes and vehicle-eligible highway ways.
-2. Preserve source IDs/tags and source version.
-3. Split roads at intersections and other topology-changing nodes.
-4. Create **directed** segments, respecting `oneway` and relevant access restrictions.
-5. Store geometry, endpoint IDs, and calculated physical length.
-6. Validate dangling endpoints, duplicates, counts, and known one-way behaviour.
-7. Keep baseline data rebuildable and completely separate from incident overlays.
+## Completed milestone: Directed routing solver & Neo4j baseline loader
 
-Turn restrictions require edge-based route state (or equivalent inbound-segment state); a plain junction-to-junction graph cannot represent prohibited turns.
+1. **Directed Petgraph solver:**
+   - Upgraded `DeterministicPathfinder` to `petgraph::graph::DiGraph<String, RoutingEdge>`.
+   - Full support for one-way constraints, vehicle accessibility (`Ambulance`, `EvacTruck`, `RescueBoat`), cost objectives (`FastestTime`, `ShortestDistance`), and dynamic hazard avoidance.
+2. **Neo4j directed baseline loader:**
+   - Implemented `src/db/baseline_loader.rs` and `src/bin/load_baseline_graph.rs`.
+   - Batch ingests junctions and directed road segments using Cypher `UNWIND` transactions.
+   - Built uniqueness constraints and indexes on `(:Junction {id, dataset})` and `[:CONNECTS_TO {segment_id, dataset}]`.
+   - Ingested 21,256 junctions and 48,626 directed segments in 7.1s.
+3. **Dynamic operational overlay & verification:**
+   - `StateManager::get_passable_directed_subgraph` extracts passable directed edges filtering out active hazard closures.
+   - `StateManager::apply_segment_hazard` and `clear_operational_hazards` support temporal overlays.
+   - Verified via integration tests in `tests/neo4j_baseline_tests.rs`.
+
+Run command:
+```bash
+cargo run --bin load_baseline_graph -- \
+  --junctions data/processed/aluva-periyar-pilot/junctions.geojson \
+  --segments data/processed/aluva-periyar-pilot/road_segments.geojson \
+  --dataset aluva-periyar-pilot \
+  --clean
+```
+
+## Next milestone: Pipeline integration & dispatcher verification
+
+1. **Pipeline routing stage upgrade:**
+   - Connect the main pipeline runner (`src/pipeline/stages.rs`) to the directed Neo4j graph and `DeterministicPathfinder::find_directed_route`.
+   - Wire Aluva pilot landmark / coordinate resolution to nearest Neo4j junctions.
+2. **Dispatcher verification stage:**
+   - Implement independent post-routing verification of every traversed edge against current operational hazard timestamps.
 
 ## Safety and implementation rules
 

@@ -1,6 +1,5 @@
 use crisis_graph::db::PassableEdge;
 use crisis_graph::ingestion::SpatialResolver;
-use crisis_graph::models::{AssetType, HazardReport, RoadStatus, SosAlert, TriageReport};
 use crisis_graph::solver::DeterministicPathfinder;
 
 #[test]
