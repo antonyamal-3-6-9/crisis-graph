@@ -13,6 +13,7 @@
 
 # Local handoff and work-in-progress notes
 docs/handoff-*.md
+docs/internal/
 
 # Logs and runtime state
 *.log
