@@ -87,6 +87,7 @@ impl BaselineLoader {
             "CREATE INDEX junction_dataset IF NOT EXISTS FOR (j:Junction) ON (j.dataset)",
             "CREATE INDEX connects_to_segment_id IF NOT EXISTS FOR ()-[r:CONNECTS_TO]-() ON (r.segment_id)",
             "CREATE INDEX connects_to_dataset IF NOT EXISTS FOR ()-[r:CONNECTS_TO]-() ON (r.dataset)",
+            "CREATE POINT INDEX junction_point_idx IF NOT EXISTS FOR (j:Junction) ON (j.location)",
         ];
 
         for stmt in schema_statements {
@@ -142,7 +143,8 @@ impl BaselineLoader {
                 in_degree: j.in_degree,
                 out_degree: j.out_degree,
                 inside_boundary: j.inside_boundary,
-                dataset: j.dataset
+                dataset: j.dataset,
+                location: point({latitude: j.lat, longitude: j.lon})
             })
         ";
 

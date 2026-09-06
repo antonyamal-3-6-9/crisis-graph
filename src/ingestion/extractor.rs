@@ -163,15 +163,17 @@ Do not include any explanation or markdown formatting, output JSON only."#;
             }
         }
 
-        // 3. Asset requirement
-        let required_asset = if text_lower.contains("boat") || text_lower.contains("flood") || text_lower.contains("water") {
-            AssetType::RescueBoat
-        } else if text_lower.contains("injur") || text_lower.contains("medic") || text_lower.contains("ambulance") {
+        // 3. Asset requirement (explicit vehicle requests take precedence over hazard keywords)
+        let required_asset = if text_lower.contains("injur") || text_lower.contains("medic") || text_lower.contains("ambulance") {
             AssetType::Ambulance
+        } else if text_lower.contains("boat") {
+            AssetType::RescueBoat
         } else if text_lower.contains("truck") || text_lower.contains("evac") {
             AssetType::EvacTruck
-        } else {
+        } else if text_lower.contains("flood") || text_lower.contains("water") || text_lower.contains("drown") {
             AssetType::RescueBoat
+        } else {
+            AssetType::EvacTruck
         };
 
         // 4. Hazard extraction

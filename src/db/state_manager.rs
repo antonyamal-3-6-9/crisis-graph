@@ -200,6 +200,137 @@ impl StateManager {
         }
     }
 
+    /// Spatial Snapper: Find the nearest junction to a given (latitude, longitude) within max_radius_m
+    pub async fn find_nearest_junction(
+        &self,
+        dataset: &str,
+        lat: f64,
+        lon: f64,
+        max_radius_m: f64,
+    ) -> Result<Option<(String, f64)>, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query(
+            "MATCH (j:Junction {dataset: $dataset}) \
+             WHERE j.location IS NOT NULL AND point.distance(j.location, point({latitude: $lat, longitude: $lon})) <= $radius \
+             RETURN j.id AS id, point.distance(j.location, point({latitude: $lat, longitude: $lon})) AS dist \
+             ORDER BY dist ASC LIMIT 1"
+        )
+        .param("dataset", dataset)
+        .param("lat", lat)
+        .param("lon", lon)
+        .param("radius", max_radius_m);
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        if let Some(row) = result.next().await? {
+            let id: String = row.get("id")?;
+            let dist: f64 = row.get("dist")?;
+            Ok(Some((id, dist)))
+        } else {
+            // Fallback for nodes where location point hasn't been precomputed
+            let fallback_q = query(
+                "MATCH (j:Junction {dataset: $dataset}) \
+                 WITH j, point.distance(point({latitude: j.lat, longitude: j.lon}), point({latitude: $lat, longitude: $lon})) AS dist \
+                 WHERE dist <= $radius \
+                 RETURN j.id AS id, dist \
+                 ORDER BY dist ASC LIMIT 1"
+            )
+            .param("dataset", dataset)
+            .param("lat", lat)
+            .param("lon", lon)
+            .param("radius", max_radius_m);
+
+            let mut fallback_result = self.neo4j.graph.execute(fallback_q).await?;
+            if let Some(row) = fallback_result.next().await? {
+                let id: String = row.get("id")?;
+                let dist: f64 = row.get("dist")?;
+                Ok(Some((id, dist)))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    /// Seed relief shelters and depot facilities for the Aluva pilot
+    pub async fn seed_aluva_shelters(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let cypher = r#"
+            MERGE (s1:Shelter {id: 'S_ALUVA_TOWNHALL'})
+            SET s1.name = 'Aluva Town Hall Relief Hub',
+                s1.junction_id = 'node/4664235729',
+                s1.capacity = 250,
+                s1.current_occupancy = 0,
+                s1.ambulances_available = 6,
+                s1.trucks_available = 4,
+                s1.boats_available = 0,
+                s1.dataset = 'aluva-periyar-pilot',
+                s1.last_updated = datetime()
+
+            MERGE (s2:Shelter {id: 'S_UC_COLLEGE'})
+            SET s2.name = 'UC College Campus Relief Camp',
+                s2.junction_id = 'node/9903123560',
+                s2.capacity = 600,
+                s2.current_occupancy = 0,
+                s2.ambulances_available = 3,
+                s2.trucks_available = 8,
+                s2.boats_available = 0,
+                s2.dataset = 'aluva-periyar-pilot',
+                s2.last_updated = datetime()
+
+            MERGE (s3:Shelter {id: 'S_MANAPPURAM_DEPOT'})
+            SET s3.name = 'Periyar Riverside Rescue Boat Depot',
+                s3.junction_id = 'node/7048449098',
+                s3.capacity = 50,
+                s3.current_occupancy = 0,
+                s3.ambulances_available = 2,
+                s3.trucks_available = 2,
+                s3.boats_available = 10,
+                s3.dataset = 'aluva-periyar-pilot',
+                s3.last_updated = datetime()
+
+            MERGE (s4:Shelter {id: 'S_TALUK_HOSPITAL'})
+            SET s4.name = 'Aluva Taluk Hospital Medical Outpost',
+                s4.junction_id = 'node/343716109',
+                s4.capacity = 120,
+                s4.current_occupancy = 0,
+                s4.ambulances_available = 8,
+                s4.trucks_available = 0,
+                s4.boats_available = 0,
+                s4.dataset = 'aluva-periyar-pilot',
+                s4.last_updated = datetime()
+        "#;
+
+        self.neo4j.graph.run(query(cypher)).await?;
+        Ok(())
+    }
+
+    /// Independent post-routing safety verifier:
+    /// Checks every traversed segment ID against current operational hazard timestamps in Neo4j.
+    /// Returns a list of any hazardous or compromised segment IDs.
+    pub async fn verify_path_segments(
+        &self,
+        segment_ids: &[String],
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        if segment_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let q = query(
+            "UNWIND $ids AS seg_id \
+             MATCH ()-[r:CONNECTS_TO {segment_id: seg_id}]->() \
+             WHERE r.baseline_status = 'UNSUITABLE' \
+                OR (r.operational_status IS NOT NULL AND r.operational_status <> 'OPEN' AND r.valid_until > datetime()) \
+             RETURN seg_id"
+        )
+        .param("ids", segment_ids.to_vec());
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let mut hazardous = Vec::new();
+        while let Some(row) = result.next().await? {
+            let seg_id: String = row.get("seg_id")?;
+            hazardous.push(seg_id);
+        }
+
+        Ok(hazardous)
+    }
+
     /// Query available shelters capable of accommodating the headcount and asset requirement
     pub async fn find_candidate_shelters(&self, asset_type: &AssetType, headcount: u32) -> Result<Vec<Shelter>, Box<dyn std::error::Error + Send + Sync>> {
         let asset_filter = match asset_type {

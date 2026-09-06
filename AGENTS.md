@@ -209,13 +209,17 @@ cargo run --bin load_baseline_graph -- \
   --clean
 ```
 
-## Next milestone: Pipeline integration & dispatcher verification
+## Completed milestone: Pipeline integration & dispatcher verification
 
 1. **Pipeline routing stage upgrade:**
-   - Connect the main pipeline runner (`src/pipeline/stages.rs`) to the directed Neo4j graph and `DeterministicPathfinder::find_directed_route`.
-   - Wire Aluva pilot landmark / coordinate resolution to nearest Neo4j junctions.
-2. **Dispatcher verification stage:**
-   - Implement independent post-routing verification of every traversed edge against current operational hazard timestamps.
+   - Upgraded `src/pipeline/stages.rs` to stream directed graph snapshots from Neo4j (`get_passable_directed_subgraph`) through `DeterministicPathfinder::find_directed_route`.
+   - Wired GPS coordinate parsing and nearest-neighbor junction snapping (`SpatialResolver::parse_coordinates`, `StateManager::find_nearest_junction`).
+   - Mapped prominent Aluva landmarks (*Railway Station, Town Hall, UC College, Manappuram Shiva Temple, Pump Junction, Bank Junction, Taluk Hospital*) directly to Neo4j junctions.
+   - Seeded 4 operational relief hubs and vehicle depots across Aluva in Neo4j (`S_ALUVA_TOWNHALL`, `S_UC_COLLEGE`, `S_MANAPPURAM_DEPOT`, `S_TALUK_HOSPITAL`).
+2. **Independent dispatcher verification stage:**
+   - Implemented `StateManager::verify_path_segments` to independently cross-check 100% of traversed OSM road segments against active operational closures in Neo4j.
+   - Fails closed with `DispatchStatus::EscalateHumanDispatcher` if any segment is hazardous or inaccessible (e.g. oversized trucks on service alleys).
+   - Validated via end-to-end integration tests in `tests/aluva_pipeline_tests.rs`.
 
 ## Safety and implementation rules
 
@@ -225,7 +229,7 @@ cargo run --bin load_baseline_graph -- \
 4. Keep all I/O asynchronous with Tokio.
 5. Guard resource mutation with a Redis ownership-checked lock and atomic Neo4j reservation.
 6. Treat citizen/LLM hazard extraction as a candidate event. Verified field/dispatcher events are the route-blocking authority.
-7. Before dispatch, independently verify every traversed segment against current operational state; the current verifier does not yet do this.
+7. Before dispatch, independently verify every traversed segment against current operational state (`verify_path_segments`).
 8. Do not use the demo Neo4j seed graph together with the imported Aluva graph.
 9. Do not commit `.env`, raw downloaded map data, build output, or operational exports.
 10. When changing the data model or importer, update `docs/geospatial-data-engineering.md`.

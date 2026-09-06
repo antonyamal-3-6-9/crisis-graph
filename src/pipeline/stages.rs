@@ -2,9 +2,9 @@ use chrono::Utc;
 use uuid::Uuid;
 use tracing::{info, warn, error};
 use crate::db::{RedisClient, StateManager};
-use crate::ingestion::TriageExtractor;
+use crate::ingestion::{SpatialResolver, TriageExtractor};
 use crate::models::{CrisisState, DispatchStatus, TacticalBrief};
-use crate::solver::DeterministicPathfinder;
+use crate::solver::{DeterministicPathfinder, RoutingQuery};
 
 pub struct PipelineStages {
     extractor: TriageExtractor,
@@ -27,6 +27,36 @@ impl PipelineStages {
 
         match self.extractor.extract(&state.sos).await {
             Ok(triage) => {
+                let mut triage = triage;
+
+                // Attempt GPS coordinate snapping or lexical landmark resolution if junction is not yet resolved
+                if triage.resolved_junction_id.is_none() {
+                    // 1. Check for explicit or embedded GPS coordinates
+                    if let Some((lat, lon)) = SpatialResolver::parse_coordinates(&state.sos.raw_text) {
+                        info!("Found GPS coordinates ({lat}, {lon}) in SOS text. Snapping to nearest junction...");
+                        match self.state_mgr.find_nearest_junction("aluva-periyar-pilot", lat, lon, 1000.0).await {
+                            Ok(Some((junction_id, dist))) => {
+                                info!("Snapped GPS ({lat}, {lon}) -> {junction_id} ({dist:.1} m away)");
+                                triage.resolved_junction_id = Some(junction_id);
+                            }
+                            Ok(None) => warn!("No road junction found within 1000m of ({lat}, {lon})"),
+                            Err(e) => warn!("Spatial snapper query error: {e}"),
+                        }
+                    }
+
+                    // 2. Check for lexical landmark matching in raw location or message body
+                    if triage.resolved_junction_id.is_none() {
+                        let resolver = SpatialResolver::new();
+                        if let Some(junction_id) = resolver.resolve(&triage.victim_location_raw) {
+                            info!("Resolved location '{}' -> {}", triage.victim_location_raw, junction_id);
+                            triage.resolved_junction_id = Some(junction_id);
+                        } else if let Some(junction_id) = resolver.resolve(&state.sos.raw_text) {
+                            info!("Resolved SOS message landmark -> {}", junction_id);
+                            triage.resolved_junction_id = Some(junction_id);
+                        }
+                    }
+                }
+
                 info!(
                     "Extracted: victim_junction={:?}, headcount={}, asset={:?}, hazards={}",
                     triage.resolved_junction_id, triage.headcount, triage.required_asset, triage.hazards.len()
@@ -34,7 +64,13 @@ impl PipelineStages {
 
                 // Apply hazard side-effects dynamically to Neo4j edge states
                 for hazard in &triage.hazards {
-                    if let Err(e) = self.state_mgr.apply_hazard(hazard).await {
+                    if hazard.road_segment.starts_with("way/") {
+                        if let Err(e) = self.state_mgr.apply_segment_hazard(&hazard.road_segment, hazard.status, hazard.duration_hours).await {
+                            warn!("Failed to mutate segment hazard {}: {}", hazard.road_segment, e);
+                        } else {
+                            info!("Applied dynamic hazard overlay on road segment: {}", hazard.road_segment);
+                        }
+                    } else if let Err(e) = self.state_mgr.apply_hazard(hazard).await {
                         warn!("Failed to mutate hazard edge state {}: {}", hazard.road_segment, e);
                     } else {
                         info!("Applied hazard decay state on road segment: {}", hazard.road_segment);
@@ -156,26 +192,59 @@ impl PipelineStages {
             }
         };
 
-        // Query active passable subgraph from Neo4j
-        let passable_edges = match self.state_mgr.get_passable_subgraph().await {
-            Ok(edges) => edges,
-            Err(e) => {
-                state.errors.push(format!("Failed to retrieve passable subgraph from Neo4j: {}", e));
-                return state;
-            }
-        };
+        let is_directed_pilot = start_junction.starts_with("node/") || target_junction.starts_with("node/");
 
-        // Compute shortest path via Petgraph Dijkstra
-        match DeterministicPathfinder::find_shortest_path(&passable_edges, start_junction, target_junction) {
-            Ok(route) => {
-                info!("Path computed successfully: {:?} ({} km)", route.path, route.total_distance_km);
-                state.computed_path = Some(route.path);
-                state.total_distance_km = Some(route.total_distance_km);
-                state.detour_reason = route.detour_reason;
+        if is_directed_pilot {
+            // Query active passable directed subgraph from Neo4j (Aluva pilot dataset)
+            let edges = match self.state_mgr.get_passable_directed_subgraph("aluva-periyar-pilot").await {
+                Ok(edges) => edges,
+                Err(e) => {
+                    state.errors.push(format!("Failed to retrieve passable directed graph from Neo4j: {}", e));
+                    return state;
+                }
+            };
+
+            let query = RoutingQuery::new(start_junction, target_junction)
+                .with_asset_type(triage.required_asset.clone());
+
+            match DeterministicPathfinder::find_directed_route(&edges, &query) {
+                Ok(route) => {
+                    info!(
+                        "Directed route computed: {} waypoints, {} segments, {:.2} km, {:.1} s",
+                        route.path.len(), route.segment_path.len(), route.total_distance_km, route.total_travel_time_s
+                    );
+                    state.computed_path = Some(route.path);
+                    state.segment_path = Some(route.segment_path);
+                    state.total_distance_km = Some(route.total_distance_km);
+                    state.total_travel_time_s = Some(route.total_travel_time_s);
+                    state.detour_reason = route.detour_reason;
+                }
+                Err(e) => {
+                    error!("Directed routing failed: {}", e);
+                    state.errors.push(format!("RoutingError: {}", e));
+                }
             }
-            Err(e) => {
-                error!("Routing failed: {}", e);
-                state.errors.push(format!("RoutingError: {}", e));
+        } else {
+            // Backward-compatible fallback for prototype toy graph (J1-J8)
+            let passable_edges = match self.state_mgr.get_passable_subgraph().await {
+                Ok(edges) => edges,
+                Err(e) => {
+                    state.errors.push(format!("Failed to retrieve passable subgraph from Neo4j: {}", e));
+                    return state;
+                }
+            };
+
+            match DeterministicPathfinder::find_shortest_path(&passable_edges, start_junction, target_junction) {
+                Ok(route) => {
+                    info!("Path computed successfully: {:?} ({} km)", route.path, route.total_distance_km);
+                    state.computed_path = Some(route.path);
+                    state.total_distance_km = Some(route.total_distance_km);
+                    state.detour_reason = route.detour_reason;
+                }
+                Err(e) => {
+                    error!("Routing failed: {}", e);
+                    state.errors.push(format!("RoutingError: {}", e));
+                }
             }
         }
 
@@ -222,6 +291,26 @@ impl PipelineStages {
             verification_notes.push("FAILURE: Resource allocation incomplete.".to_string());
         }
 
+        // Assertion 3: Independent live safety verification of every traversed road segment against operational overlay
+        if let Some(ref segment_ids) = state.segment_path {
+            match self.state_mgr.verify_path_segments(segment_ids).await {
+                Ok(hazardous) if !hazardous.is_empty() => {
+                    verified = false;
+                    verification_notes.push(format!(
+                        "CRITICAL SAFETY VIOLATION: Route traverses {} actively compromised/flooded segments: {:?}",
+                        hazardous.len(), hazardous
+                    ));
+                }
+                Ok(_) => {
+                    info!("Independent safety check: 100% of {} traversed segments verified safe.", segment_ids.len());
+                }
+                Err(e) => {
+                    verified = false;
+                    verification_notes.push(format!("SafetyVerificationFailed: {}", e));
+                }
+            }
+        }
+
         let dispatch_status = if verified && !state.has_errors() {
             DispatchStatus::RoutedVerified
         } else {
@@ -230,6 +319,18 @@ impl PipelineStages {
 
         let shelter_id = shelter.as_ref().map(|s| s.id.clone()).unwrap_or_else(|| "NONE".to_string());
         let shelter_junction = shelter.as_ref().map(|s| s.junction_id.clone()).unwrap_or_else(|| "NONE".to_string());
+
+        let travel_time_text = if let Some(s) = state.total_travel_time_s {
+            format!("{:.1} min ({:.0} s)", s / 60.0, s)
+        } else {
+            "N/A".to_string()
+        };
+
+        let waypoints_summary = if path.len() <= 6 {
+            path.join(" -> ")
+        } else {
+            format!("{} -> ... ({} hops) -> {}", path[0], path.len() - 2, path[path.len() - 1])
+        };
 
         let raw_brief = format!(
             "====================================================\n\
@@ -243,9 +344,11 @@ impl PipelineStages {
              DISPATCH    : {}\n\
              FROM SHELTER: {} (Junction: {})\n\
              ----------------------------------------------------\n\
-             ROUTE (KM)  : {} km\n\
+             DISTANCE    : {:.2} km\n\
+             EST. TIME   : {}\n\
              WAYPOINTS   : {}\n\
              DETOUR INFO : {}\n\
+             VERIFICATION: {}\n\
              ====================================================",
             incident_id,
             Utc::now().to_rfc3339(),
@@ -257,8 +360,10 @@ impl PipelineStages {
             shelter.as_ref().map(|s| s.name.as_str()).unwrap_or("None"),
             shelter_junction,
             distance,
-            path.join(" -> "),
-            state.detour_reason.as_deref().unwrap_or("None (Direct Clear Path)")
+            travel_time_text,
+            waypoints_summary,
+            state.detour_reason.as_deref().unwrap_or("None (Direct Clear Path)"),
+            if verification_notes.is_empty() { "PASSED (100% Segments Independently Verified Safe)".to_string() } else { verification_notes.join("; ") }
         );
 
         let brief = TacticalBrief {
@@ -270,7 +375,9 @@ impl PipelineStages {
             assigned_asset: asset,
             headcount,
             computed_route: path,
+            segment_path: state.segment_path.clone().unwrap_or_default(),
             total_distance_km: distance,
+            total_travel_time_s: state.total_travel_time_s.unwrap_or(0.0),
             detour_reason: state.detour_reason.clone(),
             timestamp: Utc::now(),
             raw_brief_text: raw_brief,

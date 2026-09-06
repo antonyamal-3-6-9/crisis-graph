@@ -33,7 +33,11 @@ pub struct TacticalBrief {
     pub assigned_asset: String,
     pub headcount: u32,
     pub computed_route: Vec<String>,
+    #[serde(default)]
+    pub segment_path: Vec<String>,
     pub total_distance_km: f64,
+    #[serde(default)]
+    pub total_travel_time_s: f64,
     pub detour_reason: Option<String>,
     pub timestamp: DateTime<Utc>,
     pub raw_brief_text: String,

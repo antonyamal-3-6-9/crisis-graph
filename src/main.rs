@@ -36,32 +36,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let redis = RedisClient::connect(&config).await?;
     info!("Connected to Redis/Valkey successfully.");
 
-    // 4. Seed Database if specified via command line or by default
+    // 4. Seed Database if specified via command line or ensure Aluva shelters exist
     let args: Vec<String> = env::args().collect();
-    if args.iter().any(|arg| arg == "--seed" || arg == "-s") || true {
-        info!("Running database seed script...");
+    let state_manager = StateManager::new(neo4j.clone());
+
+    if args.iter().any(|arg| arg == "--seed-demo") {
+        info!("Seeding legacy prototype demo graph (J1-J8)...");
         seed_database(&neo4j).await?;
+    } else {
+        info!("Ensuring Aluva pilot shelters are registered in Neo4j...");
+        state_manager.seed_aluva_shelters().await?;
     }
 
     // 5. Initialize Components
-    let state_manager = StateManager::new(neo4j.clone());
     let extractor = TriageExtractor::new(&config);
     let stages = PipelineStages::new(extractor, state_manager, redis);
     let orchestrator = CrisisOrchestrator::new(stages);
 
-    // 6. Simulate an Emergency Disaster SOS Stream
+    // 6. Simulate an Emergency Disaster SOS Stream (Aluva–Periyar Pilot Area)
     let sample_alerts = vec![
         SosAlert {
             alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
-            raw_text: "URGENT: Flash flood at Riverside Community School, 14 people trapped on roof. Need rescue boat immediately! Road J3-J6 is completely underwater and flooded.".to_string(),
+            raw_text: "URGENT: Periyar river rising rapidly at (lat: 10.1135, lon: 76.3540) near Pump Junction. 4 persons trapped on 1st floor, elderly patient needs ambulance immediately!".to_string(),
             timestamp: Utc::now(),
-            source_channel: Some("citizen_radio_mesh".to_string()),
+            source_channel: Some("kerala_disaster_helpline".to_string()),
         },
         SosAlert {
             alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
-            raw_text: "Landslide near Aluva River Bridge, 4 injured civilians need immediate ambulance evacuation to Highland camp.".to_string(),
+            raw_text: "Flash flood near Aluva Railway Station, 8 passengers stranded. Send evacuation truck to transport them to relief camp!".to_string(),
             timestamp: Utc::now(),
-            source_channel: Some("vhf_repeater".to_string()),
+            source_channel: Some("railway_police_radio".to_string()),
+        },
+        SosAlert {
+            alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+            raw_text: "Water entering Aluva Manappuram temple grounds, 12 pilgrims stranded on temple steps. Urgent boat rescue needed!".to_string(),
+            timestamp: Utc::now(),
+            source_channel: Some("fire_rescue_vhf".to_string()),
         },
     ];
 
