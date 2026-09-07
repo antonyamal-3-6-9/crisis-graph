@@ -1,5 +1,6 @@
 use chrono::{Duration, Utc};
 use neo4rs::query;
+use serde::{Deserialize, Serialize};
 use crate::geospatial::{AccessFlags, BaselineStatus};
 use crate::models::{AssetType, HazardReport, RoadStatus, Shelter};
 use crate::solver::RoutingEdge;
@@ -8,6 +9,33 @@ use super::neo4j::Neo4jClient;
 #[derive(Clone)]
 pub struct StateManager {
     neo4j: Neo4jClient,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShelterWithLocation {
+    pub id: String,
+    pub name: String,
+    pub junction_id: String,
+    pub capacity: u32,
+    pub current_occupancy: u32,
+    pub boats_available: u32,
+    pub ambulances_available: u32,
+    pub trucks_available: u32,
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveHazardInfo {
+    pub segment_id: String,
+    pub road_name: String,
+    pub operational_status: String,
+    pub from_id: String,
+    pub to_id: String,
+    pub from_lat: f64,
+    pub from_lon: f64,
+    pub to_lat: f64,
+    pub to_lon: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -435,5 +463,107 @@ impl StateManager {
         } else {
             Ok(None)
         }
+    }
+
+    /// Retrieve ordered GPS coordinates (lon, lat) for a list of junction IDs
+    pub async fn get_junction_coordinates(
+        &self,
+        junction_ids: &[String],
+    ) -> Result<Vec<[f64; 2]>, Box<dyn std::error::Error + Send + Sync>> {
+        if junction_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let q = query(
+            "UNWIND range(0, size($ids)-1) AS idx \
+             WITH idx, $ids[idx] AS jid \
+             MATCH (j:Junction {id: jid}) \
+             RETURN idx, j.lat AS lat, j.lon AS lon \
+             ORDER BY idx"
+        )
+        .param("ids", junction_ids.to_vec());
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let mut coords = Vec::new();
+        while let Some(row) = result.next().await? {
+            let lat: f64 = row.get("lat")?;
+            let lon: f64 = row.get("lon")?;
+            // GeoJSON standard: [longitude, latitude]
+            coords.push([lon, lat]);
+        }
+
+        Ok(coords)
+    }
+
+    /// Get all shelters enriched with their physical WGS-84 coordinates
+    pub async fn get_shelters_with_locations(
+        &self,
+    ) -> Result<Vec<ShelterWithLocation>, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query(
+            "MATCH (s:Shelter) \
+             OPTIONAL MATCH (j:Junction {id: s.junction_id}) \
+             RETURN s.id AS id, s.name AS name, s.junction_id AS junction_id, \
+                    s.capacity AS capacity, s.current_occupancy AS current_occupancy, \
+                    s.boats_available AS boats_available, s.ambulances_available AS ambulances_available, \
+                    s.trucks_available AS trucks_available, \
+                    coalesce(j.lat, 10.108) AS lat, coalesce(j.lon, 76.356) AS lon \
+             ORDER BY s.id"
+        );
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let mut list = Vec::new();
+        while let Some(row) = result.next().await? {
+            list.push(ShelterWithLocation {
+                id: row.get("id")?,
+                name: row.get("name")?,
+                junction_id: row.get("junction_id")?,
+                capacity: row.get::<i64>("capacity")? as u32,
+                current_occupancy: row.get::<i64>("current_occupancy")? as u32,
+                boats_available: row.get::<i64>("boats_available")? as u32,
+                ambulances_available: row.get::<i64>("ambulances_available")? as u32,
+                trucks_available: row.get::<i64>("trucks_available")? as u32,
+                lat: row.get("lat")?,
+                lon: row.get("lon")?,
+            });
+        }
+
+        Ok(list)
+    }
+
+    /// Query all active operational hazards / road closures
+    pub async fn get_active_hazards(
+        &self,
+        dataset: &str,
+    ) -> Result<Vec<ActiveHazardInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query(
+            "MATCH (a:Junction)-[r:CONNECTS_TO {dataset: $dataset}]->(b:Junction) \
+             WHERE (r.operational_status IS NOT NULL AND r.operational_status <> 'OPEN' AND r.valid_until > datetime()) \
+                OR r.baseline_status = 'FLOODED' \
+             RETURN r.segment_id AS segment_id, \
+                    coalesce(r.road_name, 'Unnamed Road') AS road_name, \
+                    coalesce(r.operational_status, r.baseline_status) AS operational_status, \
+                    a.id AS from_id, a.lat AS from_lat, a.lon AS from_lon, \
+                    b.id AS to_id, b.lat AS to_lat, b.lon AS to_lon \
+             LIMIT 100"
+        )
+        .param("dataset", dataset);
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let mut hazards = Vec::new();
+        while let Some(row) = result.next().await? {
+            hazards.push(ActiveHazardInfo {
+                segment_id: row.get("segment_id")?,
+                road_name: row.get("road_name")?,
+                operational_status: row.get("operational_status")?,
+                from_id: row.get("from_id")?,
+                to_id: row.get("to_id")?,
+                from_lat: row.get("from_lat")?,
+                from_lon: row.get("from_lon")?,
+                to_lat: row.get("to_lat")?,
+                to_lon: row.get("to_lon")?,
+            });
+        }
+
+        Ok(hazards)
     }
 }

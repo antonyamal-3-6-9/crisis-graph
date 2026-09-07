@@ -6,6 +6,7 @@ use crate::ingestion::{SpatialResolver, TriageExtractor};
 use crate::models::{CrisisState, DispatchStatus, TacticalBrief};
 use crate::solver::{DeterministicPathfinder, RoutingQuery};
 
+#[derive(Clone)]
 pub struct PipelineStages {
     extractor: TriageExtractor,
     state_mgr: StateManager,

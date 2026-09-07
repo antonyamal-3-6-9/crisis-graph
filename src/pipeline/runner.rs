@@ -2,6 +2,7 @@ use tracing::info;
 use crate::models::{CrisisState, SosAlert};
 use super::stages::PipelineStages;
 
+#[derive(Clone)]
 pub struct CrisisOrchestrator {
     stages: PipelineStages,
 }

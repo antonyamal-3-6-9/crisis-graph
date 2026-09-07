@@ -33,6 +33,8 @@ petgraph = "0.6.5"
 # Logging and Instrumentation
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+axum = "0.8.9"
+tower-http = { version = "0.7.1", features = ["cors", "fs"] }
 
 [dev-dependencies]
 tokio-test = "0.4.4"
