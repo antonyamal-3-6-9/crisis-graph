@@ -110,8 +110,11 @@ impl SpatialResolver {
             return Some(junction.clone());
         }
 
-        // Substring / Lexical match
-        for (landmark, junction) in &self.landmark_map {
+        // Substring / Lexical match (longest landmark key matches first for specificity)
+        let mut sorted_landmarks: Vec<(&String, &String)> = self.landmark_map.iter().collect();
+        sorted_landmarks.sort_by_key(|(k, _)| std::cmp::Reverse(k.len()));
+
+        for (landmark, junction) in sorted_landmarks {
             if cleaned.contains(landmark) || landmark.contains(&cleaned) {
                 return Some(junction.clone());
             }
