@@ -11,6 +11,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initMap();
   loadShelters();
   loadHazards();
+  initEventStream();
 });
 
 // 1. Initialize Map (Locked to Aluva Operational Pilot Zone)
@@ -343,4 +344,79 @@ function copyBriefText() {
       alert("Tactical Brief copied to clipboard!");
     });
   }
+}
+
+// 8. Real-Time Redis Streams EventSource (SSE Listener)
+function initEventStream() {
+  const streamStatusText = document.getElementById("stream-status-text");
+  const evtSource = new EventSource("/api/v1/events");
+
+  evtSource.onopen = () => {
+    if (streamStatusText) {
+      streamStatusText.innerText = "REDIS STREAM: LIVE";
+      streamStatusText.style.color = "#38bdf8";
+    }
+  };
+
+  evtSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      renderDispatchResult(data);
+      loadShelters();
+      showToastNotification(data);
+    } catch (err) {
+      console.error("Error parsing stream event:", err);
+    }
+  };
+
+  evtSource.onerror = () => {
+    if (streamStatusText) {
+      streamStatusText.innerText = "REDIS STREAM: RECONNECTING...";
+      streamStatusText.style.color = "#f59e0b";
+    }
+  };
+}
+
+// 9. Trigger 5 Concurrent Stream Alerts (Disaster Surge)
+async function triggerStreamSpike() {
+  try {
+    const res = await fetch("/api/v1/sos/simulate_spike", { method: "POST" });
+    if (!res.ok) throw new Error("Failed to simulate stream surge");
+    const data = await res.json();
+    showToast("⚡ DISASTER SURGE QUEUED", `Published ${data.queued_count} concurrent alerts into Redis Stream (sos:stream:aluva). Watch worker pool process them!`, "verified");
+  } catch (err) {
+    alert("Error triggering stream surge: " + err.message);
+  }
+}
+
+// 10. Live Toast Notifications
+function showToastNotification(data) {
+  const isVerified = data.status === "RoutedVerified";
+  const title = `📡 ${data.alert_id}`;
+  const desc = isVerified 
+    ? `${data.assigned_asset || "Asset"} dispatched from ${data.assigned_shelter ? data.assigned_shelter.name.split(" ")[0] : "Shelter"} (${data.distance_km.toFixed(1)} km, ${(data.travel_time_s / 60).toFixed(1)} min)`
+    : `ESCALATE TO DISPATCHER: Ground route restricted for ${data.assigned_asset || "vehicle"}`;
+  showToast(title, desc, isVerified ? "verified" : "escalate");
+}
+
+function showToast(title, message, type) {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = `toast ${type === "verified" ? "toast-verified" : "toast-escalate"}`;
+  toast.innerHTML = `
+    <div class="toast-header">
+      <span class="toast-title">${title}</span>
+      <span class="toast-time">${new Date().toLocaleTimeString()}</span>
+    </div>
+    <div class="toast-body">${message}</div>
+  `;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateX(50px)";
+    setTimeout(() => toast.remove(), 300);
+  }, 6000);
 }

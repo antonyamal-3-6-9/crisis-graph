@@ -1,29 +1,41 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use axum::{
     extract::State,
     http::StatusCode,
-    response::Json,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        Json,
+    },
     routing::{get, post},
     Router,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crisis_graph::config::Config;
 use crisis_graph::db::{Neo4jClient, RedisClient, ShelterWithLocation, StateManager};
 use crisis_graph::ingestion::TriageExtractor;
-use crisis_graph::models::{DispatchStatus, RoadStatus, SosAlert};
+use crisis_graph::models::{CrisisState, DispatchStatus, RoadStatus, SosAlert};
 use crisis_graph::pipeline::{CrisisOrchestrator, PipelineStages};
+
+const STREAM_KEY: &str = "sos:stream:aluva";
+const CONSUMER_GROUP: &str = "crisisgraph_workers";
 
 #[derive(Clone)]
 struct AppState {
     orchestrator: CrisisOrchestrator,
     state_manager: StateManager,
+    redis: RedisClient,
+    event_tx: Arc<broadcast::Sender<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,7 +44,7 @@ pub struct DispatchRequest {
     pub source_channel: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DispatchResponse {
     pub alert_id: String,
     pub status: String,
@@ -50,7 +62,7 @@ pub struct DispatchResponse {
     pub errors: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ShelterSummary {
     pub id: String,
     pub name: String,
@@ -80,14 +92,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Ensure Aluva shelters are registered
     state_manager.seed_aluva_shelters().await?;
 
+    // Setup Redis Streams consumer group
+    if let Err(e) = redis.ensure_consumer_group(STREAM_KEY, CONSUMER_GROUP).await {
+        warn!("Consumer group setup note: {e}");
+    }
+
     let extractor = TriageExtractor::new(&config);
-    let stages = PipelineStages::new(extractor, state_manager.clone(), redis);
+    let stages = PipelineStages::new(extractor, state_manager.clone(), redis.clone());
     let orchestrator = CrisisOrchestrator::new(stages);
 
+    // Event broadcast channel for real-time SSE streaming to web dashboard
+    let (event_tx, _) = broadcast::channel::<String>(256);
+    let event_tx_arc = Arc::new(event_tx);
+
     let app_state = AppState {
-        orchestrator,
-        state_manager,
+        orchestrator: orchestrator.clone(),
+        state_manager: state_manager.clone(),
+        redis: redis.clone(),
+        event_tx: event_tx_arc.clone(),
     };
+
+    // Spawn background Redis Streams worker pool task
+    spawn_stream_worker(
+        redis.clone(),
+        orchestrator.clone(),
+        state_manager.clone(),
+        event_tx_arc.clone(),
+    );
 
     let router = Router::new()
         // API Routes
@@ -98,6 +129,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/api/v1/hazards", post(apply_hazard))
         .route("/api/v1/hazards/clear", post(clear_hazards))
         .route("/api/v1/dispatch", post(handle_dispatch))
+        // Event-Driven Stream & Real-time Endpoints
+        .route("/api/v1/events", get(sse_events))
+        .route("/api/v1/sos/stream", post(ingest_sos_stream))
+        .route("/api/v1/sos/simulate_spike", post(simulate_spike))
         // Serve Web Assets from `web/` folder
         .fallback_service(ServeDir::new("web"))
         .layer(CorsLayer::permissive())
@@ -123,8 +158,143 @@ async fn health_check() -> Json<serde_json::Value> {
         "status": "ok",
         "service": "CrisisGraph Emergency Dispatch Engine",
         "timestamp": Utc::now().to_rfc3339(),
-        "pilot": "Aluva–Periyar Pilot Area (10 km)"
+        "pilot": "Aluva–Periyar Pilot Area (10 km)",
+        "streams": {
+            "ingest_stream": STREAM_KEY,
+            "consumer_group": CONSUMER_GROUP
+        }
     }))
+}
+
+async fn sse_events(
+    State(state): State<AppState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let rx = state.event_tx.subscribe();
+    let stream = BroadcastStream::new(rx).filter_map(|msg| match msg {
+        Ok(data) => Some(Ok(Event::default().data(data))),
+        Err(_) => None,
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn ingest_sos_stream(
+    State(state): State<AppState>,
+    Json(req): Json<DispatchRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let alert = SosAlert {
+        alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+        raw_text: req.raw_text,
+        timestamp: Utc::now(),
+        source_channel: req.source_channel.or_else(|| Some("redis_streams_intake".to_string())),
+    };
+
+    let payload = serde_json::to_string(&alert).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match state.redis.xadd(STREAM_KEY, &payload).await {
+        Ok(stream_msg_id) => Ok(Json(json!({
+            "status": "queued",
+            "stream_message_id": stream_msg_id,
+            "alert_id": alert.alert_id,
+            "stream": STREAM_KEY
+        }))),
+        Err(e) => {
+            error!("Failed to enqueue SOS into Redis stream: {e}");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+async fn simulate_spike(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let sample_alerts = [
+        "URGENT: Flash flood at (lat: 10.1135, lon: 76.3540) near Pump Junction. 4 persons trapped, ambulance needed!",
+        "Aluva Railway Station has 3 injured passengers, need ambulance dispatch immediately.",
+        "Water entering Aluva Manappuram temple grounds, 12 pilgrims stranded on temple steps. Urgent boat rescue needed!",
+        "House partially submerged near Bank Junction (lat: 10.1082, lon: 76.3565). 2 elderly persons need rescue.",
+        "Flash flood at UC College gate 2, 6 students stranded in water, need evacuation truck.",
+    ];
+
+    let mut queued = Vec::new();
+
+    for alert_text in sample_alerts {
+        let alert = SosAlert {
+            alert_id: format!("SOS-SPIKE-{}", Uuid::new_v4().to_string()[..6].to_uppercase()),
+            raw_text: alert_text.to_string(),
+            timestamp: Utc::now(),
+            source_channel: Some("disaster_spike_simulator".to_string()),
+        };
+
+        if let Ok(payload) = serde_json::to_string(&alert) {
+            if let Ok(msg_id) = state.redis.xadd(STREAM_KEY, &payload).await {
+                queued.push(json!({
+                    "alert_id": alert.alert_id,
+                    "stream_id": msg_id,
+                    "text": alert_text
+                }));
+            }
+        }
+    }
+
+    Ok(Json(json!({
+        "status": "ok",
+        "queued_count": queued.len(),
+        "alerts": queued
+    })))
+}
+
+fn spawn_stream_worker(
+    redis: RedisClient,
+    orchestrator: CrisisOrchestrator,
+    state_mgr: StateManager,
+    event_tx: Arc<broadcast::Sender<String>>,
+) {
+    tokio::spawn(async move {
+        info!(">>> Redis Streams Worker Pool started on stream: {} [group: {}] <<<", STREAM_KEY, CONSUMER_GROUP);
+
+        loop {
+            // Read next batch of messages from consumer group
+            match redis
+                .read_group_messages(STREAM_KEY, CONSUMER_GROUP, "worker_tokio_1", 10, 2000)
+                .await
+            {
+                Ok(messages) => {
+                    for (msg_id, payload_str) in messages {
+                        info!("[Stream Consumer] Received message id: {}", msg_id);
+
+                        let alert: SosAlert = match serde_json::from_str(&payload_str) {
+                            Ok(a) => a,
+                            Err(_) => SosAlert {
+                                alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+                                raw_text: payload_str,
+                                timestamp: Utc::now(),
+                                source_channel: Some("stream_fallback".to_string()),
+                            },
+                        };
+
+                        // Process through the full 4-stage pipeline
+                        let final_state = orchestrator.process_alert(alert).await;
+                        let response = build_dispatch_response(&final_state, &state_mgr).await;
+
+                        // Broadcast to connected web clients (SSE)
+                        if let Ok(json_str) = serde_json::to_string(&response) {
+                            let _ = event_tx.send(json_str);
+                        }
+
+                        // Acknowledge stream message
+                        if let Err(e) = redis.xack(STREAM_KEY, CONSUMER_GROUP, &msg_id).await {
+                            warn!("Failed to XACK stream message {msg_id}: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Stream reading error: {e}. Backing off 1s...");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
+    });
 }
 
 async fn get_shelters(State(state): State<AppState>) -> Result<Json<Vec<ShelterWithLocation>>, StatusCode> {
@@ -246,11 +416,23 @@ async fn handle_dispatch(
     };
 
     let final_state = state.orchestrator.process_alert(alert).await;
+    let response = build_dispatch_response(&final_state, &state.state_manager).await;
 
+    // Also broadcast to SSE subscribers
+    if let Ok(json_str) = serde_json::to_string(&response) {
+        let _ = state.event_tx.send(json_str);
+    }
+
+    Ok(Json(response))
+}
+
+async fn build_dispatch_response(
+    final_state: &CrisisState,
+    state_mgr: &StateManager,
+) -> DispatchResponse {
     let route_nodes = final_state.computed_path.clone().unwrap_or_default();
     let route_coords = if !route_nodes.is_empty() {
-        state
-            .state_manager
+        state_mgr
             .get_junction_coordinates(&route_nodes)
             .await
             .unwrap_or_default()
@@ -289,8 +471,7 @@ async fn handle_dispatch(
 
     // 2. Shelter Origin Feature
     if let Some(ref shelter) = final_state.assigned_shelter {
-        let shelter_coords = state
-            .state_manager
+        let shelter_coords = state_mgr
             .get_junction_coordinates(&[shelter.junction_id.clone()])
             .await
             .unwrap_or_default();
@@ -314,8 +495,7 @@ async fn handle_dispatch(
     // 3. Victim Destination Feature
     if let Some(ref triage) = final_state.triage {
         if let Some(ref jid) = triage.resolved_junction_id {
-            let victim_coords = state
-                .state_manager
+            let victim_coords = state_mgr
                 .get_junction_coordinates(&[jid.clone()])
                 .await
                 .unwrap_or_default();
@@ -342,10 +522,10 @@ async fn handle_dispatch(
         "features": features
     });
 
-    let assigned_shelter = final_state.assigned_shelter.map(|s| ShelterSummary {
-        id: s.id,
-        name: s.name,
-        junction_id: s.junction_id,
+    let assigned_shelter = final_state.assigned_shelter.as_ref().map(|s| ShelterSummary {
+        id: s.id.clone(),
+        name: s.name.clone(),
+        junction_id: s.junction_id.clone(),
     });
 
     let headcount = final_state.triage.as_ref().map(|t| t.headcount).unwrap_or(0);
@@ -356,23 +536,24 @@ async fn handle_dispatch(
 
     let brief_text = final_state
         .brief
-        .map(|b| b.raw_brief_text)
+        .as_ref()
+        .map(|b| b.raw_brief_text.clone())
         .unwrap_or_else(|| "No tactical brief generated.".to_string());
 
-    Ok(Json(DispatchResponse {
-        alert_id: final_state.sos.alert_id,
+    DispatchResponse {
+        alert_id: final_state.sos.alert_id.clone(),
         status: format!("{:?}", dispatch_status),
         victim_junction,
         assigned_shelter,
-        assigned_asset: final_state.assigned_asset,
+        assigned_asset: final_state.assigned_asset.clone(),
         headcount,
         distance_km: final_state.total_distance_km.unwrap_or(0.0),
         travel_time_s: final_state.total_travel_time_s.unwrap_or(0.0),
         is_detour,
-        detour_reason: final_state.detour_reason,
-        segment_count: final_state.segment_path.map(|p| p.len()).unwrap_or(0),
+        detour_reason: final_state.detour_reason.clone(),
+        segment_count: final_state.segment_path.as_ref().map(|p| p.len()).unwrap_or(0),
         tactical_brief: brief_text,
         geojson,
-        errors: final_state.errors,
-    }))
+        errors: final_state.errors.clone(),
+    }
 }

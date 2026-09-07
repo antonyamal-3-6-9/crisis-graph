@@ -564,3 +564,83 @@ textarea:focus, select:focus {
   white-space: pre-wrap;
   overflow-x: auto;
 }
+
+/* REDIS STREAMS SURGE BUTTON */
+.action-btn.surge-btn {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  border-color: #38bdf8;
+  color: #fff;
+  font-weight: 700;
+  padding: 10px;
+}
+
+.action-btn.surge-btn:hover {
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  box-shadow: 0 4px 14px rgba(14, 165, 233, 0.4);
+}
+
+/* REAL-TIME TOAST NOTIFICATIONS */
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 2000;
+  pointer-events: none;
+}
+
+.toast {
+  background-color: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(10px);
+  border: 1px solid #24344d;
+  border-left: 4px solid var(--accent-cyan);
+  border-radius: 6px;
+  padding: 10px 14px;
+  min-width: 300px;
+  max-width: 400px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 11px;
+  animation: toastIn 0.3s ease-out;
+  pointer-events: auto;
+  transition: all 0.3s;
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(50px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.toast.toast-verified {
+  border-left-color: var(--accent-green);
+}
+
+.toast.toast-escalate {
+  border-left-color: var(--accent-amber);
+}
+
+.toast-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.toast-title {
+  font-weight: 700;
+  color: #38bdf8;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.toast-time {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.toast-body {
+  color: #cbd5e1;
+  font-size: 11px;
+}
+

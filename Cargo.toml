@@ -35,6 +35,7 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 axum = "0.8.9"
 tower-http = { version = "0.7.1", features = ["cors", "fs"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
 
 [dev-dependencies]
 tokio-test = "0.4.4"

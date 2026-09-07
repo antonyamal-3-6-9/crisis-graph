@@ -29,9 +29,13 @@
       </div>
       
       <div class="header-status">
+        <div class="status-indicator" id="stream-indicator">
+          <span class="pulse-dot" style="background-color: #38bdf8; box-shadow: 0 0 10px #38bdf8;"></span>
+          <span class="status-text" id="stream-status-text" style="color: #38bdf8;">REDIS STREAM: CONNECTING</span>
+        </div>
         <div class="status-indicator">
           <span class="pulse-dot"></span>
-          <span class="status-text">NEO4J & REDIS ONLINE</span>
+          <span class="status-text">NEO4J ONLINE</span>
         </div>
         <div class="network-stats">
           <div class="stat-pill"><span class="val">21,256</span> Nodes</div>
@@ -106,6 +110,17 @@
               <span class="btn-loader" style="display:none;"></span>
             </button>
           </form>
+        </div>
+
+        <!-- SECTION 2.5: REDIS STREAMS HIGH-THROUGHPUT INTAKE -->
+        <div class="sidebar-section">
+          <div class="section-title">HIGH-THROUGHPUT REDIS STREAMS</div>
+          <p style="font-size:10px; color:#94a3b8; margin-bottom:10px; line-height:1.4;">
+            Publishes simultaneous emergency incidents into <code>sos:stream:aluva</code>. Background Tokio worker pool consumes in parallel and pushes live dispatches via SSE.
+          </p>
+          <button class="action-btn surge-btn" onclick="triggerStreamSpike()">
+            ⚡ Simulate 5 Concurrent Alerts (Disaster Surge)
+          </button>
         </div>
 
         <!-- SECTION 3: HAZARD SIMULATION (TEST DETOUR) -->
@@ -186,6 +201,9 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Real-time Toast Notifications -->
+  <div id="toast-container" class="toast-container"></div>
+
   <script src="app.js"></script>
 </body>
 </html>

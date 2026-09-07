@@ -1,4 +1,6 @@
 use redis::aio::ConnectionManager;
+use redis::streams::StreamReadReply;
+use redis::FromRedisValue;
 use crate::config::Config;
 
 #[derive(Clone)]
@@ -62,5 +64,89 @@ impl RedisClient {
         } else {
             Err("Unexpected Redis PING response".into())
         }
+    }
+
+    /// Append a payload to a Redis Stream (XADD)
+    pub async fn xadd(&self, stream_key: &str, payload: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let id: String = redis::cmd("XADD")
+            .arg(stream_key)
+            .arg("*")
+            .arg("payload")
+            .arg(payload)
+            .query_async(&mut conn)
+            .await?;
+        Ok(id)
+    }
+
+    /// Ensure that a consumer group exists for a stream (XGROUP CREATE ... MKSTREAM)
+    pub async fn ensure_consumer_group(&self, stream_key: &str, group_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let res: Result<(), redis::RedisError> = redis::cmd("XGROUP")
+            .arg("CREATE")
+            .arg(stream_key)
+            .arg(group_name)
+            .arg("$")
+            .arg("MKSTREAM")
+            .query_async(&mut conn)
+            .await;
+
+        match res {
+            Ok(_) => Ok(()),
+            Err(e) if e.to_string().contains("BUSYGROUP") => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Read incoming messages for a consumer group (XREADGROUP)
+    pub async fn read_group_messages(
+        &self,
+        stream_key: &str,
+        group_name: &str,
+        consumer_name: &str,
+        count: usize,
+        block_ms: usize,
+    ) -> Result<Vec<(String, String)>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let reply: Option<StreamReadReply> = redis::cmd("XREADGROUP")
+            .arg("GROUP")
+            .arg(group_name)
+            .arg(consumer_name)
+            .arg("BLOCK")
+            .arg(block_ms)
+            .arg("COUNT")
+            .arg(count)
+            .arg("STREAMS")
+            .arg(stream_key)
+            .arg(">")
+            .query_async(&mut conn)
+            .await?;
+
+        let mut messages = Vec::new();
+        if let Some(reply) = reply {
+            for key in reply.keys {
+                for id_entry in key.ids {
+                    if let Some(val) = id_entry.map.get("payload") {
+                        if let Ok(payload_str) = String::from_redis_value(val) {
+                            messages.push((id_entry.id, payload_str));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(messages)
+    }
+
+    /// Acknowledge a processed stream message (XACK)
+    pub async fn xack(&self, stream_key: &str, group_name: &str, message_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let _: () = redis::cmd("XACK")
+            .arg(stream_key)
+            .arg(group_name)
+            .arg(message_id)
+            .query_async(&mut conn)
+            .await?;
+        Ok(())
     }
 }
