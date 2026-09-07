@@ -19,12 +19,35 @@ function initMap() {
     zoomControl: true,
   }).setView(ALUVA_CENTRE, 13);
 
-  // High-contrast dark cartographic base tiles
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: "abcd",
+  // Layer 1: Tactical Dark (Watermark-free high-contrast OSM)
+  const tacticalDark = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    className: "tactical-tiles",
     maxZoom: 19,
-  }).addTo(map);
+  });
+
+  // Layer 2: Clean Standard OpenStreetMap
+  const standardOsm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
+  });
+
+  // Layer 3: High-Resolution Satellite (Esri World Imagery)
+  const satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+    attribution: 'Tiles &copy; Esri, Earthstar Geographics',
+    maxZoom: 18,
+  });
+
+  // Add default layer
+  tacticalDark.addTo(map);
+
+  // Layer switcher control
+  const baseMaps = {
+    "Tactical Dark": tacticalDark,
+    "Satellite Imagery": satellite,
+    "Clean Street Map": standardOsm,
+  };
+  L.control.layers(baseMaps, null, { position: "topright" }).addTo(map);
 
   // 10 km Pilot Boundary Ring
   L.circle(ALUVA_CENTRE, {

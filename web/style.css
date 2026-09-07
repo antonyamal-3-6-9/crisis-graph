@@ -389,6 +389,26 @@ textarea:focus, select:focus {
   background-color: #0b0f19;
 }
 
+/* Watermark-free tactical dark style on OpenStreetMap */
+.tactical-tiles .leaflet-tile {
+  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
+
+.leaflet-control-layers {
+  background: rgba(17, 24, 39, 0.9) !important;
+  color: #f1f5f9 !important;
+  border: 1px solid #24344d !important;
+  border-radius: 6px !important;
+  font-family: inherit !important;
+  font-size: 11px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
+}
+
+.leaflet-control-layers-toggle {
+  background-color: rgba(17, 24, 39, 0.9) !important;
+  border-radius: 6px !important;
+}
+
 /* TACTICAL BRIEF OVERLAY */
 .brief-overlay {
   position: absolute;
