@@ -13,10 +13,19 @@ document.addEventListener("DOMContentLoaded", () => {
   loadHazards();
 });
 
-// 1. Initialize Map
+// 1. Initialize Map (Locked to Aluva Operational Pilot Zone)
 function initMap() {
+  // Bounding box for Aluva–Periyar Disaster Response Zone
+  const southWest = L.latLng(10.000, 76.240);
+  const northEast = L.latLng(10.220, 76.470);
+  const aluvaBounds = L.latLngBounds(southWest, northEast);
+
   map = L.map("map", {
     zoomControl: true,
+    minZoom: 12,             // Prevents zooming out to see state/world
+    maxZoom: 18,             // Street-level inspection
+    maxBounds: aluvaBounds,  // Constrains viewport to Aluva disaster sector
+    maxBoundsViscosity: 1.0, // Hard lock: completely blocks panning outside bounds
   }).setView(ALUVA_CENTRE, 13);
 
   // Layer 1: Tactical Dark (Watermark-free high-contrast OSM)
