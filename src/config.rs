@@ -45,7 +45,7 @@ impl Config {
             .filter(|p| !p.is_empty());
 
         let vllm_base_url = env::var("VLLM_BASE_URL").unwrap_or_else(|_| "http://localhost:8000/v1".to_string());
-        let vllm_model = env::var("VLLM_MODEL").unwrap_or_else(|_| "Qwen/Qwen2.5-7B-Instruct".to_string());
+        let vllm_model = env::var("VLLM_MODEL").unwrap_or_else(|_| "Qwen/Qwen3-4B-Instruct-2507".to_string());
 
         let app_env = env::var("APP_ENV").unwrap_or_else(|_| "development".to_string());
         let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string());

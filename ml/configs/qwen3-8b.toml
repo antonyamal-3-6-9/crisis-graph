@@ -1,0 +1,33 @@
+[model]
+base_model = "Qwen/Qwen3-8B"
+runtime_model = "Qwen/Qwen3-8B-GGUF:Q4_K_M"
+task = "triage_extraction"
+
+[generation]
+temperature = 0.0
+max_output_tokens = 512
+reasoning = "off"
+
+[contract]
+schema_version = "triage-extraction-v2"
+schema_path = "../../schemas/triage-extraction-v2.json"
+
+[prompt]
+default_version = "triage-extraction-v2.1.1"
+default_path = "../prompts/triage-extraction-v2.1.1.txt"
+
+[evaluation]
+backend = "llama-cpp"
+quantization = "Q4_K_M"
+concurrency_levels = [1]
+prompt_versions = [
+  "triage-extraction-v2.1",
+  "triage-extraction-v2.1.1",
+  "triage-extraction-v2.2",
+]
+
+# Targets, not measured results.
+[evaluation.targets]
+schema_validity = 1.0
+human_review_recall = 0.99
+unsupported_fact_rate_max = 0.01

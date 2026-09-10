@@ -1,0 +1,27 @@
+[model]
+base_model = "google/gemma-3-4b-it"
+runtime_model = "ggml-org/gemma-3-4b-it-GGUF:Q4_K_M"
+task = "triage_extraction"
+
+[generation]
+temperature = 0.0
+max_output_tokens = 512
+
+[contract]
+schema_version = "triage-extraction-v2"
+schema_path = "../../schemas/triage-extraction-v2.json"
+
+[prompt]
+version = "triage-extraction-v2.1.1"
+path = "../prompts/triage-extraction-v2.1.1.txt"
+
+[evaluation]
+backend = "llama-cpp"
+quantization = "Q4_K_M"
+concurrency_levels = [1, 2, 4]
+
+# Targets, not measured results.
+[evaluation.targets]
+schema_validity = 1.0
+human_review_recall = 0.99
+unsupported_fact_rate_max = 0.01

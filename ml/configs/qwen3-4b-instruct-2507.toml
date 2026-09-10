@@ -1,0 +1,24 @@
+[model]
+base_model = "Qwen/Qwen3-4B-Instruct-2507"
+task = "triage_extraction"
+
+[generation]
+temperature = 0.0
+max_output_tokens = 512
+
+[contract]
+schema_version = "triage-extraction-v2"
+schema_path = "../../schemas/triage-extraction-v2.json"
+
+[prompt]
+version = "triage-extraction-v2.1.1"
+path = "../prompts/triage-extraction-v2.1.1.txt"
+
+[evaluation]
+concurrency_levels = [1, 2, 4]
+
+# Targets, not measured results.
+[evaluation.targets]
+schema_validity = 1.0
+human_review_recall = 0.99
+unsupported_fact_rate_max = 0.01

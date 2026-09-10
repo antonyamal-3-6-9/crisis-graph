@@ -57,4 +57,8 @@ pub struct TriageReport {
     pub required_asset: AssetType,
     pub hazards: Vec<HazardReport>,
     pub confidence_score: f32,
+    #[serde(default)]
+    pub needs_human_review: bool,
+    #[serde(default)]
+    pub uncertainty_reasons: Vec<String>,
 }

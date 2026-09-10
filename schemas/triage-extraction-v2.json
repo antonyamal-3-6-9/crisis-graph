@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crisisgraph.local/schemas/triage-extraction-v2.json",
+  "title": "CrisisGraph Triage Extraction V2",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "triage-extraction-v2"
+    },
+    "victim_location": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "headcount": {
+      "anyOf": [
+        {"type": "integer", "minimum": 1, "maximum": 10000},
+        {"type": "null"}
+      ]
+    },
+    "required_asset": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": ["RESCUE_BOAT", "AMBULANCE", "EVAC_TRUCK", "HELICOPTER"]
+        },
+        {"type": "null"}
+      ]
+    },
+    "hazards": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "road_segment": {
+            "type": ["string", "null"],
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "anyOf": [
+              {"type": "string", "enum": ["FLOODED", "BLOCKED", "OPEN"]},
+              {"type": "null"}
+            ]
+          },
+          "duration_hours": {
+            "anyOf": [
+              {"type": "integer", "minimum": 1, "maximum": 168},
+              {"type": "null"}
+            ]
+          }
+        },
+        "required": ["road_segment", "status", "duration_hours"]
+      }
+    },
+    "confidence_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "needs_human_review": {
+      "type": "boolean"
+    },
+    "uncertainty_reasons": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "victim_location",
+    "headcount",
+    "required_asset",
+    "hazards",
+    "confidence_score",
+    "needs_human_review",
+    "uncertainty_reasons"
+  ]
+}

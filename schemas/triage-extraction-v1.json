@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crisisgraph.local/schemas/triage-extraction-v1.json",
+  "title": "CrisisGraph Triage Extraction V1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "triage-extraction-v1"
+    },
+    "victim_location": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "headcount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "required_asset": {
+      "type": "string",
+      "enum": ["RESCUE_BOAT", "AMBULANCE", "EVAC_TRUCK", "HELICOPTER"]
+    },
+    "hazards": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "road_segment": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "status": {
+            "type": "string",
+            "enum": ["FLOODED", "BLOCKED", "OPEN"]
+          },
+          "duration_hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 168
+          }
+        },
+        "required": ["road_segment", "status", "duration_hours"]
+      }
+    },
+    "confidence_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "needs_human_review": {
+      "type": "boolean"
+    },
+    "uncertainty_reasons": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "victim_location",
+    "headcount",
+    "required_asset",
+    "hazards",
+    "confidence_score",
+    "needs_human_review",
+    "uncertainty_reasons"
+  ]
+}

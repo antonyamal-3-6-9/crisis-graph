@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+
+# Rebuildable or potentially sensitive ML artifacts
+artifacts/
+checkpoints/
+model-cache/
+runs/
+data/generated/
+data/raw/
+data/operational/
+*.gguf
+*.safetensors
+*.pt
+*.pth

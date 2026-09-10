@@ -63,19 +63,14 @@ impl PipelineStages {
                     triage.resolved_junction_id, triage.headcount, triage.required_asset, triage.hazards.len()
                 );
 
-                // Apply hazard side-effects dynamically to Neo4j edge states
+                // LLM/citizen extractions are candidate reports only. They must not mutate
+                // the authoritative operational overlay without dispatcher/field verification.
                 for hazard in &triage.hazards {
-                    if hazard.road_segment.starts_with("way/") {
-                        if let Err(e) = self.state_mgr.apply_segment_hazard(&hazard.road_segment, hazard.status, hazard.duration_hours).await {
-                            warn!("Failed to mutate segment hazard {}: {}", hazard.road_segment, e);
-                        } else {
-                            info!("Applied dynamic hazard overlay on road segment: {}", hazard.road_segment);
-                        }
-                    } else if let Err(e) = self.state_mgr.apply_hazard(hazard).await {
-                        warn!("Failed to mutate hazard edge state {}: {}", hazard.road_segment, e);
-                    } else {
-                        info!("Applied hazard decay state on road segment: {}", hazard.road_segment);
-                    }
+                    info!("Recorded candidate hazard extraction for verification: segment={}, status={:?}, duration_hours={}", hazard.road_segment, hazard.status, hazard.duration_hours);
+                }
+
+                if triage.needs_human_review {
+                    state.errors.push(format!("TriageRequiresHumanReview: {}", triage.uncertainty_reasons.join("; ")));
                 }
 
                 state.triage = Some(triage);
@@ -92,6 +87,11 @@ impl PipelineStages {
     /// Stage 2: Database Clerk (Asset & Shelter Allocation with Redis Mutex)
     pub async fn stage_2_asset_allocation(&self, mut state: CrisisState) -> CrisisState {
         info!("--- [Stage 2: Database Clerk] Reserving Shelter & Assets ---");
+
+        if state.has_errors() {
+            info!("Skipping resource allocation because triage did not pass validation");
+            return state;
+        }
 
         let triage = match &state.triage {
             Some(t) => t,
