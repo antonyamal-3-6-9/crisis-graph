@@ -29,6 +29,7 @@ CRITICAL_FIELDS = (
 class CaseResult:
     case_id: str
     category: str
+    language: str
     schema_valid: bool
     critical_fields_correct: int
     critical_fields_total: int
@@ -109,6 +110,7 @@ def score_case(
     return CaseResult(
         case_id=case["id"],
         category=case["category"],
+        language=case.get("language", "unspecified"),
         schema_valid=not errors,
         critical_fields_correct=correct,
         critical_fields_total=len(CRITICAL_FIELDS),
@@ -130,6 +132,7 @@ def error_result(
     return CaseResult(
         case_id=case["id"],
         category=case["category"],
+        language=case.get("language", "unspecified"),
         schema_valid=False,
         critical_fields_correct=0,
         critical_fields_total=len(CRITICAL_FIELDS),
@@ -213,10 +216,36 @@ def percentile(values: list[float], quantile: float) -> float:
     return ordered[index]
 
 
-def summarize(results: list[CaseResult], model: str, backend: str) -> dict[str, Any]:
+def requires_review_after_policy(result: CaseResult) -> bool:
+    """Apply the deterministic fail-closed review rule to a model result."""
+    if not result.schema_valid or result.actual is None:
+        return True
+    actual = result.actual
+    if any(actual.get(field) is None for field in ("victim_location", "headcount", "required_asset")):
+        return True
+    hazards = actual.get("hazards")
+    if not isinstance(hazards, list):
+        return True
+    if any(
+        not isinstance(hazard, dict)
+        or any(hazard.get(field) is None for field in ("road_segment", "status", "duration_hours"))
+        for hazard in hazards
+    ):
+        return True
+    return actual.get("needs_human_review") is True
+
+
+def summarize_metrics(results: list[CaseResult]) -> dict[str, Any]:
     count = len(results)
     review_cases = [result for result in results if result.human_review_expected]
     review_true_positives = sum(result.human_review_actual is True for result in review_cases)
+    review_predicted_positives = sum(result.human_review_actual is True for result in results)
+    review_false_positives = sum(
+        result.human_review_actual is True and not result.human_review_expected
+        for result in results
+    )
+    review_false_negatives = len(review_cases) - review_true_positives
+    effective_true_positives = sum(requires_review_after_policy(result) for result in review_cases)
     total_fields = sum(result.critical_fields_total for result in results)
     correct_fields = sum(result.critical_fields_correct for result in results)
     latencies = [result.latency_ms for result in results]
@@ -234,8 +263,6 @@ def summarize(results: list[CaseResult], model: str, backend: str) -> dict[str, 
         for field in CRITICAL_FIELDS
     }
     return {
-        "model": model,
-        "backend": backend,
         "case_count": count,
         "schema_validity": sum(result.schema_valid for result in results) / count if count else 0.0,
         "critical_field_accuracy": correct_fields / total_fields if total_fields else 0.0,
@@ -244,6 +271,30 @@ def summarize(results: list[CaseResult], model: str, backend: str) -> dict[str, 
         if count
         else 0.0,
         "human_review_recall": review_true_positives / len(review_cases) if review_cases else 0.0,
+        "human_review_precision": (
+            review_true_positives / review_predicted_positives
+            if review_predicted_positives
+            else 0.0
+        ),
+        "human_review_decision_accuracy": (
+            sum(
+                result.human_review_actual is result.human_review_expected
+                for result in results
+            )
+            / count
+            if count
+            else 0.0
+        ),
+        "effective_human_review_recall": (
+            effective_true_positives / len(review_cases) if review_cases else 0.0
+        ),
+        "human_review_confusion": {
+            "expected_positive": len(review_cases),
+            "predicted_positive": review_predicted_positives,
+            "true_positive": review_true_positives,
+            "false_positive": review_false_positives,
+            "false_negative": review_false_negatives,
+        },
         "unsupported_fact_count": sum(result.unsupported_fact_count for result in results),
         "unsupported_fact_case_rate": (
             sum(result.unsupported_fact_count > 0 for result in results) / count if count else 0.0
@@ -254,6 +305,24 @@ def summarize(results: list[CaseResult], model: str, backend: str) -> dict[str, 
             "p50": percentile(latencies, 0.50),
             "p95": percentile(latencies, 0.95),
         },
+    }
+
+
+def grouped_metrics(results: list[CaseResult], field: str) -> dict[str, dict[str, Any]]:
+    values = sorted({getattr(result, field) for result in results})
+    return {
+        value: summarize_metrics([result for result in results if getattr(result, field) == value])
+        for value in values
+    }
+
+
+def summarize(results: list[CaseResult], model: str, backend: str) -> dict[str, Any]:
+    return {
+        "model": model,
+        "backend": backend,
+        **summarize_metrics(results),
+        "by_category": grouped_metrics(results, "category"),
+        "by_language": grouped_metrics(results, "language"),
         "results": [asdict(result) for result in results],
     }
 

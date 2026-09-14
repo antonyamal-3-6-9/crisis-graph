@@ -2,6 +2,7 @@ from collections import Counter
 
 from crisisgraph_ml.generate_triage_eval import EXPECTED_COUNTS, build_cases, validate_cases
 from crisisgraph_ml.triage_eval import DEFAULT_SCHEMA, load_json
+from crisisgraph_ml.validate_triage_data import require_review_status
 
 
 def test_generated_candidate_distribution_and_contract():
@@ -26,3 +27,23 @@ def test_adversarial_missing_asset_requires_review():
     )
     assert case["expected"]["required_asset"] is None
     assert case["expected"]["needs_human_review"] is True
+
+
+def test_review_status_gate_accepts_completed_first_pass():
+    cases = build_cases()
+    for case in cases:
+        case["reviewer_status"] = "first_pass_reviewed"
+
+    require_review_status(cases, "first_pass_reviewed")
+
+
+def test_review_status_gate_rejects_mixed_workflow_state():
+    cases = build_cases()
+    cases[0]["reviewer_status"] = "first_pass_reviewed"
+
+    try:
+        require_review_status(cases, "first_pass_reviewed")
+    except ValueError as error:
+        assert "119 records" in str(error)
+    else:
+        raise AssertionError("mixed reviewer statuses must fail the workflow gate")

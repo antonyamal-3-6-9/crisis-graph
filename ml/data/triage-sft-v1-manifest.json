@@ -1,0 +1,94 @@
+{
+  "dataset": "CrisisGraph Triage SFT Pilot V1",
+  "candidate_revision": 3,
+  "generated_on": "2026-09-14",
+  "provenance": "deterministic synthetic generation",
+  "revision_reason": "Regenerated after the revision-2 dev review found unnatural hyphenated Malayalam case suffixes in generated location mentions.",
+  "dev_review_history": [
+    {
+      "candidate_revision": 1,
+      "records_reviewed": 48,
+      "first_pass_reviewed": 35,
+      "needs_revision": 13,
+      "decision": "revise generator and restart review"
+    },
+    {
+      "candidate_revision": 2,
+      "records_reviewed": 48,
+      "first_pass_reviewed": 38,
+      "needs_revision": 10,
+      "decision": "replace Malayalam suffix concatenation with explicit inflected forms and restart review"
+    },
+    {
+      "candidate_revision": 3,
+      "records_reviewed": 48,
+      "first_pass_reviewed": 48,
+      "needs_revision": 0,
+      "targeted_re_review_records": 10,
+      "decision": "first-pass dev gate passed after the location policy clarification and targeted re-review; no dataset regeneration required"
+    }
+  ],
+  "annotation_policy_clarifications": [
+    {
+      "date": "2026-09-14",
+      "field": "victim_location",
+      "decision": "Permit removal of attached grammatical case markers in morphologically inflected languages while preserving lexical content and spelling."
+    }
+  ],
+  "train_review_history": [
+    {
+      "candidate_revision": 3,
+      "records_reviewed": 240,
+      "first_pass_reviewed": 240,
+      "needs_revision": 0,
+      "review_method": "four consecutive 60-record batches",
+      "decision": "first-pass training gate passed; no regeneration required"
+    }
+  ],
+  "validation_review_history": [
+    {
+      "candidate_revision": 3,
+      "records_reviewed": 48,
+      "first_pass_reviewed": 48,
+      "needs_revision": 0,
+      "decision": "first-pass validation gate passed; no regeneration required"
+    }
+  ],
+  "frozen_evaluation_source_used": false,
+  "files": {
+    "train": {
+      "path": "triage-sft-v1-train-candidates.jsonl",
+      "records": 240,
+      "sha256": "2849a1e6585e70350aa35c46b9986b3893998fccb7368f0f4447bfc76b63b02f"
+    },
+    "validation": {
+      "path": "triage-sft-v1-validation-candidates.jsonl",
+      "records": 48,
+      "sha256": "d2cdf4929c2496223a9c27cb4fe4304cb333365ae0f9a47815c1410a8041e963"
+    },
+    "dev": {
+      "path": "triage-sft-v1-dev-candidates.jsonl",
+      "records": 48,
+      "sha256": "056af8e6ed2523e90b17b397d01b2569e3b257c8e7393fe387ed8e1f517fa755"
+    }
+  },
+  "language_totals": {
+    "en": 192,
+    "ml": 72,
+    "manglish": 72
+  },
+  "human_review_targets": {
+    "true": 224,
+    "false": 112
+  },
+  "reviewer_status_by_split": {
+    "train": "first_pass_reviewed",
+    "validation": "first_pass_reviewed",
+    "dev": "first_pass_reviewed"
+  },
+  "train_first_pass_complete": true,
+  "validation_first_pass_complete": true,
+  "dev_first_pass_complete": true,
+  "independent_review_required_before_export": true,
+  "training_ready": false
+}

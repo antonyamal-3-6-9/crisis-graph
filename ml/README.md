@@ -39,7 +39,9 @@ messages in this directory.
 ## Initial milestone
 
 Before fine-tuning, establish a Qwen3-4B baseline against a reviewed triage test
-set. Measure at least:
+set. The frozen benchmark is `data/triage-eval-v2.0.0.jsonl`; never use it for
+training or prompt tuning. Report results overall and by category and language.
+Measure at least:
 
 - JSON Schema validity
 - Critical-field exact match
@@ -102,6 +104,24 @@ The Qwen3-8B comparison across V2.1, V2.1.1, and V2.2—including its required
 non-thinking runtime configuration—is documented in
 `reports/qwen3-8b-prompt-comparison.md`.
 
+The first independently reviewed 120-case baseline is documented in
+`reports/qwen3-4b-eval-v2.0.0-baseline.md`. It records overall, per-category,
+and per-language results and the remaining fail-closed safety gap.
+
 Training dependencies are intentionally not included yet. They should be added
 only after the baseline evaluation identifies a fine-tuning requirement and the
 target training environment is known.
+
+The baseline identified a semantic-review gap, so a deliberately small SFT
+pilot has been generated as separately reviewed train, validation, and dev
+candidates. See `data/triage-sft-v1-review-guide.md`. The exporter refuses to
+create chat-format training data from pending or rejected records. Its default
+`independent` policy requires a completed second pass; the explicitly selected
+`pilot-first-pass` policy accepts first-pass-reviewed synthetic data for this
+controlled experiment.
+
+The Colab-ready QLoRA workflow is in
+`notebooks/crisisgraph-qwen3-4b-qlora.ipynb`. It verifies the exported dataset
+hashes, defaults to a three-step smoke run, trains PEFT adapters over a 4-bit
+NF4 Qwen3-4B base with TRL, and records adapter/run metadata for the later
+frozen-benchmark comparison.

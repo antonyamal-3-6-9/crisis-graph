@@ -110,3 +110,29 @@ def test_summary_contains_field_and_unsupported_fact_metrics():
     report = summarize([result], "model", "llama-cpp")
     assert report["field_accuracy"]["headcount"] == 0.0
     assert report["unsupported_fact_case_rate"] == 1.0
+    assert report["human_review_precision"] == 1.0
+    assert report["human_review_recall"] == 1.0
+    assert report["effective_human_review_recall"] == 1.0
+    assert report["by_category"]["missing_information"]["case_count"] == 1
+    assert report["by_language"]["unspecified"]["case_count"] == 1
+
+
+def test_fail_closed_policy_recovers_review_when_critical_field_is_null():
+    actual = complete_output(needs_human_review=False, uncertainty_reasons=[])
+    case = {
+        "id": "case-1",
+        "category": "missing_information",
+        "language": "en",
+        "expected": {
+            "victim_location": None,
+            "headcount": None,
+            "required_asset": None,
+            "hazards": [],
+            "needs_human_review": True,
+        },
+    }
+    result = score_case(case, actual, Draft202012Validator(SCHEMA))
+    report = summarize([result], "model", "llama-cpp")
+
+    assert report["human_review_recall"] == 0.0
+    assert report["effective_human_review_recall"] == 1.0

@@ -19,6 +19,7 @@ dev = [
 crisisgraph-triage-eval = "crisisgraph_ml.triage_eval:main"
 crisisgraph-generate-triage-eval = "crisisgraph_ml.generate_triage_eval:main"
 crisisgraph-validate-triage-data = "crisisgraph_ml.validate_triage_data:main"
+crisisgraph-triage-sft-data = "crisisgraph_ml.triage_sft_data:main"
 
 [build-system]
 requires = ["hatchling"]

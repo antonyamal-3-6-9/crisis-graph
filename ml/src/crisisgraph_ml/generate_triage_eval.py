@@ -22,6 +22,14 @@ EXPECTED_COUNTS = {
     "adversarial": 8,
     "irrelevant": 7,
 }
+REVIEWER_STATUSES = frozenset(
+    {
+        "pending_manual_review",
+        "first_pass_reviewed",
+        "reviewed",
+        "needs_revision",
+    }
+)
 
 
 def hazard(
@@ -947,11 +955,7 @@ def validate_cases(cases: list[dict[str, Any]], schema: dict[str, Any]) -> None:
     validator.check_schema(schema)
     for case in cases:
         expected = case["expected"]
-        if case["reviewer_status"] not in {
-            "pending_manual_review",
-            "reviewed",
-            "needs_revision",
-        }:
+        if case["reviewer_status"] not in REVIEWER_STATUSES:
             errors.append(f"{case['id']}: unexpected reviewer status")
         if any(all(value is None for value in item.values()) for item in expected["hazards"]):
             errors.append(f"{case['id']}: hazard cannot be entirely null")

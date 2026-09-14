@@ -1,0 +1,30 @@
+{
+  "dataset": "CrisisGraph Triage Eval V2",
+  "version": "2.0.0",
+  "artifact": "triage-eval-v2.0.0.jsonl",
+  "sha256": "08f6ab7d2513583599db4288fbf894de654dbc1e03251506d920410ad5ff58d4",
+  "record_count": 120,
+  "reviewer_status": "reviewed",
+  "first_semantic_review_completed_on": "2026-09-12",
+  "independent_second_review_completed_on": "2026-09-12",
+  "second_review_result": "No annotation errors, unresolved policy disagreements, or records requiring revision were found.",
+  "road_segment_policy": "Preserve named or explicitly anchored textual road locators; use null for unanchored, deictic, or area-only descriptions.",
+  "frozen_benchmark": true,
+  "permitted_use": [
+    "final model evaluation",
+    "regression testing",
+    "cross-model comparison",
+    "cross-lingual consistency measurement"
+  ],
+  "prohibited_use": [
+    "model training",
+    "fine-tuning",
+    "prompt tuning",
+    "training-example generation"
+  ],
+  "required_reporting": [
+    "overall",
+    "per category",
+    "per language"
+  ]
+}

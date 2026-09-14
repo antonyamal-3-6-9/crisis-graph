@@ -1,0 +1,13 @@
+{
+  "artifact": "triage-eval-v2-second-review.jsonl",
+  "source": "triage-eval-v2-candidates.jsonl",
+  "sha256": "a5ac7907e8fad57b57435133e3b4dd83c8d3a8fc380a765278153d733b8e58ee",
+  "record_count": 120,
+  "review_stage": "first_pass_complete",
+  "reviewer_status": "first_pass_reviewed",
+  "review_completed_on": "2026-09-12",
+  "review_summary": "No definite mislabeled examples found; category mix accepted; multilingual semantic mirrors retained for cross-lingual consistency reporting.",
+  "road_segment_policy": "Preserve named or explicitly anchored textual road locators; use null for unanchored, deictic, or area-only descriptions.",
+  "independent_second_review_required": true,
+  "frozen_benchmark": false
+}
