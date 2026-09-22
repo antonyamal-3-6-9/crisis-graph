@@ -1,0 +1,150 @@
+{
+  "dataset": "CrisisGraph Triage SFT V3 targeted additions",
+  "candidate_revision": 3,
+  "generated_on": "2026-09-21",
+  "status": "first_pass_review_complete",
+  "provenance": "AI-assisted, individually authored synthetic scenarios with deterministic validation and emission",
+  "base_dataset": "CrisisGraph Triage SFT Pilot V1 revision 3",
+  "generation_uses_frozen_evaluation_records": false,
+  "references_used_for_overlap_checks_only": true,
+  "generator": {
+    "path": "../src/crisisgraph_ml/triage_sft_v3_data.py",
+    "sha256": "c324e53cc2cb44cf5d68e97d233a5974191d1f107a0139b9e18b0f85b61ab22a"
+  },
+  "specification": {
+    "path": "triage-sft-v3-augmentation-spec.md",
+    "sha256": "9a569541dc00b2a19f1c2d909643f150d29b6e523cd0682f5cd3be1f7d4ae3d7",
+    "machine_readable_path": "triage-sft-v3-augmentation-spec.json",
+    "machine_readable_sha256": "8133519c0b91e56cf8a9ae2c94368c87d59a9c84b08fd68622b8d38598c791a2"
+  },
+  "review_prompt": {
+    "path": "triage-sft-v3-train-validation-review-prompt.md",
+    "sha256": "4907118806a3cc82220a6be762ea361546537b68d01edbda074fc1ce25b8258c"
+  },
+  "combined_with_unchanged_v1": {
+    "train_records": 300,
+    "validation_records": 72
+  },
+  "training_ready": false,
+  "exported": true,
+  "export_manifest": "triage-sft-v3-export-manifest.json",
+  "controlled_experiment_ready": true,
+  "files": {
+    "train_augmentation": {
+      "path": "triage-sft-v3-train-augmentation-candidates.jsonl",
+      "sha256": "7f1121a642aa1e5b7c9bd7702fe346723c1bae268f577e10292b88c3d615475f",
+      "records": 60,
+      "language_counts": {
+        "en": 36,
+        "ml": 12,
+        "manglish": 12
+      },
+      "category_counts": {
+        "contradictory_count": 6,
+        "contradictory_location": 6,
+        "contradictory_asset": 6,
+        "uncertain_headcount": 6,
+        "missing_location": 6,
+        "implicit_asset_only": 6,
+        "hazard_unknown_status": 6,
+        "hazard_missing_duration": 6,
+        "hazard_unanchored_road": 6,
+        "complete_boundary": 6
+      },
+      "reviewer_status_counts": {
+        "first_pass_reviewed": 60
+      }
+    },
+    "validation_extension": {
+      "path": "triage-sft-v3-validation-extension-candidates.jsonl",
+      "sha256": "b1defba87ba6bed9d9a1e21b65301708d3e3cb798fcb485c206260f33d01e30a",
+      "records": 24,
+      "language_counts": {
+        "en": 12,
+        "ml": 6,
+        "manglish": 6
+      },
+      "category_counts": {
+        "contradictory_count": 3,
+        "contradictory_location": 3,
+        "contradictory_asset": 3,
+        "missing_asset": 1,
+        "missing_location": 1,
+        "uncertain_headcount": 1,
+        "hazard_unknown_status": 3,
+        "hazard_missing_duration": 3,
+        "hazard_unanchored_road": 3,
+        "complete_boundary": 3
+      },
+      "reviewer_status_counts": {
+        "first_pass_reviewed": 24
+      }
+    }
+  },
+  "independence": {
+    "unique_scenario_families": 84,
+    "unique_wording_families": 84,
+    "exact_reference_overlap": 0,
+    "near_duplicate_screen": {
+      "repository_records_compared": 1062,
+      "sequence_match_threshold": 0.85,
+      "token_jaccard_threshold": 0.75,
+      "flagged_pairs": 0,
+      "maximum_sequence_match": 0.782
+    }
+  },
+  "review": {
+    "method": "AI-assisted first-pass semantic and language review",
+    "train_records_reviewed": 60,
+    "train_initial_first_pass_reviewed": 56,
+    "train_initial_needs_revision": 4,
+    "train_wording_corrections_applied": 4,
+    "train_final_first_pass_reviewed": 60,
+    "train_final_needs_revision": 0,
+    "train_gate_decision": "passed_after_listed_corrections",
+    "validation_records_reviewed": 24,
+    "validation_initial_first_pass_reviewed": 22,
+    "validation_initial_needs_revision": 2,
+    "validation_wording_corrections_applied": 2,
+    "validation_final_first_pass_reviewed": 24,
+    "validation_final_needs_revision": 0,
+    "validation_gate_decision": "passed_after_listed_corrections",
+    "required_next": "run smoke training in the hash-pinned V3 notebook, then restart the runtime for the full run",
+    "human_or_domain_expert_review_claimed": false
+  },
+  "train_first_pass_review_report": {
+    "path": "triage-sft-v3-train-augmentation-first-pass-review-report.md",
+    "sha256": "c38d3d9729512a5fc1021bd9c73f0166fa52a26f078ef56c5ca50b6d5f9771c4"
+  },
+  "validation_first_pass_review_report": {
+    "path": "triage-sft-v3-validation-extension-first-pass-review-report.md",
+    "sha256": "d98c1ed4c06faf2a4ff62c574686a0c3cd97119c9d9ca826b80885b625401127"
+  },
+  "candidate_review_complete": true,
+  "review_history": [
+    {
+      "candidate_revision": 1,
+      "train_sha256": "b1f17db0f32a7525072c0e037457e25ac96e9687105516fa2f8af68eca56a83b",
+      "initial_verdicts": {"first_pass_reviewed": 56, "needs_revision": 4},
+      "decision": "apply four wording-only hazard-duration clarifications; targets unchanged"
+    },
+    {
+      "candidate_revision": 2,
+      "train_sha256": "7f1121a642aa1e5b7c9bd7702fe346723c1bae268f577e10292b88c3d615475f",
+      "final_verdicts": {"first_pass_reviewed": 60, "needs_revision": 0},
+      "decision": "training augmentation first-pass gate complete; validation review remains pending"
+    },
+    {
+      "candidate_revision": 3,
+      "validation_sha256": "b1defba87ba6bed9d9a1e21b65301708d3e3cb798fcb485c206260f33d01e30a",
+      "initial_verdicts": {"first_pass_reviewed": 22, "needs_revision": 2},
+      "final_verdicts": {"first_pass_reviewed": 24, "needs_revision": 0},
+      "decision": "apply two wording-only hazard-duration clarifications; V3 candidate first-pass gate complete"
+    }
+  ],
+  "limitations": [
+    "Synthetic records are not evidence of field-language distribution",
+    "Automated checks do not prove semantic correctness or Malayalam/Manglish fluency",
+    "The exposed regression suite cannot support an unbiased generalization claim"
+  ]
+}

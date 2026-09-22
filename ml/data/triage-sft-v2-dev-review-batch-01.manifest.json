@@ -1,0 +1,44 @@
+{
+  "dataset": "CrisisGraph SFT V2 initial dev review batch",
+  "candidate_revision": 2,
+  "records": 24,
+  "languages": {
+    "en": 8,
+    "ml": 8,
+    "manglish": 8
+  },
+  "semantic_families": 8,
+  "sha256": "2d2879533501dba749e9efbee78eed3c938191a9d0321d74cb10a64236444031",
+  "generator_sha256": "39f477d29e3cc4f989281f3eed295e9761d97b55be01f5d00656487711ea952b",
+  "reviewer_status_counts": {"first_pass_reviewed": 24},
+  "independent_review_complete": false,
+  "frozen": false,
+  "review_history": [
+    {
+      "candidate_revision": 1,
+      "sha256": "e94bda8a6f7f642f594779f150a83288d74aef23153a166b1db440be00e158d6",
+      "generator_sha256": "978667eaa0f361c7d15f6fbf6928e92f64eea8ccaac681adba41f447948accfc",
+      "source": "User-supplied first-pass review in conversation",
+      "first_pass_reviewed": 23,
+      "needs_revision": 1
+    },
+    {
+      "candidate_revision": 2,
+      "decision": "User's conditional first-pass acceptance applied after exact wording correction and confidence policy documentation",
+      "corrected_record": "sft-v2-dev-ml-unverified_group_size_range",
+      "targets_changed": false,
+      "first_pass_reviewed": 24,
+      "needs_revision": 0,
+      "report": "../reports/triage-sft-v2-batch-01-first-pass-review.md"
+    }
+  ],
+  "training_ready": false,
+  "generation_uses_benchmark_records": false,
+  "reference_data_used_for_exact_overlap_check_only": true,
+  "split": "dev",
+  "planned_final_sizes": {
+    "train": 240,
+    "validation": 48,
+    "dev": 48
+  }
+}

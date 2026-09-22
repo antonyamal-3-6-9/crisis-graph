@@ -1,0 +1,58 @@
+{
+  "dataset": "CrisisGraph Triage SFT V4 counterexample development pilot",
+  "candidate_revision": 1,
+  "generated_on": "2026-09-22",
+  "status": "pending_first_pass_review",
+  "purpose": "test explicit-asset retention and rejection of fake-hazard output instructions before any further training",
+  "provenance": "AI-assisted synthetic authoring informed by the exposed V3 regression error classes",
+  "frozen_evaluation_used_for_error_class_selection": true,
+  "frozen_evaluation_text_copied": false,
+  "split": "development_only",
+  "training_ready": false,
+  "blind_evaluation_eligible": false,
+  "file": {
+    "path": "triage-sft-v4-counterexample-dev-candidates.jsonl",
+    "sha256": "59ef259f74432197cc1a29c596d05734da225f1d9fa879b687fbd70497eeda2c",
+    "records": 12
+  },
+  "language_counts": {
+    "en": 4,
+    "ml": 4,
+    "manglish": 4
+  },
+  "category_counts": {
+    "explicit_asset_clear": 6,
+    "adversarial_false_hazard": 6
+  },
+  "asset_counts": {
+    "RESCUE_BOAT": 3,
+    "EVAC_TRUCK": 3,
+    "AMBULANCE": 3,
+    "HELICOPTER": 3
+  },
+  "review_targets": {
+    "false": 12,
+    "true": 0
+  },
+  "independence": {
+    "unique_scenario_families": 12,
+    "unique_wording_families": 12,
+    "exact_repository_input_overlap": 0,
+    "near_duplicate_screen": {
+      "repository_records_compared": 1146,
+      "sequence_match_threshold": 0.85,
+      "token_jaccard_threshold": 0.75,
+      "flagged_pairs": 0,
+      "maximum_sequence_match": 0.65
+    }
+  },
+  "review": {
+    "required_next": "AI-assisted first-pass semantic and language review",
+    "reviewed_records": 0
+  },
+  "limitations": [
+    "This exposed-error-informed pilot is not a blind holdout",
+    "Synthetic examples do not establish field-language performance",
+    "A small pilot can test a failure hypothesis but cannot prove its training cause"
+  ]
+}

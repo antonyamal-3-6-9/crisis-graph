@@ -1,0 +1,57 @@
+{
+  "dataset": "CrisisGraph SFT V2 dev review batch 02",
+  "candidate_revision": 2,
+  "records": 24,
+  "semantic_families": 8,
+  "languages": {
+    "en": 8,
+    "ml": 8,
+    "manglish": 8
+  },
+  "categories": {
+    "contradictory_count": 3,
+    "contradictory_location": 3,
+    "missing_asset": 3,
+    "missing_multiple_fields": 3,
+    "irrelevant": 3,
+    "clear": 3,
+    "adversarial": 3,
+    "hazard_missing_duration": 3
+  },
+  "reviewer_status_counts": {
+    "first_pass_reviewed": 24
+  },
+  "sha256": "00a2f4fbf609b7256ba44f93063cb0dabba429e728f538d03c165c53b72c3345",
+  "generator_sha256": "7d5bc2dbfddb8e94dbcce98c0132835082e17e437562825bba0aea936d2cd2b2",
+  "batch01_sha256_at_generation": "2d2879533501dba749e9efbee78eed3c938191a9d0321d74cb10a64236444031",
+  "generation_uses_benchmark_records": false,
+  "reference_data_used_for_exact_overlap_check_only": true,
+  "training_ready": false,
+  "independent_review_complete": false,
+  "frozen": false,
+  "split": "dev",
+  "planned_final_sizes": {
+    "train": 240,
+    "validation": 48,
+    "dev": 48
+  },
+  "review_history": [
+    {
+      "candidate_revision": 1,
+      "sha256": "df166ed3628a53ab6eef6c66656e55fe57597308cf5b9d8e7f05b67c8618fe4a",
+      "generator_sha256": "ff38c5d50b64939039287e00123f5a4aa8c1e95668032ab2960fd6a7ae227682",
+      "source": "User-supplied first-pass review in conversation",
+      "first_pass_reviewed": 23,
+      "needs_revision": 1
+    },
+    {
+      "candidate_revision": 2,
+      "decision": "User's conditional first-pass acceptance applied after exact Malayalam wording correction",
+      "corrected_record": "sft-v2-dev-ml-museum_rescue_equipment_exhibit",
+      "targets_changed": false,
+      "first_pass_reviewed": 24,
+      "needs_revision": 0,
+      "report": "../reports/triage-sft-v2-batch-02-first-pass-review.md"
+    }
+  ]
+}

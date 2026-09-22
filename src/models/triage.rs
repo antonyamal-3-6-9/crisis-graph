@@ -41,6 +41,27 @@ pub struct HazardReport {
     pub duration_hours: u32,
 }
 
+/// Unverified hazard facts extracted from language. Every field is independent
+/// and may be absent; this type must never be written directly to the
+/// authoritative operational overlay.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CandidateHazardReport {
+    pub road_segment: Option<String>,
+    pub status: Option<RoadStatus>,
+    pub duration_hours: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriageInferenceMetadata {
+    pub backend: String,
+    pub model: String,
+    pub adapter_id: Option<String>,
+    pub adapter_sha256: Option<String>,
+    pub prompt_version: String,
+    pub schema_version: String,
+    pub latency_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SosAlert {
     pub alert_id: String,
@@ -51,14 +72,15 @@ pub struct SosAlert {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriageReport {
-    pub victim_location_raw: String,
+    pub victim_location_raw: Option<String>,
     pub resolved_junction_id: Option<String>,
-    pub headcount: u32,
-    pub required_asset: AssetType,
-    pub hazards: Vec<HazardReport>,
+    pub headcount: Option<u32>,
+    pub required_asset: Option<AssetType>,
+    pub hazards: Vec<CandidateHazardReport>,
     pub confidence_score: f32,
     #[serde(default)]
     pub needs_human_review: bool,
     #[serde(default)]
     pub uncertainty_reasons: Vec<String>,
+    pub inference: TriageInferenceMetadata,
 }

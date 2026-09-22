@@ -43,3 +43,26 @@ were exported under the explicit `pilot-first-pass` policy. The generated
 chat-format JSONL files remain ignored and reproducible; their source, prompt,
 record counts, and checksums are tracked in
 `triage-sft-v1-export-manifest.json`.
+
+V2 and V3 are controlled synthetic iterations, not replacements for a
+field-derived corpus:
+
+- V2 tested broader contradiction and review behavior but regressed on hazards
+  and Malayalam in the frozen regression suite.
+- V3 combines the unchanged 240-record V1 training split with 60 targeted,
+  first-pass-reviewed additions. Its validation set combines the unchanged 48
+  V1 records with 24 additions, producing 300 train and 72 validation records.
+- `triage-sft-v3-export-manifest.json` records source hashes, export hashes,
+  review status, language counts, and overlap checks. The ignored chat exports
+  can be reproduced from those reviewed sources.
+- The 120-case frozen evaluation set was not included in any training export.
+
+The V3 dataset received AI-assisted first-pass semantic/language review with
+documented wording corrections. It did not receive an independent human or
+domain-expert acceptance pass, and it is synthetic. Reports and resume claims
+must retain those qualifications.
+
+The V4 counterexample files are a deferred development diagnostic informed by
+errors on the exposed regression suite. They are neither training-ready nor a
+blind holdout and should not be mixed into a training export without a new,
+documented experiment decision.

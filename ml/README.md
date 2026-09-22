@@ -36,7 +36,7 @@ Generated datasets, downloaded model weights, checkpoints, experiment runs, and
 operational exports are ignored. Do not put real personally identifiable SOS
 messages in this directory.
 
-## Initial milestone
+## Current model-engineering status
 
 Before fine-tuning, establish a Qwen3-4B baseline against a reviewed triage test
 set. The frozen benchmark is `data/triage-eval-v2.0.0.jsonl`; never use it for
@@ -53,11 +53,59 @@ Measure at least:
 
 The evaluation contract is `../schemas/triage-extraction-v2.json`. It permits
 explicit unknown values so the model is never forced to invent a missing
-location, headcount, asset, or hazard duration. The Rust runtime still uses V1
-until its typed pipeline contract is migrated and verified separately.
+location, headcount, asset, or hazard duration. The Rust runtime now consumes
+this V2 contract with strict typed validation and deterministic fail-closed
+guards. Model output remains a candidate report; it does not reserve resources,
+change hazards, route vehicles, or certify safety.
 
 Tracked experiment conclusions live in `reports/`. Full raw run artifacts stay
 under the ignored `runs/` directory.
+
+The completed V2 adapter comparison is in
+`reports/qwen3-4b-qlora-sft-v2-regression.md`. V2 improves contradiction handling
+over V1 but regresses on hazards and Malayalam; neither adapter meets the review
+recall gate. A checkpointed serial runner is available at
+`evals/triage/run_checkpointed.py` with the evaluator's existing arguments.
+Resume only with the identical model/adapter and serving settings; checkpoint
+identity checks cover dataset, prompt, schema, model alias, backend, and endpoint,
+not the server's actual loaded weights. Do not reuse a checkpoint across adapters.
+
+The V3 experiment was specified in
+`data/triage-sft-v3-augmentation-spec.md`, with a machine-readable companion at
+`data/triage-sft-v3-augmentation-spec.json`. V3 keeps the reviewed V1 dataset,
+adds targeted abstention/hazard examples, and starts from the untouched base
+model. Its 18-record dev pilot is in
+`data/triage-sft-v3-dev-candidates.jsonl`; review it with
+`data/triage-sft-v3-dev-review-prompt.md`. The passed dev gate produced separate
+60-record training-augmentation and 24-record validation-extension candidates;
+their review procedure is in `data/triage-sft-v3-train-validation-review-prompt.md`.
+After first-pass correction closure, the combined 300/72 chat exports are recorded
+in `data/triage-sft-v3-export-manifest.json`. Use the hash-pinned
+`notebooks/crisisgraph-qwen3-4b-qlora-sft-v3.ipynb` for the controlled run;
+the original working notebook remains unchanged.
+
+The completed V3 frozen-suite comparison is in
+`reports/qwen3-4b-qlora-sft-v3-regression.md`. V3 is the strongest aggregate
+adapter measured so far (98/120 exact matches and 60/68 review recall), but it
+fails the predeclared clear-case gate at 18/20. It remains an experimental
+candidate rather than a production-approved model. It is the adapter currently
+integrated for local end-to-end prototype testing because its limitations are
+measured and the deterministic Rust boundary still fails closed.
+
+The false-positive audit is recorded in
+`reports/qwen3-4b-qlora-sft-v3-false-positive-audit.md`. Its resulting 12-record,
+development-only counterexample pilot is
+`data/triage-sft-v4-counterexample-dev-candidates.jsonl`; review all records with
+`data/triage-sft-v4-counterexample-dev-review-prompt.md` if that experiment is
+resumed. V4 is currently deferred: the pilot is informed by exposed errors, is
+not a blind holdout, and is not training-ready. The selected next milestone is
+runtime integration and controlled end-to-end validation, not another synthetic
+fine-tuning cycle or an arbitrary expansion to 1,000 records.
+
+Runtime setup, provenance, backend-specific structured-output behavior, and the
+inference-only probe are documented in
+`../docs/triage-inference-integration.md`. The evaluated V3 PEFT/GGUF weights
+remain ignored local artifacts; tracked reports retain their hashes and results.
 
 ## Environment
 
@@ -108,9 +156,9 @@ The first independently reviewed 120-case baseline is documented in
 `reports/qwen3-4b-eval-v2.0.0-baseline.md`. It records overall, per-category,
 and per-language results and the remaining fail-closed safety gap.
 
-Training dependencies are intentionally not included yet. They should be added
-only after the baseline evaluation identifies a fine-tuning requirement and the
-target training environment is known.
+Training dependencies remain isolated in the Colab notebooks rather than the
+CPU development environment. The notebooks pin and record the actual
+Transformers/TRL/PEFT/bitsandbytes stack used for each controlled run.
 
 The baseline identified a semantic-review gap, so a deliberately small SFT
 pilot has been generated as separately reviewed train, validation, and dev

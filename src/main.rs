@@ -26,8 +26,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 2. Load Configuration
     let config = Config::from_env();
     info!("Target Neo4j URI : {}", config.neo4j_uri);
-    info!("Target Redis URI : {}:{}", config.redis_host, config.redis_port);
-    info!("Target vLLM URL  : {}", config.vllm_base_url);
+    info!(
+        "Target Redis URI : {}:{}",
+        config.redis_host, config.redis_port
+    );
+    info!("Inference backend: {}", config.inference_backend);
+    info!("Inference URL    : {}", config.inference_base_url);
+    info!("Inference model  : {}", config.inference_model);
+    info!("Triage adapter   : {:?}", config.triage_adapter_id);
 
     // 3. Connect to Database and Cache
     let neo4j = Neo4jClient::connect(&config).await?;
@@ -82,7 +88,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(brief) = final_state.brief {
             println!("\n{}\n", brief.raw_brief_text);
         } else {
-            eprintln!("Failed to generate tactical brief: {:?}", final_state.errors);
+            eprintln!(
+                "Failed to generate tactical brief: {:?}",
+                final_state.errors
+            );
         }
     }
 

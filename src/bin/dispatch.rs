@@ -1,5 +1,5 @@
-use std::io::{self, Write};
 use chrono::Utc;
+use std::io::{self, Write};
 use uuid::Uuid;
 
 use crisis_graph::config::Config;
@@ -71,20 +71,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         if let Some(brief) = final_state.brief {
             println!("\n{}", brief.raw_brief_text);
-            
+
             // Print extra inspection details for technical verification
             if let Some(ref triage) = final_state.triage {
                 println!("\n--- DIAGNOSTIC INSPECTION ---");
                 println!("• Victim Junction  : {:?}", triage.resolved_junction_id);
                 println!("• Needed Asset     : {:?}", triage.required_asset);
-                println!("• Headcount        : {}", triage.headcount);
+                println!("• Headcount        : {:?}", triage.headcount);
+                println!(
+                    "• Inference        : {} / {} / {:?}",
+                    triage.inference.backend, triage.inference.model, triage.inference.adapter_id
+                );
                 if let Some(ref shelter) = final_state.assigned_shelter {
                     println!("• Assigned Shelter : {} ({})", shelter.name, shelter.id);
                 }
                 if let Some(ref segments) = final_state.segment_path {
                     println!("• Road Segments    : {} total traversed", segments.len());
                     if !segments.is_empty() {
-                        println!("• First 3 Segments : {:?}", &segments[..segments.len().min(3)]);
+                        println!(
+                            "• First 3 Segments : {:?}",
+                            &segments[..segments.len().min(3)]
+                        );
                     }
                 }
                 println!("-----------------------------\n");

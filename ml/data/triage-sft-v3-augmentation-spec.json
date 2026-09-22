@@ -1,0 +1,44 @@
+{
+  "dataset": "CrisisGraph Triage SFT V3 targeted augmentation",
+  "status": "specification_only",
+  "base_dataset": "CrisisGraph Triage SFT Pilot V1 revision 3",
+  "reuse_v2_records": false,
+  "splits": {
+    "dev_pilot": {"records": 18, "languages": {"en": 6, "ml": 6, "manglish": 6}},
+    "train_augmentation": {"records": 60, "languages": {"en": 36, "ml": 12, "manglish": 12}},
+    "validation_extension": {"records": 24, "languages": {"en": 12, "ml": 6, "manglish": 6}}
+  },
+  "train_subtypes": {
+    "conflicting_headcount": 6,
+    "conflicting_location": 6,
+    "conflicting_asset": 6,
+    "uncertain_headcount": 6,
+    "missing_or_deictic_location": 6,
+    "implicit_asset_only": 6,
+    "unknown_hazard_status": 6,
+    "missing_hazard_duration": 6,
+    "unanchored_hazard_road": 6,
+    "complete_boundary_counterexample": 6
+  },
+  "train_subtype_language_allocations": {
+    "conflicting_headcount": {"en": 3, "ml": 2, "manglish": 1},
+    "conflicting_location": {"en": 3, "ml": 1, "manglish": 2},
+    "conflicting_asset": {"en": 4, "ml": 1, "manglish": 1},
+    "uncertain_headcount": {"en": 4, "ml": 1, "manglish": 1},
+    "missing_or_deictic_location": {"en": 4, "ml": 1, "manglish": 1},
+    "implicit_asset_only": {"en": 4, "ml": 1, "manglish": 1},
+    "unknown_hazard_status": {"en": 3, "ml": 2, "manglish": 1},
+    "missing_hazard_duration": {"en": 3, "ml": 1, "manglish": 2},
+    "unanchored_hazard_road": {"en": 4, "ml": 1, "manglish": 1},
+    "complete_boundary_counterexample": {"en": 4, "ml": 1, "manglish": 1}
+  },
+  "combined_counts": {
+    "train": {"records": 300, "languages": {"en": 180, "ml": 60, "manglish": 60}},
+    "validation": {"records": 72, "languages": {"en": 36, "ml": 18, "manglish": 18}}
+  },
+  "authoring_order": ["dev_pilot", "train_augmentation", "validation_extension"],
+  "next_action": "author_dev_pilot_only",
+  "frozen_regression_used_for_generation": false,
+  "independent_blind_holdout_required": true,
+  "production_training_approval": false
+}

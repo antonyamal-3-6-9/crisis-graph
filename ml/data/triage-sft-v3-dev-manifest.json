@@ -1,0 +1,89 @@
+{
+  "dataset": "CrisisGraph Triage SFT V3 dev pilot",
+  "candidate_revision": 1,
+  "generated_on": "2026-09-21",
+  "status": "first_pass_review_complete",
+  "purpose": "validate targeted V3 augmentation policy and wording before train and validation authoring",
+  "provenance": "AI-assisted synthetic authoring under the V3 targeted augmentation specification",
+  "base_dataset": "CrisisGraph Triage SFT Pilot V1 revision 3",
+  "reuse_v2_records": false,
+  "frozen_evaluation_source_used_for_record_authoring": false,
+  "files": {
+    "candidates": {
+      "path": "triage-sft-v3-dev-candidates.jsonl",
+      "records": 18,
+      "sha256": "4d1807a814f3bb8d5fae596bda40a781d61f7bddad51fa97629a2edca0e1dff9"
+    },
+    "specification": {
+      "path": "triage-sft-v3-augmentation-spec.md",
+      "sha256": "9a569541dc00b2a19f1c2d909643f150d29b6e523cd0682f5cd3be1f7d4ae3d7"
+    },
+    "machine_readable_specification": {
+      "path": "triage-sft-v3-augmentation-spec.json",
+      "sha256": "8133519c0b91e56cf8a9ae2c94368c87d59a9c84b08fd68622b8d38598c791a2"
+    },
+    "review_prompt": {
+      "path": "triage-sft-v3-dev-review-prompt.md",
+      "sha256": "f233bd165e1790acb876c24a4fe2b019799ad8375974f6e3bbabaf37ccffb060"
+    },
+    "annotation_guidelines": {
+      "path": "triage-annotation-guidelines.md",
+      "sha256": "cb9bea1228b41524c7f4677c3a79153161e27bc74091fab49fb0ae1d422a9ee0"
+    },
+    "first_pass_review_report": {
+      "path": "triage-sft-v3-dev-first-pass-review-report.md",
+      "sha256": "0661e04aafeb18216ba94e4fbc74dc6ea2aca59d0ef9d1772795574eea2d59d2"
+    }
+  },
+  "language_counts": {
+    "en": 6,
+    "ml": 6,
+    "manglish": 6
+  },
+  "coverage_counts": {
+    "contradiction": 6,
+    "incomplete_hazard": 6,
+    "missing_or_underspecified": 3,
+    "complete_boundary_counterexample": 3
+  },
+  "human_review_targets": {
+    "true": 15,
+    "false": 3
+  },
+  "independence": {
+    "unique_scenario_families": 18,
+    "unique_wording_families": 18,
+    "cross_language_translations": 0,
+    "exact_overlap_with_repository_jsonl": 0
+  },
+  "automated_validation": {
+    "json_lines_parse": "passed",
+    "draft_2020_12_schema": "passed",
+    "count_and_allocation_invariants": "passed",
+    "exact_normalized_input_overlap": "passed",
+    "near_duplicate_screen": {
+      "repository_records_compared": 1044,
+      "sequence_match_threshold": 0.85,
+      "token_jaccard_threshold": 0.75,
+      "flagged_pairs": 0,
+      "maximum_sequence_match": 0.768,
+      "maximum_token_jaccard_for_maximum_sequence_pair": 0.548
+    }
+  },
+  "review": {
+    "method": "AI-assisted first-pass semantic and language review",
+    "reviewed_records": 18,
+    "initial_first_pass_reviewed": 17,
+    "initial_needs_revision": 1,
+    "corrections_applied": 1,
+    "first_pass_reviewed": 18,
+    "needs_revision": 0,
+    "policy_documentation_corrections_applied": 1,
+    "gate_decision": "passed_after_listed_corrections",
+    "required_next": "first-pass review of train augmentation and validation extension candidates",
+    "independent_second_pass_required_for_dev_gate": false,
+    "human_or_domain_expert_review_claimed": false
+  },
+  "training_or_validation_generation_approved": true,
+  "training_approved": false
+}

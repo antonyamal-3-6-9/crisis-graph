@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -13,6 +11,8 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
@@ -24,7 +24,7 @@ use uuid::Uuid;
 use crisis_graph::config::Config;
 use crisis_graph::db::{Neo4jClient, RedisClient, ShelterWithLocation, StateManager};
 use crisis_graph::ingestion::TriageExtractor;
-use crisis_graph::models::{CrisisState, DispatchStatus, RoadStatus, SosAlert};
+use crisis_graph::models::{CrisisState, DispatchStatus, RoadStatus, SosAlert, TriageReport};
 use crisis_graph::pipeline::{CrisisOrchestrator, PipelineStages};
 
 const STREAM_KEY: &str = "sos:stream:aluva";
@@ -51,7 +51,8 @@ pub struct DispatchResponse {
     pub victim_junction: Option<String>,
     pub assigned_shelter: Option<ShelterSummary>,
     pub assigned_asset: Option<String>,
-    pub headcount: u32,
+    pub headcount: Option<u32>,
+    pub triage: Option<TriageReport>,
     pub distance_km: f64,
     pub travel_time_s: f64,
     pub is_detour: bool,
@@ -93,7 +94,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     state_manager.seed_aluva_shelters().await?;
 
     // Setup Redis Streams consumer group
-    if let Err(e) = redis.ensure_consumer_group(STREAM_KEY, CONSUMER_GROUP).await {
+    if let Err(e) = redis
+        .ensure_consumer_group(STREAM_KEY, CONSUMER_GROUP)
+        .await
+    {
         warn!("Consumer group setup note: {e}");
     }
 
@@ -186,7 +190,9 @@ async fn ingest_sos_stream(
         alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
         raw_text: req.raw_text,
         timestamp: Utc::now(),
-        source_channel: req.source_channel.or_else(|| Some("redis_streams_intake".to_string())),
+        source_channel: req
+            .source_channel
+            .or_else(|| Some("redis_streams_intake".to_string())),
     };
 
     let payload = serde_json::to_string(&alert).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -220,7 +226,10 @@ async fn simulate_spike(
 
     for alert_text in sample_alerts {
         let alert = SosAlert {
-            alert_id: format!("SOS-SPIKE-{}", Uuid::new_v4().to_string()[..6].to_uppercase()),
+            alert_id: format!(
+                "SOS-SPIKE-{}",
+                Uuid::new_v4().to_string()[..6].to_uppercase()
+            ),
             raw_text: alert_text.to_string(),
             timestamp: Utc::now(),
             source_channel: Some("disaster_spike_simulator".to_string()),
@@ -251,7 +260,10 @@ fn spawn_stream_worker(
     event_tx: Arc<broadcast::Sender<String>>,
 ) {
     tokio::spawn(async move {
-        info!(">>> Redis Streams Worker Pool started on stream: {} [group: {}] <<<", STREAM_KEY, CONSUMER_GROUP);
+        info!(
+            ">>> Redis Streams Worker Pool started on stream: {} [group: {}] <<<",
+            STREAM_KEY, CONSUMER_GROUP
+        );
 
         loop {
             // Read next batch of messages from consumer group
@@ -266,7 +278,10 @@ fn spawn_stream_worker(
                         let alert: SosAlert = match serde_json::from_str(&payload_str) {
                             Ok(a) => a,
                             Err(_) => SosAlert {
-                                alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+                                alert_id: format!(
+                                    "SOS-{}",
+                                    Uuid::new_v4().to_string()[..8].to_uppercase()
+                                ),
                                 raw_text: payload_str,
                                 timestamp: Utc::now(),
                                 source_channel: Some("stream_fallback".to_string()),
@@ -297,7 +312,9 @@ fn spawn_stream_worker(
     });
 }
 
-async fn get_shelters(State(state): State<AppState>) -> Result<Json<Vec<ShelterWithLocation>>, StatusCode> {
+async fn get_shelters(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ShelterWithLocation>>, StatusCode> {
     state
         .state_manager
         .get_shelters_with_locations()
@@ -309,7 +326,9 @@ async fn get_shelters(State(state): State<AppState>) -> Result<Json<Vec<ShelterW
         })
 }
 
-async fn reset_shelters(State(state): State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
+async fn reset_shelters(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
     state
         .state_manager
         .seed_aluva_shelters()
@@ -327,7 +346,11 @@ async fn reset_shelters(State(state): State<AppState>) -> Result<Json<serde_json
 }
 
 async fn get_hazards(State(state): State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
-    match state.state_manager.get_active_hazards("aluva-periyar-pilot").await {
+    match state
+        .state_manager
+        .get_active_hazards("aluva-periyar-pilot")
+        .await
+    {
         Ok(hazards) => {
             let features: Vec<serde_json::Value> = hazards
                 .into_iter()
@@ -391,8 +414,14 @@ async fn apply_hazard(
     }
 }
 
-async fn clear_hazards(State(state): State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
-    match state.state_manager.clear_operational_hazards("aluva-periyar-pilot").await {
+async fn clear_hazards(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state
+        .state_manager
+        .clear_operational_hazards("aluva-periyar-pilot")
+        .await
+    {
         Ok(cleared) => Ok(Json(json!({
             "status": "ok",
             "cleared_segments": cleared
@@ -412,7 +441,9 @@ async fn handle_dispatch(
         alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
         raw_text: req.raw_text,
         timestamp: Utc::now(),
-        source_channel: req.source_channel.or_else(|| Some("web_dispatcher_api".to_string())),
+        source_channel: req
+            .source_channel
+            .or_else(|| Some("web_dispatcher_api".to_string())),
     };
 
     let final_state = state.orchestrator.process_alert(alert).await;
@@ -510,7 +541,7 @@ async fn build_dispatch_response(
                         "type": "victim",
                         "junction_id": jid,
                         "headcount": triage.headcount,
-                        "needed_asset": format!("{:?}", triage.required_asset)
+                        "needed_asset": triage.required_asset.as_ref().map(ToString::to_string)
                     }
                 }));
             }
@@ -522,13 +553,16 @@ async fn build_dispatch_response(
         "features": features
     });
 
-    let assigned_shelter = final_state.assigned_shelter.as_ref().map(|s| ShelterSummary {
-        id: s.id.clone(),
-        name: s.name.clone(),
-        junction_id: s.junction_id.clone(),
-    });
+    let assigned_shelter = final_state
+        .assigned_shelter
+        .as_ref()
+        .map(|s| ShelterSummary {
+            id: s.id.clone(),
+            name: s.name.clone(),
+            junction_id: s.junction_id.clone(),
+        });
 
-    let headcount = final_state.triage.as_ref().map(|t| t.headcount).unwrap_or(0);
+    let headcount = final_state.triage.as_ref().and_then(|t| t.headcount);
     let victim_junction = final_state
         .triage
         .as_ref()
@@ -547,11 +581,16 @@ async fn build_dispatch_response(
         assigned_shelter,
         assigned_asset: final_state.assigned_asset.clone(),
         headcount,
+        triage: final_state.triage.clone(),
         distance_km: final_state.total_distance_km.unwrap_or(0.0),
         travel_time_s: final_state.total_travel_time_s.unwrap_or(0.0),
         is_detour,
         detour_reason: final_state.detour_reason.clone(),
-        segment_count: final_state.segment_path.as_ref().map(|p| p.len()).unwrap_or(0),
+        segment_count: final_state
+            .segment_path
+            .as_ref()
+            .map(|p| p.len())
+            .unwrap_or(0),
         tactical_brief: brief_text,
         geojson,
         errors: final_state.errors.clone(),

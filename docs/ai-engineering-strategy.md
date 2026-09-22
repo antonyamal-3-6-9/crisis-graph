@@ -1,7 +1,7 @@
 # CrisisGraph AI engineering strategy
 
-Status: Proposed architecture decision
-Date: 2026-09-13
+Status: Architecture decision; V3 extraction integration in progress
+Date: 2026-09-22
 
 ## Decision
 
@@ -48,11 +48,25 @@ therefore a valid hypothesis test for ambiguity handling, multilingual
 extraction, and unsupported-fact reduction. It is not a commitment to deploy a
 fine-tuned checkpoint.
 
-The experiment must have a stop condition. Reject the adapter if it does not
+The experiment had a stop condition. Reject an adapter if it does not
 materially improve review recall and unsupported-fact rate without regressing
 schema validity or clear-case accuracy. The reviewed 240-record training pilot
 exists to test whether a learning signal is present before spending time and
 compute on a much larger corpus.
+
+Three adapter iterations were evaluated on the same exposed 120-case regression
+suite. V3 is the strongest aggregate candidate: 94.0% critical-field accuracy,
+98/120 exact matches, 60/68 raw and guarded review recall, and 17/120 cases with
+unsupported facts. It also regresses from V1's 20/20 to 18/20 exact matches on
+clear cases, so it did not pass every predeclared gate and must not be presented
+as production-approved or as proof of generalization.
+
+The practical decision is to stop synthetic scaling for now, integrate V3 as an
+experimental candidate extractor, and validate the complete safety boundary.
+This is more informative than creating 1,000 synthetic examples merely to reach
+a conventional-looking sample count. A later training cycle requires a defined
+error hypothesis, additional independently reviewed data, and a new blind
+holdout.
 
 See `ml/reports/qwen3-4b-eval-v2.0.0-baseline.md` and
 `ml/data/triage-sft-v1-review-guide.md` for the measured baseline and dataset
@@ -191,8 +205,9 @@ unrestricted model with authority over the specialists or operational stores.
 
 ## Implementation sequence
 
-1. Complete the Qwen3-4B fine-tuning pilot and make a measured keep/reject
-   decision.
+1. Complete the V3 runtime integration and two-case end-to-end gate: one
+   complete request must route and verify; one incomplete request must escalate
+   before allocation or routing.
 2. Finish and test the normal event-driven incident workflow, including stale
    evidence, concurrent reservations, and fail-closed escalation.
 3. Define typed escalation reasons and the `ContingencyProposal` contract.

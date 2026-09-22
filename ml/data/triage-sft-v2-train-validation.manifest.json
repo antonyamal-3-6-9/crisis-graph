@@ -1,0 +1,296 @@
+{
+  "dataset": "CrisisGraph SFT V2 train and validation candidates",
+  "candidate_revision": 2,
+  "catalog_sha256": "5c9acb518417aabb65b0733e54962057ca3072c3556728c20066bef3ab71a946",
+  "generator_sha256": "85fcef36dd880793e8377c343dad38f8462a7eb0a07905d2c85834dd95323906",
+  "provenance": "synthetic authored templates with repeated slot variants",
+  "generation_uses_benchmark_records": false,
+  "references_used_for_overlap_checks_only": true,
+  "reference_sha256": {
+    "triage-eval-v2.0.0.jsonl": "08f6ab7d2513583599db4288fbf894de654dbc1e03251506d920410ad5ff58d4",
+    "triage-sft-v1-dev-candidates.jsonl": "056af8e6ed2523e90b17b397d01b2569e3b257c8e7393fe387ed8e1f517fa755",
+    "triage-sft-v1-train-candidates.jsonl": "2849a1e6585e70350aa35c46b9986b3893998fccb7368f0f4447bfc76b63b02f",
+    "triage-sft-v1-validation-candidates.jsonl": "d2cdf4929c2496223a9c27cb4fe4304cb333365ae0f9a47815c1410a8041e963",
+    "triage-sft-v2-dev-review-batch-01.jsonl": "2d2879533501dba749e9efbee78eed3c938191a9d0321d74cb10a64236444031",
+    "triage-sft-v2-dev-review-batch-02.jsonl": "00a2f4fbf609b7256ba44f93063cb0dabba429e728f538d03c165c53b72c3345"
+  },
+  "training_ready": false,
+  "exported": true,
+  "export_manifest": "triage-sft-v2-export-manifest.json",
+  "pilot_export_policy": "pilot-first-pass",
+  "independent_review_complete": false,
+  "files": {
+    "train": {
+      "path": "triage-sft-v2-train-candidates.jsonl",
+      "sha256": "00b408b048b3e99fdb8ab212b0c2dcff15ac5bec5bc5b846321633ea7f104dfe",
+      "records": 240,
+      "language_counts": {
+        "en": 144,
+        "ml": 48,
+        "manglish": 48
+      },
+      "semantic_families": 16,
+      "category_counts": {
+        "clear": 30,
+        "contradictory_count": 30,
+        "contradictory_location": 15,
+        "contradictory_asset": 30,
+        "uncertain_count": 15,
+        "missing_asset": 15,
+        "missing_count": 15,
+        "missing_location": 15,
+        "hazard_complete": 15,
+        "hazard_unanchored_road": 15,
+        "adversarial": 15,
+        "adversarial_missing_count": 15,
+        "irrelevant": 15
+      },
+      "reviewer_status_counts": {
+        "first_pass_reviewed": 240
+      }
+    },
+    "validation": {
+      "path": "triage-sft-v2-validation-candidates.jsonl",
+      "sha256": "0e767b4c72266a42002c4ab62b67dfccb9a5e4a18b6eef19880f2518401e8cf2",
+      "records": 48,
+      "language_counts": {
+        "en": 24,
+        "ml": 12,
+        "manglish": 12
+      },
+      "semantic_families": 12,
+      "category_counts": {
+        "clear": 4,
+        "contradictory_count": 4,
+        "contradictory_location": 4,
+        "contradictory_asset": 4,
+        "uncertain_count": 4,
+        "missing_asset": 4,
+        "missing_count": 4,
+        "missing_location": 4,
+        "hazard_complete": 4,
+        "hazard_missing_duration": 4,
+        "adversarial": 4,
+        "irrelevant": 4
+      },
+      "reviewer_status_counts": {
+        "first_pass_reviewed": 48
+      }
+    }
+  },
+  "limitations": [
+    "240 training records expand 16 families; they are not 240 independent scenarios",
+    "48 validation records expand 12 separate families; translations and variants are correlated",
+    "No automated check proves semantic independence or Malayalam/Manglish fluency",
+    "New reviewed blind holdout still required for final generalization claims"
+  ],
+  "review_history": [
+    {
+      "candidate_revision": 1,
+      "generator_sha256": "0bfd1e85b755778fb7360d875ce97f1cf5266b5bb8e8aba98e96ea991b162e0f",
+      "catalog_sha256": "5c9acb518417aabb65b0733e54962057ca3072c3556728c20066bef3ab71a946",
+      "files": {
+        "train": {
+          "path": "triage-sft-v2-train-candidates.jsonl",
+          "sha256": "48cd4e66cc9fd3b8ae763b0a5bf47aafb7ad983626144fd68aeff35c83cba600",
+          "records": 240,
+          "language_counts": {
+            "en": 144,
+            "ml": 48,
+            "manglish": 48
+          },
+          "semantic_families": 16,
+          "category_counts": {
+            "clear": 30,
+            "contradictory_count": 30,
+            "contradictory_location": 15,
+            "contradictory_asset": 30,
+            "uncertain_count": 15,
+            "missing_asset": 15,
+            "missing_count": 15,
+            "missing_location": 15,
+            "hazard_complete": 15,
+            "hazard_unanchored_road": 15,
+            "adversarial": 15,
+            "adversarial_missing_count": 15,
+            "irrelevant": 15
+          },
+          "reviewer_status_counts": {
+            "pending_manual_review": 240
+          }
+        },
+        "validation": {
+          "path": "triage-sft-v2-validation-candidates.jsonl",
+          "sha256": "8fc26002beb9cb44d80b43c4b1424533e59e23810bb9c9eec39f928d11fb7292",
+          "records": 48,
+          "language_counts": {
+            "en": 24,
+            "ml": 12,
+            "manglish": 12
+          },
+          "semantic_families": 12,
+          "category_counts": {
+            "clear": 4,
+            "contradictory_count": 4,
+            "contradictory_location": 4,
+            "contradictory_asset": 4,
+            "uncertain_count": 4,
+            "missing_asset": 4,
+            "missing_count": 4,
+            "missing_location": 4,
+            "hazard_complete": 4,
+            "hazard_missing_duration": 4,
+            "adversarial": 4,
+            "irrelevant": 4
+          },
+          "reviewer_status_counts": {
+            "pending_manual_review": 48
+          }
+        }
+      }
+    },
+    {
+      "candidate_revision": 2,
+      "review_type": "AI-assisted first pass; exact mechanical correction closure by coding assistant",
+      "independent_semantic_review": false,
+      "targets_changed": false,
+      "original_verdicts": {
+        "train": {
+          "first_pass_reviewed": 218,
+          "needs_revision": 22
+        },
+        "validation": {
+          "first_pass_reviewed": 47,
+          "needs_revision": 1
+        }
+      },
+      "corrections": [
+        {
+          "id": "sft-v2-train-en-two_occupant_lists_one_vehicle-01",
+          "before": "a helicopter is requested at Bamboo Reading Room. Two lists both claim to cover everyone currently waiting: list A totals 24, list B totals 28. Both are marked current.",
+          "after": "A helicopter is requested at Bamboo Reading Room. Two lists both claim to cover everyone currently waiting: list A totals 24, list B totals 28. Both are marked current."
+        },
+        {
+          "id": "sft-v2-train-en-two_occupant_lists_one_vehicle-02",
+          "before": "an ambulance is requested at Lotus Meeting Hall. Two lists both claim to cover everyone currently waiting: list A totals 27, list B totals 31. Both are marked current.",
+          "after": "An ambulance is requested at Lotus Meeting Hall. Two lists both claim to cover everyone currently waiting: list A totals 27, list B totals 31. Both are marked current."
+        },
+        {
+          "id": "sft-v2-train-en-two_occupant_lists_one_vehicle-03",
+          "before": "a rescue boat is requested at Palm Crafts Centre. Two lists both claim to cover everyone currently waiting: list A totals 30, list B totals 34. Both are marked current.",
+          "after": "A rescue boat is requested at Palm Crafts Centre. Two lists both claim to cover everyone currently waiting: list A totals 30, list B totals 34. Both are marked current."
+        },
+        {
+          "id": "sft-v2-train-en-two_occupant_lists_one_vehicle-04",
+          "before": "an evacuation truck is requested at Teak Sports Hall. Two lists both claim to cover everyone currently waiting: list A totals 33, list B totals 37. Both are marked current.",
+          "after": "An evacuation truck is requested at Teak Sports Hall. Two lists both claim to cover everyone currently waiting: list A totals 33, list B totals 37. Both are marked current."
+        },
+        {
+          "id": "sft-v2-train-en-two_occupant_lists_one_vehicle-05",
+          "before": "a helicopter is requested at Orchid Guest House. Two lists both claim to cover everyone currently waiting: list A totals 36, list B totals 40. Both are marked current.",
+          "after": "A helicopter is requested at Orchid Guest House. Two lists both claim to cover everyone currently waiting: list A totals 36, list B totals 40. Both are marked current."
+        },
+        {
+          "id": "sft-v2-train-en-two_occupant_lists_one_vehicle-06",
+          "before": "an ambulance is requested at Pine Study Centre. Two lists both claim to cover everyone currently waiting: list A totals 39, list B totals 43. Both are marked current.",
+          "after": "An ambulance is requested at Pine Study Centre. Two lists both claim to cover everyone currently waiting: list A totals 39, list B totals 43. Both are marked current."
+        },
+        {
+          "id": "sft-v2-train-en-two_occupant_lists_one_vehicle-07",
+          "before": "a rescue boat is requested at Jasmine Rest House. Two lists both claim to cover everyone currently waiting: list A totals 42, list B totals 46. Both are marked current.",
+          "after": "A rescue boat is requested at Jasmine Rest House. Two lists both claim to cover everyone currently waiting: list A totals 42, list B totals 46. Both are marked current."
+        },
+        {
+          "id": "sft-v2-train-en-two_occupant_lists_one_vehicle-08",
+          "before": "an evacuation truck is requested at Coconut Youth Hall. Two lists both claim to cover everyone currently waiting: list A totals 45, list B totals 49. Both are marked current.",
+          "after": "An evacuation truck is requested at Coconut Youth Hall. Two lists both claim to cover everyone currently waiting: list A totals 45, list B totals 49. Both are marked current."
+        },
+        {
+          "id": "sft-v2-train-en-two_occupant_lists_one_vehicle-09",
+          "before": "a helicopter is requested at Fig Assembly Hall. Two lists both claim to cover everyone currently waiting: list A totals 48, list B totals 52. Both are marked current.",
+          "after": "A helicopter is requested at Fig Assembly Hall. Two lists both claim to cover everyone currently waiting: list A totals 48, list B totals 52. Both are marked current."
+        },
+        {
+          "id": "sft-v2-train-en-crowd_hidden_from_reporter-01",
+          "before": "a rescue boat is needed at Jasmine Rest House. People are waiting behind the compound wall, and I cannot see how many there are.",
+          "after": "A rescue boat is needed at Jasmine Rest House. People are waiting behind the compound wall, and I cannot see how many there are."
+        },
+        {
+          "id": "sft-v2-train-en-crowd_hidden_from_reporter-02",
+          "before": "an evacuation truck is needed at Coconut Youth Hall. People are waiting behind the compound wall, and I cannot see how many there are.",
+          "after": "An evacuation truck is needed at Coconut Youth Hall. People are waiting behind the compound wall, and I cannot see how many there are."
+        },
+        {
+          "id": "sft-v2-train-en-crowd_hidden_from_reporter-03",
+          "before": "a helicopter is needed at Fig Assembly Hall. People are waiting behind the compound wall, and I cannot see how many there are.",
+          "after": "A helicopter is needed at Fig Assembly Hall. People are waiting behind the compound wall, and I cannot see how many there are."
+        },
+        {
+          "id": "sft-v2-train-en-crowd_hidden_from_reporter-04",
+          "before": "an ambulance is needed at Larch Rest Hall. People are waiting behind the compound wall, and I cannot see how many there are.",
+          "after": "An ambulance is needed at Larch Rest Hall. People are waiting behind the compound wall, and I cannot see how many there are."
+        },
+        {
+          "id": "sft-v2-train-en-crowd_hidden_from_reporter-05",
+          "before": "a rescue boat is needed at Mango Workers Hostel. People are waiting behind the compound wall, and I cannot see how many there are.",
+          "after": "A rescue boat is needed at Mango Workers Hostel. People are waiting behind the compound wall, and I cannot see how many there are."
+        },
+        {
+          "id": "sft-v2-train-en-crowd_hidden_from_reporter-06",
+          "before": "an evacuation truck is needed at Rose Training Centre. People are waiting behind the compound wall, and I cannot see how many there are.",
+          "after": "An evacuation truck is needed at Rose Training Centre. People are waiting behind the compound wall, and I cannot see how many there are."
+        },
+        {
+          "id": "sft-v2-train-en-crowd_hidden_from_reporter-07",
+          "before": "a helicopter is needed at Bamboo Reading Room. People are waiting behind the compound wall, and I cannot see how many there are.",
+          "after": "A helicopter is needed at Bamboo Reading Room. People are waiting behind the compound wall, and I cannot see how many there are."
+        },
+        {
+          "id": "sft-v2-train-en-crowd_hidden_from_reporter-08",
+          "before": "an ambulance is needed at Lotus Meeting Hall. People are waiting behind the compound wall, and I cannot see how many there are.",
+          "after": "An ambulance is needed at Lotus Meeting Hall. People are waiting behind the compound wall, and I cannot see how many there are."
+        },
+        {
+          "id": "sft-v2-train-en-crowd_hidden_from_reporter-09",
+          "before": "a rescue boat is needed at Palm Crafts Centre. People are waiting behind the compound wall, and I cannot see how many there are.",
+          "after": "A rescue boat is needed at Palm Crafts Centre. People are waiting behind the compound wall, and I cannot see how many there are."
+        },
+        {
+          "id": "sft-v2-train-en-named_road_debris_and_waiting_group-01",
+          "before": "Larch Link Road has been blocked by debris for 1 hours. Separately, 80 people waiting at Fig Assembly Hall request a helicopter.",
+          "after": "Larch Link Road has been blocked by debris for 1 hour. Separately, 80 people waiting at Fig Assembly Hall request a helicopter."
+        },
+        {
+          "id": "sft-v2-train-en-named_road_debris_and_waiting_group-08",
+          "before": "Larch Link Road has been blocked by debris for 1 hours. Separately, 18 people waiting at Teak Sports Hall request an evacuation truck.",
+          "after": "Larch Link Road has been blocked by debris for 1 hour. Separately, 18 people waiting at Teak Sports Hall request an evacuation truck."
+        },
+        {
+          "id": "sft-v2-train-en-anonymous_caller_reports_unnamed_road-01",
+          "before": "A caller reports that 'that road' has been flooded for 1 hours, without naming any place or road. My separate pickup request is for 4 people at Larch Rest Hall, using an ambulance.",
+          "after": "A caller reports that 'that road' has been flooded for 1 hour, without naming any place or road. My separate pickup request is for 4 people at Larch Rest Hall, using an ambulance."
+        },
+        {
+          "id": "sft-v2-train-en-anonymous_caller_reports_unnamed_road-08",
+          "before": "A caller reports that 'that road' has been flooded for 1 hours, without naming any place or road. My separate pickup request is for 25 people at Orchid Guest House, using a helicopter.",
+          "after": "A caller reports that 'that road' has been flooded for 1 hour, without naming any place or road. My separate pickup request is for 25 people at Orchid Guest House, using a helicopter."
+        },
+        {
+          "id": "sft-v2-validation-en-explicit_hazard_bulletin_and_pickup-01",
+          "before": "Road bulletin: Silver Cross Road, debris blockage lasting 1 hours. Pickup bulletin: Ochre Meeting Room, 59 people asking for an ambulance.",
+          "after": "Road bulletin: Silver Cross Road, debris blockage lasting 1 hour. Pickup bulletin: Ochre Meeting Room, 59 people asking for an ambulance."
+        }
+      ],
+      "reports": [
+        {
+          "path": "../reports/triage-sft-v2-train-first-pass-review-report.md",
+          "sha256": "837d7becbac61cf1649405277c5fd928aa346e09c45533840a8ce7dc7f4ad874"
+        },
+        {
+          "path": "../reports/triage-sft-v2-validation-first-pass-review-report.md",
+          "sha256": "bb8b91301b2412b50c7333dd957d732f7007f304ef0dec8ab87440001162c431"
+        }
+      ]
+    }
+  ]
+}

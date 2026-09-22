@@ -60,6 +60,21 @@ extraction.
 - `needs_human_review`: whether deterministic dispatch processing must stop
   for clarification or verification.
 
+## Synthetic SFT confidence labels
+
+For the V1, V2, and V3 synthetic SFT datasets, use this fixed mapping:
+
+- `0.95`: complete, explicit dispatch facts with `needs_human_review=false`.
+- `0.55`: a relevant emergency report requiring review because critical facts
+  are missing, uncertain, contradictory, or incomplete.
+- `0.10`: an irrelevant message containing no emergency dispatch facts;
+  `needs_human_review=true`.
+
+These are annotation-policy labels, not calibrated probabilities or evidence
+that a route or incident is safe. A parser instruction does not lower confidence
+when the genuine emergency facts are otherwise complete and unambiguous.
+This documents the existing SFT convention; it does not relabel frozen evaluation.
+
 ## Review process
 
 Use `pending_manual_review` before semantic review, `first_pass_reviewed` after
