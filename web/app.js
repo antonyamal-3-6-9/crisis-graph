@@ -1,422 +1,338 @@
-// CrisisGraph Emergency Dispatch Web Console
+"use strict";
 
-const ALUVA_CENTRE = [10.10816, 76.35651];
-let map;
-let sheltersLayer;
-let hazardsLayer;
-let routeLayer;
-let currentBriefText = "";
+const API = "/api/v1";
+const ALUVA = [10.10816, 76.35651];
+const state = { incidents: [], shelters: [], hazards: null, reservations: [], graph: null, maps: {}, layers: {}, selectedIncident: null };
 
-document.addEventListener("DOMContentLoaded", () => {
-  initMap();
-  loadShelters();
-  loadHazards();
+const pageMeta = {
+  "/": ["Emergency operations", "Operational overview"],
+  "/dispatch": ["Decision-support laboratory", "SOS dispatch demonstration"],
+  "/incidents": ["Persisted control plane", "Incident registry"],
+  "/hazards": ["Dynamic map validity", "Operational hazard overlay"],
+  "/resources": ["Concurrent allocation", "Relief hubs and reservations"],
+};
+
+const scenarios = {
+  verified: "Aluva Railway Station has 3 injured passengers. Send an ambulance immediately.",
+  malayalam: "ആലുവ മണപ്പുറം ക്ഷേത്രപ്പടികളിൽ 12 പേർ വെള്ളത്തിൽ കുടുങ്ങിയിരിക്കുന്നു. രക്ഷാബോട്ട് വേണം.",
+  ambiguous: "Bank Junction aduthu help venam. Aalkkar undu, pakshe exact countum vehicleum confirm alla.",
+  truck: "Send an evacuation truck to Aluva Railway Station for 10 stranded passengers.",
+};
+
+document.addEventListener("DOMContentLoaded", async () => {
+  configurePage();
+  bindEvents();
+  startClock();
+  initializeMaps();
   initEventStream();
+  await Promise.allSettled([loadHealth(), loadGraphSummary(), loadShelters(), loadHazards(), loadIncidents(), loadReservations()]);
+  invalidateVisibleMaps();
 });
 
-// 1. Initialize Map (Locked to Aluva Operational Pilot Zone)
-function initMap() {
-  // Bounding box for Aluva–Periyar Disaster Response Zone
-  const southWest = L.latLng(10.000, 76.240);
-  const northEast = L.latLng(10.220, 76.470);
-  const aluvaBounds = L.latLngBounds(southWest, northEast);
-
-  map = L.map("map", {
-    zoomControl: true,
-    minZoom: 12,             // Prevents zooming out to see state/world
-    maxZoom: 18,             // Street-level inspection
-    maxBounds: aluvaBounds,  // Constrains viewport to Aluva disaster sector
-    maxBoundsViscosity: 1.0, // Hard lock: completely blocks panning outside bounds
-  }).setView(ALUVA_CENTRE, 13);
-
-  // Layer 1: Tactical Dark (Watermark-free high-contrast OSM)
-  const tacticalDark = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    className: "tactical-tiles",
-    maxZoom: 19,
-  });
-
-  // Layer 2: Clean Standard OpenStreetMap
-  const standardOsm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    maxZoom: 19,
-  });
-
-  // Layer 3: High-Resolution Satellite (Esri World Imagery)
-  const satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-    attribution: 'Tiles &copy; Esri, Earthstar Geographics',
-    maxZoom: 18,
-  });
-
-  // Add default layer
-  tacticalDark.addTo(map);
-
-  // Layer switcher control
-  const baseMaps = {
-    "Tactical Dark": tacticalDark,
-    "Satellite Imagery": satellite,
-    "Clean Street Map": standardOsm,
-  };
-  L.control.layers(baseMaps, null, { position: "topright" }).addTo(map);
-
-  // 10 km Pilot Boundary Ring
-  L.circle(ALUVA_CENTRE, {
-    radius: 10000,
-    color: "#3b82f6",
-    weight: 1.5,
-    opacity: 0.6,
-    fillColor: "#3b82f6",
-    fillOpacity: 0.02,
-    dashArray: "6, 8",
-  }).addTo(map);
-
-  // Layer groups
-  sheltersLayer = L.layerGroup().addTo(map);
-  hazardsLayer = L.layerGroup().addTo(map);
-  routeLayer = L.layerGroup().addTo(map);
+function configurePage() {
+  const path = pageMeta[location.pathname] ? location.pathname : "/";
+  document.querySelectorAll(".view").forEach((el) => el.classList.toggle("active", el.dataset.view === path));
+  document.querySelectorAll(".nav a").forEach((el) => el.classList.toggle("active", el.dataset.route === path));
+  document.getElementById("page-eyebrow").textContent = pageMeta[path][0];
+  document.getElementById("page-title").textContent = pageMeta[path][1];
 }
 
-// 2. Fetch and render shelters
+function bindEvents() {
+  document.getElementById("dispatch-form")?.addEventListener("submit", submitDispatch);
+  document.querySelectorAll("[data-scenario]").forEach((button) => button.addEventListener("click", () => {
+    document.getElementById("sos-text").value = scenarios[button.dataset.scenario];
+    document.getElementById("dispatch-form").requestSubmit();
+  }));
+  document.getElementById("incident-search")?.addEventListener("input", renderIncidentList);
+  document.getElementById("incident-filter")?.addEventListener("change", renderIncidentList);
+  document.getElementById("refresh-incidents")?.addEventListener("click", loadIncidents);
+  document.getElementById("simulate-flood")?.addEventListener("click", simulateFlood);
+  document.getElementById("clear-hazards")?.addEventListener("click", clearHazards);
+  document.getElementById("reset-resources")?.addEventListener("click", resetResources);
+}
+
+function startClock() {
+  const update = () => document.getElementById("clock").textContent = `${new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date())} IST`;
+  update();
+  setInterval(update, 1000);
+}
+
+async function fetchJson(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json();
+}
+
+async function loadHealth() {
+  try {
+    await fetchJson(`${API}/health`);
+    setConnection("api", true, "Engine API online");
+  } catch (error) {
+    setConnection("api", false, "Engine API unavailable");
+  }
+}
+
+function setConnection(kind, online, label) {
+  const dot = document.getElementById(`${kind}-dot`);
+  const text = document.getElementById(`${kind}-label`);
+  if (dot) dot.className = online ? "online" : "warn";
+  if (text) text.textContent = label;
+}
+
+async function loadGraphSummary() {
+  try {
+    state.graph = await fetchJson(`${API}/admin/graph/summary`);
+    setText("metric-junctions", number(state.graph.junctions));
+    setText("metric-segments", number(state.graph.directed_segments));
+    setText("metric-hazards", number(state.graph.active_hazards));
+    setText("metric-reservations", number(state.graph.active_reservations));
+  } catch (error) {
+    console.error("Graph summary failed", error);
+  }
+}
+
 async function loadShelters() {
   try {
-    const res = await fetch("/api/v1/shelters");
-    if (!res.ok) throw new Error("Failed to load shelters");
-    const shelters = await res.json();
-
-    sheltersLayer.clearLayers();
-    const container = document.getElementById("shelters-list");
-    container.innerHTML = "";
-
-    shelters.forEach((s) => {
-      // Map Marker
-      const iconHtml = getShelterIcon(s.id);
-      const customIcon = L.divIcon({
-        className: "custom-shelter-icon",
-        html: `<div style="background:#1e293b; border:2px solid #3b82f6; border-radius:50%; width:32px; height:32px; display:flex; align-items:center; justify-content:center; box-shadow:0 0 10px rgba(59,130,246,0.6); font-size:16px;">${iconHtml}</div>`,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
-      });
-
-      const marker = L.marker([s.lat, s.lon], { icon: customIcon }).addTo(sheltersLayer);
-      marker.bindPopup(`
-        <div style="font-family:inherit; color:#0f172a; padding:4px;">
-          <strong style="font-size:13px;">${s.name}</strong><br/>
-          <small style="color:#64748b;">ID: ${s.id}</small>
-          <hr style="margin:6px 0; border:0; border-top:1px solid #e2e8f0;"/>
-          <div>Occupancy: <strong>${s.current_occupancy} / ${s.capacity}</strong></div>
-          <div style="margin-top:4px; font-size:11px; color:#2563eb;">
-            🚑 Ambulances: ${s.ambulances_available} | 🚚 Trucks: ${s.trucks_available} | 🚤 Boats: ${s.boats_available}
-          </div>
-        </div>
-      `);
-
-      // Sidebar Card
-      const card = document.createElement("div");
-      card.className = "shelter-card";
-      card.innerHTML = `
-        <div class="shelter-header">
-          <span class="shelter-name">${s.name}</span>
-          <span class="shelter-occ">${s.current_occupancy}/${s.capacity}</span>
-        </div>
-        <div class="shelter-assets">
-          ${s.ambulances_available > 0 ? `<span class="asset-badge">🚑 ${s.ambulances_available} Amb</span>` : ""}
-          ${s.trucks_available > 0 ? `<span class="asset-badge">🚚 ${s.trucks_available} Trk</span>` : ""}
-          ${s.boats_available > 0 ? `<span class="asset-badge">🚤 ${s.boats_available} Boat</span>` : ""}
-        </div>
-      `;
-      container.appendChild(card);
-    });
-  } catch (err) {
-    console.error("Error loading shelters:", err);
+    state.shelters = await fetchJson(`${API}/shelters`);
+    renderSheltersOnMaps();
+    renderResourceCards();
+  } catch (error) {
+    renderFailure("resource-cards", "Relief hubs could not be loaded.");
   }
 }
 
-function getShelterIcon(id) {
-  if (id.includes("HOSPITAL")) return "🏥";
-  if (id.includes("MANAPPURAM")) return "🚤";
-  if (id.includes("UC_COLLEGE")) return "🏫";
-  return "🏛️";
-}
-
-// 3. Fetch and render active hazards
 async function loadHazards() {
   try {
-    const res = await fetch("/api/v1/hazards");
-    if (!res.ok) throw new Error("Failed to load hazards");
-    const geojson = await res.json();
-
-    hazardsLayer.clearLayers();
-    const count = geojson.features ? geojson.features.length : 0;
-    document.getElementById("hazard-status").innerText = `${count} Active Road Closure(s)`;
-
-    if (count > 0) {
-      L.geoJSON(geojson, {
-        style: {
-          color: "#ef4444",
-          weight: 6,
-          opacity: 0.85,
-          dashArray: "4, 6",
-        },
-        onEachFeature: (feature, layer) => {
-          layer.bindPopup(`
-            <div style="color:#0f172a; padding:4px;">
-              <strong style="color:#dc2626;">HAZARD: ${feature.properties.status}</strong><br/>
-              Road: ${feature.properties.road_name}<br/>
-              <small>Segment: ${feature.properties.segment_id}</small>
-            </div>
-          `);
-        },
-      }).addTo(hazardsLayer);
-    }
-  } catch (err) {
-    console.error("Error loading hazards:", err);
+    state.hazards = await fetchJson(`${API}/hazards`);
+    const count = state.hazards.features?.length || 0;
+    setText("hazard-count", `${count} active`);
+    setText("metric-hazards", number(count));
+    renderHazardsOnMaps();
+    renderHazardList();
+  } catch (error) {
+    renderFailure("hazard-list", "Operational overlay could not be loaded.");
   }
 }
 
-// 4. Submit SOS Alert to Dispatch Engine
-async function submitDispatch(e) {
-  if (e) e.preventDefault();
-  const textInput = document.getElementById("sos-text");
-  const channelSelect = document.getElementById("channel-select");
-  const btn = document.getElementById("dispatch-btn");
-  const btnText = btn.querySelector(".btn-text");
-  const btnLoader = btn.querySelector(".btn-loader");
-
-  const raw_text = textInput.value.trim();
-  if (!raw_text) return;
-
-  btn.disabled = true;
-  btnText.innerText = "RUNNING SOLVER & VERIFIER...";
-
+async function loadIncidents() {
   try {
-    const res = await fetch("/api/v1/dispatch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        raw_text,
-        source_channel: channelSelect.value,
-      }),
-    });
+    state.incidents = await fetchJson(`${API}/incidents?limit=100`);
+    const reviewCount = state.incidents.filter((item) => item.status === "REVIEW_REQUIRED").length;
+    setText("metric-review", number(reviewCount));
+    renderOverviewIncidents();
+    renderIncidentList();
+  } catch (error) {
+    renderFailure("overview-incidents", "Incident registry could not be loaded.");
+    renderFailure("incident-list", "Incident registry could not be loaded.");
+  }
+}
 
-    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-    const data = await res.json();
-    renderDispatchResult(data);
-    loadShelters(); // refresh occupancy counts
-  } catch (err) {
-    alert("Error processing dispatch: " + err.message);
+async function loadReservations() {
+  try {
+    state.reservations = await fetchJson(`${API}/resources/reservations?limit=100`);
+    renderReservations();
+  } catch (error) {
+    const table = document.getElementById("reservation-table");
+    if (table) table.innerHTML = '<tr><td colspan="7" class="muted-cell">Reservation ledger could not be loaded.</td></tr>';
+  }
+}
+
+function initializeMaps() {
+  if (!window.L) return;
+  ["overview-map", "dispatch-map", "hazard-map"].forEach((id) => {
+    if (!document.getElementById(id)) return;
+    const map = L.map(id, { minZoom: 12, maxZoom: 18, maxBounds: [[10.0, 76.24], [10.22, 76.47]], maxBoundsViscosity: 1 }).setView(ALUVA, 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+    L.circle(ALUVA, { radius: 10000, color: "#245c7c", weight: 1, opacity: .45, fillOpacity: .015, dashArray: "6 7" }).addTo(map);
+    state.maps[id] = map;
+    state.layers[id] = {
+      shelters: L.layerGroup().addTo(map),
+      hazards: L.layerGroup().addTo(map),
+      route: L.layerGroup().addTo(map),
+    };
+  });
+}
+
+function invalidateVisibleMaps() {
+  Object.values(state.maps).forEach((map) => setTimeout(() => map.invalidateSize(), 30));
+}
+
+function renderSheltersOnMaps() {
+  Object.values(state.layers).forEach(({ shelters }) => {
+    shelters.clearLayers();
+    state.shelters.forEach((hub) => {
+      const icon = L.divIcon({ className: "hub-marker", html: hub.id.includes("HOSPITAL") ? "✚" : hub.id.includes("MANAPPURAM") ? "≋" : "H", iconSize: [30, 30], iconAnchor: [15, 15] });
+      L.marker([hub.lat, hub.lon], { icon }).bindPopup(`<b>${escapeHtml(hub.name)}</b><br><small>${escapeHtml(hub.id)}</small><br>Occupancy ${hub.current_occupancy}/${hub.capacity}<br>Amb ${hub.ambulances_available} · Truck ${hub.trucks_available} · Boat ${hub.boats_available}`).addTo(shelters);
+    });
+  });
+}
+
+function renderHazardsOnMaps() {
+  Object.values(state.layers).forEach(({ hazards }) => {
+    hazards.clearLayers();
+    if (!state.hazards?.features?.length) return;
+    L.geoJSON(state.hazards, {
+      style: { color: "#b13e36", weight: 7, opacity: .9, dashArray: "4 6" },
+      onEachFeature: (feature, layer) => layer.bindPopup(`<b>${escapeHtml(feature.properties.status)}</b><br>${escapeHtml(feature.properties.road_name)}<br><small>${escapeHtml(feature.properties.segment_id)}</small>`),
+    }).addTo(hazards);
+  });
+}
+
+function renderHazardList() {
+  const target = document.getElementById("hazard-list");
+  if (!target) return;
+  const features = state.hazards?.features || [];
+  target.innerHTML = features.length ? features.map((feature) => `<div class="compact-row"><b>${escapeHtml(feature.properties.status)} · ${escapeHtml(feature.properties.road_name)}</b><small>${escapeHtml(feature.properties.segment_id)}</small></div>`).join("") : '<div class="empty-state"><h3>No active restrictions</h3><p>The operational overlay is clear.</p></div>';
+}
+
+function renderOverviewIncidents() {
+  const target = document.getElementById("overview-incidents");
+  if (!target) return;
+  const incidents = state.incidents.slice(0, 7);
+  target.innerHTML = incidents.length ? incidents.map((incident) => `<a class="feed-row" href="/incidents"><b>${escapeHtml(incident.incident_id)}</b>${statusBadge(incident.status)}<p>${escapeHtml(incident.original_sos.raw_text)}</p></a>`).join("") : '<div class="empty-state"><h3>No persisted incidents</h3><p>Use Dispatch Lab to begin the demonstration.</p></div>';
+}
+
+function renderIncidentList() {
+  const target = document.getElementById("incident-list");
+  if (!target) return;
+  const query = document.getElementById("incident-search")?.value.trim().toLowerCase() || "";
+  const filter = document.getElementById("incident-filter")?.value || "ALL";
+  const rows = state.incidents.filter((incident) => {
+    const triage = currentTriage(incident);
+    const haystack = `${incident.incident_id} ${incident.original_sos.raw_text} ${triage?.victim_location_raw || ""}`.toLowerCase();
+    return (filter === "ALL" || incident.status === filter) && (!query || haystack.includes(query));
+  });
+  target.innerHTML = rows.length ? rows.map((incident) => `<button class="incident-row ${state.selectedIncident === incident.incident_id ? "selected" : ""}" data-incident-id="${escapeHtml(incident.incident_id)}"><code>${escapeHtml(incident.incident_id)}</code>${statusBadge(incident.status)}<p>${escapeHtml(incident.original_sos.raw_text)}</p><small>v${incident.version} · ${relativeTime(incident.updated_at)}</small></button>`).join("") : '<div class="empty-state"><h3>No matching incidents</h3><p>Adjust the search or state filter.</p></div>';
+  target.querySelectorAll("[data-incident-id]").forEach((row) => row.addEventListener("click", () => selectIncident(row.dataset.incidentId)));
+}
+
+async function selectIncident(id) {
+  state.selectedIncident = id;
+  renderIncidentList();
+  const target = document.getElementById("incident-detail");
+  target.innerHTML = '<div class="skeleton">Loading incident evidence and audit history…</div>';
+  try {
+    const [incident, audit] = await Promise.all([fetchJson(`${API}/incidents/${encodeURIComponent(id)}`), fetchJson(`${API}/incidents/${encodeURIComponent(id)}/audit`)]);
+    const triage = currentTriage(incident);
+    const reasons = triage?.uncertainty_reasons || [];
+    target.innerHTML = `<div class="detail-title"><div><code>${escapeHtml(incident.incident_id)}</code><p>Version ${incident.version} · ${escapeHtml(incident.original_sos.source_channel || "unknown source")} · ${formatTime(incident.created_at)}</p></div>${statusBadge(incident.status)}</div>
+      <div class="raw-message">${escapeHtml(incident.original_sos.raw_text)}</div>
+      <div class="facts">
+        ${fact("Victim location", triage?.victim_location_raw)}${fact("Resolved junction", triage?.resolved_junction_id)}${fact("Headcount", triage?.headcount)}
+        ${fact("Requested asset", triage?.required_asset)}${fact("Confidence label", triage?.confidence_score)}${fact("Human review", triage?.needs_human_review == null ? null : triage.needs_human_review ? "Required" : "Not required")}
+      </div>
+      ${reasons.length ? `<div class="notice warning detail-notice"><b>Uncertainty</b><span>${reasons.map(escapeHtml).join(" · ")}</span></div>` : ""}
+      <div class="timeline"><h3>Immutable audit timeline</h3>${audit.length ? audit.map((event) => `<div class="timeline-row"><b>${escapeHtml(event.action)}</b><p>${escapeHtml(event.from_status)} → ${escapeHtml(event.to_status)} · ${escapeHtml(event.reason)}</p><small>v${event.previous_version} → v${event.new_version} · ${formatTime(event.occurred_at)} · ${escapeHtml(event.actor_id)}</small></div>`).join("") : '<p class="supporting">No audit events found.</p>'}</div>`;
+  } catch (error) {
+    target.innerHTML = '<div class="empty-state"><h3>Incident unavailable</h3><p>The persisted record could not be loaded.</p></div>';
+  }
+}
+
+async function submitDispatch(event) {
+  event.preventDefault();
+  const input = document.getElementById("sos-text");
+  const button = document.getElementById("dispatch-btn");
+  const rawText = input.value.trim();
+  if (!rawText) return;
+  button.disabled = true;
+  button.querySelector("span").textContent = "Running persisted safety pipeline…";
+  document.getElementById("dispatch-map-state").textContent = "Processing";
+  try {
+    const result = await fetchJson(`${API}/dispatch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ raw_text: rawText, source_channel: document.getElementById("channel-select").value }) });
+    renderDispatchResult(result);
+    await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations(), loadGraphSummary()]);
+  } catch (error) {
+    showToast("Dispatch failed", error.message, true);
+    document.getElementById("dispatch-result").innerHTML = `<div class="empty-state"><h3>Pipeline unavailable</h3><p>${escapeHtml(error.message)}</p></div>`;
   } finally {
-    btn.disabled = false;
-    btnText.innerText = "RUNNING NEURO-SYMBOLIC DISPATCH";
+    button.disabled = false;
+    button.querySelector("span").textContent = "Run triage, allocation and routing";
   }
 }
 
-// 5. Render Dispatch Result on Map & Overlay
-function renderDispatchResult(data) {
-  routeLayer.clearLayers();
-
-  const isVerified = data.status === "RoutedVerified";
-  const statusBadge = document.getElementById("brief-status-badge");
-  statusBadge.className = isVerified ? "badge verified" : "badge escalate";
-  statusBadge.innerText = isVerified ? "ROUTED & VERIFIED" : "ESCALATE TO DISPATCHER";
-
-  document.getElementById("brief-incident-id").innerText = data.alert_id;
-  document.getElementById("metric-dist").innerText = `${data.distance_km.toFixed(2)} km`;
-  document.getElementById("metric-time").innerText = data.travel_time_s > 0 ? `${(data.travel_time_s / 60).toFixed(1)} min` : "N/A";
-  document.getElementById("metric-asset").innerText = data.assigned_asset || "None";
-  document.getElementById("metric-shelter").innerText = data.assigned_shelter ? data.assigned_shelter.name.split(" ")[0] : "None";
-
-  currentBriefText = data.tactical_brief;
-  document.getElementById("brief-content").innerText = data.tactical_brief;
-  document.getElementById("brief-panel").style.display = "flex";
-
-  // Render GeoJSON Route & Pins
-  if (data.geojson && data.geojson.features && data.geojson.features.length > 0) {
-    let bounds = L.latLngBounds();
-
-    data.geojson.features.forEach((feat) => {
-      if (feat.geometry.type === "LineString") {
-        // Reverse coordinates from GeoJSON [lon, lat] to Leaflet [lat, lon]
-        const latlngs = feat.geometry.coordinates.map((c) => [c[1], c[0]]);
-        const polyline = L.polyline(latlngs, {
-          color: isVerified ? "#10b981" : "#f59e0b",
-          weight: 6,
-          opacity: 0.9,
-          lineCap: "round",
-          lineJoin: "round",
-        }).addTo(routeLayer);
-        bounds.extend(polyline.getBounds());
-      } else if (feat.geometry.type === "Point") {
-        const lat = feat.geometry.coordinates[1];
-        const lon = feat.geometry.coordinates[0];
-        bounds.extend([lat, lon]);
-
-        const isVictim = feat.properties.type === "victim";
-        const marker = L.circleMarker([lat, lon], {
-          radius: isVictim ? 9 : 8,
-          fillColor: isVictim ? "#ef4444" : "#3b82f6",
-          color: "#fff",
-          weight: 2,
-          opacity: 1,
-          fillOpacity: 0.9,
-        }).addTo(routeLayer);
-
-        marker.bindPopup(`
-          <div style="color:#0f172a;">
-            <strong>${isVictim ? "🚨 VICTIM LOCATION" : "🏥 ORIGIN FACILITY"}</strong><br/>
-            ${isVictim ? `Headcount: ${feat.properties.headcount} | Asset: ${feat.properties.needed_asset}` : `Asset: ${feat.properties.asset || "N/A"}`}
-          </div>
-        `);
-      }
-    });
-
-    if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [60, 60] });
-    }
-  }
+function renderDispatchResult(data, fromStream = false) {
+  const verified = data.status === "RoutedVerified" && data.incident_status === "ROUTE_VERIFIED";
+  const triage = data.triage || {};
+  const target = document.getElementById("dispatch-result");
+  if (target) target.innerHTML = `<div class="result-head"><div><p class="kicker">${verified ? "Certified deterministic result" : "Fail-closed outcome"}</p><h2>${verified ? "Route verified for dispatch proposal" : "Human escalation required"}</h2><code>${escapeHtml(data.alert_id)} · incident v${data.incident_version}</code></div>${statusBadge(data.incident_status)}</div>
+    <div class="result-metrics"><div><span>Distance</span><b>${data.distance_km ? data.distance_km.toFixed(2) + " km" : "Not computed"}</b></div><div><span>Travel time</span><b>${data.travel_time_s ? (data.travel_time_s / 60).toFixed(1) + " min" : "Not computed"}</b></div><div><span>Asset</span><b>${escapeHtml(data.assigned_asset || "Unassigned")}</b></div><div><span>Segments verified</span><b>${number(data.segment_count || 0)}</b></div></div>
+    <div class="evidence-grid"><div class="evidence"><h3>AI candidate extraction</h3><dl><dt>Location</dt><dd>${value(triage.victim_location_raw)}</dd><dt>Headcount</dt><dd>${value(triage.headcount)}</dd><dt>Requested asset</dt><dd>${value(triage.required_asset)}</dd><dt>Confidence</dt><dd>${value(triage.confidence_score)}</dd><dt>Review flag</dt><dd>${data.review_required ? "Required" : "Clear"}</dd></dl></div><div class="evidence"><h3>Deterministic controls</h3><dl><dt>Persistence</dt><dd>${data.control_plane_persisted ? "Neo4j committed" : "Failed"}</dd><dt>Duplicate</dt><dd>${data.duplicate_suppressed ? "Suppressed" : "No"}</dd><dt>Junction</dt><dd>${value(data.victim_junction)}</dd><dt>Origin</dt><dd>${value(data.assigned_shelter?.name)}</dd><dt>Route</dt><dd>${verified ? "100% segments passed" : "Unavailable / rejected"}</dd></dl></div></div>
+    ${(triage.uncertainty_reasons || []).length ? `<ul class="error-list">${triage.uncertainty_reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${data.errors?.length ? `<ul class="error-list">${data.errors.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`;
+  setText("dispatch-map-state", verified ? "Route verified" : "No dispatchable route");
+  renderRoute(data.geojson, verified);
+  if (fromStream) showToast(data.alert_id, verified ? "Stream incident routed and verified." : "Stream incident requires human review.", !verified);
 }
 
-// 6. Quick Scenario Presets
-function loadScenario(type) {
-  const textInput = document.getElementById("sos-text");
-  if (type === "pump_flood") {
-    textInput.value = "URGENT: Flash flood at (lat: 10.1135, lon: 76.3540) near Pump Junction. 4 persons trapped, elderly patient needs ambulance immediately!";
-  } else if (type === "railway_injured") {
-    textInput.value = "Aluva Railway Station has 3 injured passengers, need ambulance dispatch to hospital.";
-  } else if (type === "manappuram_boat") {
-    textInput.value = "Water entering Aluva Manappuram temple grounds, 12 pilgrims stranded on temple steps. Urgent boat rescue needed!";
-  } else if (type === "railway_truck") {
-    textInput.value = "Send heavy evacuation truck to Aluva Railway Station for 10 passengers.";
-  }
-  submitDispatch();
+function renderRoute(geojson, verified) {
+  ["dispatch-map", "overview-map"].forEach((id) => {
+    const bundle = state.layers[id];
+    if (!bundle) return;
+    bundle.route.clearLayers();
+    if (!geojson?.features?.length) return;
+    const layer = L.geoJSON(geojson, {
+      style: { color: verified ? "#1f8a62" : "#b57418", weight: 6, opacity: .9 },
+      pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 8, color: "#fff", weight: 2, fillColor: feature.properties.type === "victim" ? "#b13e36" : "#245c7c", fillOpacity: 1 }),
+    }).addTo(bundle.route);
+    const bounds = layer.getBounds();
+    if (bounds.isValid()) state.maps[id].fitBounds(bounds, { padding: [45, 45], maxZoom: 16 });
+  });
 }
 
-// 7. Dynamic Road Hazard Simulation
+function renderResourceCards() {
+  const target = document.getElementById("resource-cards");
+  if (!target) return;
+  target.innerHTML = state.shelters.map((hub) => {
+    const ratio = hub.capacity ? Math.min(100, Math.round(hub.current_occupancy / hub.capacity * 100)) : 0;
+    return `<article class="resource-card"><h3>${escapeHtml(hub.name)}</h3><code>${escapeHtml(hub.id)}</code><div class="capacity"><div class="capacity-head"><span>Occupancy</span><b>${hub.current_occupancy} / ${hub.capacity}</b></div><div class="bar"><i style="width:${ratio}%"></i></div></div><div class="fleet"><span>🚑 ${hub.ambulances_available}</span><span>🚚 ${hub.trucks_available}</span><span>🚤 ${hub.boats_available}</span></div></article>`;
+  }).join("");
+}
+
+function renderReservations() {
+  const target = document.getElementById("reservation-table");
+  if (!target) return;
+  target.innerHTML = state.reservations.length ? state.reservations.map((item) => `<tr><td><code>${escapeHtml(item.incident_id)}</code></td><td>${escapeHtml(item.shelter_name)}</td><td>${escapeHtml(item.asset_type)}</td><td>${item.headcount}</td><td>${statusBadge(item.status)}</td><td>${formatTime(item.reserved_at)}</td><td>${escapeHtml(item.release_reason || (item.status === "RESERVED" ? "Active allocation" : "Released"))}</td></tr>`).join("") : '<tr><td colspan="7" class="muted-cell">No reservation records yet.</td></tr>';
+}
+
 async function simulateFlood() {
-  // Flood segment on UC College route: way/1080426401/seg/0/rev
-  const segment_id = "way/1080426401/seg/0/rev";
-  try {
-    const res = await fetch("/api/v1/hazards", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        segment_id,
-        status: "FLOODED",
-        duration_hours: 4,
-      }),
-    });
-    if (!res.ok) throw new Error("Failed to flood segment");
-    await loadHazards();
-    alert("Segment way/1080426401/seg/0/rev marked FLOODED in Neo4j!\nNow click 'Pump Junction Flood' to observe automatic detour routing!");
-  } catch (err) {
-    alert("Error applying hazard: " + err.message);
-  }
+  await mutateDemo(`${API}/hazards`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ segment_id: "way/1080426401/seg/0/rev", status: "FLOODED", duration_hours: 4 }) }, "Flood overlay applied", "The known segment is excluded from subsequent routes.");
+  await Promise.allSettled([loadHazards(), loadGraphSummary()]);
 }
 
 async function clearHazards() {
-  try {
-    const res = await fetch("/api/v1/hazards/clear", { method: "POST" });
-    if (!res.ok) throw new Error("Failed to clear hazards");
-    await loadHazards();
-    alert("All active operational hazards cleared from Neo4j.");
-  } catch (err) {
-    alert("Error clearing hazards: " + err.message);
-  }
+  await mutateDemo(`${API}/hazards/clear`, { method: "POST" }, "Overlay cleared", "Operational hazards were removed; baseline geography was untouched.");
+  await Promise.allSettled([loadHazards(), loadGraphSummary()]);
 }
 
-async function resetShelters() {
-  try {
-    const res = await fetch("/api/v1/shelters/reset", { method: "POST" });
-    if (!res.ok) throw new Error("Failed to reset shelters");
-    await loadShelters();
-    alert("All 4 Aluva shelters reset to initial baseline capacity and fleet assets.");
-  } catch (err) {
-    alert("Error resetting shelters: " + err.message);
-  }
+async function resetResources() {
+  await mutateDemo(`${API}/shelters/reset`, { method: "POST" }, "Demo resources reset", "Shelter capacity and fleet values were restored.");
+  await Promise.allSettled([loadShelters(), loadReservations(), loadGraphSummary()]);
 }
 
-function closeBrief() {
-  document.getElementById("brief-panel").style.display = "none";
+async function mutateDemo(url, options, title, message) {
+  try { await fetchJson(url, options); showToast(title, message); } catch (error) { showToast("Demonstration action failed", error.message, true); }
 }
 
-function copyBriefText() {
-  if (currentBriefText) {
-    navigator.clipboard.writeText(currentBriefText).then(() => {
-      alert("Tactical Brief copied to clipboard!");
-    });
-  }
-}
-
-// 8. Real-Time Redis Streams EventSource (SSE Listener)
 function initEventStream() {
-  const streamStatusText = document.getElementById("stream-status-text");
-  const evtSource = new EventSource("/api/v1/events");
-
-  evtSource.onopen = () => {
-    if (streamStatusText) {
-      streamStatusText.innerText = "REDIS STREAM: LIVE";
-      streamStatusText.style.color = "#38bdf8";
-    }
-  };
-
-  evtSource.onmessage = (event) => {
+  const source = new EventSource(`${API}/events`);
+  source.onopen = () => setConnection("stream", true, "Redis/SSE live feed");
+  source.onerror = () => setConnection("stream", false, "Live feed reconnecting");
+  source.onmessage = async (event) => {
     try {
       const data = JSON.parse(event.data);
-      renderDispatchResult(data);
-      loadShelters();
-      showToastNotification(data);
-    } catch (err) {
-      console.error("Error parsing stream event:", err);
-    }
-  };
-
-  evtSource.onerror = () => {
-    if (streamStatusText) {
-      streamStatusText.innerText = "REDIS STREAM: RECONNECTING...";
-      streamStatusText.style.color = "#f59e0b";
-    }
+      renderDispatchResult(data, true);
+      await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations()]);
+    } catch (error) { console.error("Invalid SSE dispatch event", error); }
   };
 }
 
-// 9. Trigger 5 Concurrent Stream Alerts (Disaster Surge)
-async function triggerStreamSpike() {
-  try {
-    const res = await fetch("/api/v1/sos/simulate_spike", { method: "POST" });
-    if (!res.ok) throw new Error("Failed to simulate stream surge");
-    const data = await res.json();
-    showToast("⚡ DISASTER SURGE QUEUED", `Published ${data.queued_count} concurrent alerts into Redis Stream (sos:stream:aluva). Watch worker pool process them!`, "verified");
-  } catch (err) {
-    alert("Error triggering stream surge: " + err.message);
-  }
-}
-
-// 10. Live Toast Notifications
-function showToastNotification(data) {
-  const isVerified = data.status === "RoutedVerified";
-  const title = `📡 ${data.alert_id}`;
-  const desc = isVerified 
-    ? `${data.assigned_asset || "Asset"} dispatched from ${data.assigned_shelter ? data.assigned_shelter.name.split(" ")[0] : "Shelter"} (${data.distance_km.toFixed(1)} km, ${(data.travel_time_s / 60).toFixed(1)} min)`
-    : `ESCALATE TO DISPATCHER: Ground route restricted for ${data.assigned_asset || "vehicle"}`;
-  showToast(title, desc, isVerified ? "verified" : "escalate");
-}
-
-function showToast(title, message, type) {
-  const container = document.getElementById("toast-container");
-  if (!container) return;
-
-  const toast = document.createElement("div");
-  toast.className = `toast ${type === "verified" ? "toast-verified" : "toast-escalate"}`;
-  toast.innerHTML = `
-    <div class="toast-header">
-      <span class="toast-title">${title}</span>
-      <span class="toast-time">${new Date().toLocaleTimeString()}</span>
-    </div>
-    <div class="toast-body">${message}</div>
-  `;
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transform = "translateX(50px)";
-    setTimeout(() => toast.remove(), 300);
-  }, 6000);
-}
+function currentTriage(incident) { return incident.triage_revisions?.at(-1)?.triage || null; }
+function statusBadge(status) { const kind = status === "REVIEW_REQUIRED" || status === "RELEASED" ? "review" : status === "ROUTE_VERIFIED" || status === "RESERVED" || status === "COMPLETED" ? "verified" : "progress"; return `<span class="status ${kind}">${escapeHtml(status || "UNKNOWN")}</span>`; }
+function fact(label, content) { return `<div class="fact"><span>${escapeHtml(label)}</span><b>${value(content)}</b></div>`; }
+function value(content) { return content === null || content === undefined || content === "" ? "Not supplied" : escapeHtml(String(content)); }
+function number(content) { return new Intl.NumberFormat("en-IN").format(content || 0); }
+function setText(id, content) { const node = document.getElementById(id); if (node) node.textContent = content; }
+function formatTime(input) { if (!input) return "—"; const date = new Date(input); return Number.isNaN(date.valueOf()) ? escapeHtml(String(input)) : new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(date); }
+function relativeTime(input) { const seconds = Math.round((new Date(input).valueOf() - Date.now()) / 1000); const absolute = Math.abs(seconds); const [amount, unit] = absolute < 60 ? [seconds, "second"] : absolute < 3600 ? [Math.round(seconds / 60), "minute"] : absolute < 86400 ? [Math.round(seconds / 3600), "hour"] : [Math.round(seconds / 86400), "day"]; return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(amount, unit); }
+function escapeHtml(input) { return String(input ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char])); }
+function renderFailure(id, message) { const target = document.getElementById(id); if (target) target.innerHTML = `<div class="empty-state"><h3>Data unavailable</h3><p>${escapeHtml(message)}</p></div>`; }
+function showToast(title, message, error = false) { const region = document.getElementById("toast-region"); const toast = document.createElement("div"); toast.className = `toast${error ? " error" : ""}`; toast.innerHTML = `<b>${escapeHtml(title)}</b><span>${escapeHtml(message)}</span>`; region.appendChild(toast); setTimeout(() => toast.remove(), 6500); }

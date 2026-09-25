@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -17,22 +17,27 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crisis_graph::config::Config;
-use crisis_graph::db::{Neo4jClient, RedisClient, ShelterWithLocation, StateManager};
+use crisis_graph::db::{
+    IncidentRepository, Neo4jClient, RedisClient, ShelterWithLocation, StateManager,
+};
 use crisis_graph::ingestion::TriageExtractor;
-use crisis_graph::models::{CrisisState, DispatchStatus, RoadStatus, SosAlert, TriageReport};
-use crisis_graph::pipeline::{CrisisOrchestrator, PipelineStages};
+use crisis_graph::models::{
+    CrisisState, DispatchStatus, Incident, IncidentStatus, RoadStatus, SosAlert, TriageReport,
+};
+use crisis_graph::pipeline::{PersistedCrisisOrchestrator, PipelineStages};
 
 const STREAM_KEY: &str = "sos:stream:aluva";
 const CONSUMER_GROUP: &str = "crisisgraph_workers";
 
 #[derive(Clone)]
 struct AppState {
-    orchestrator: CrisisOrchestrator,
+    orchestrator: PersistedCrisisOrchestrator<IncidentRepository>,
+    incident_repository: IncidentRepository,
     state_manager: StateManager,
     redis: RedisClient,
     event_tx: Arc<broadcast::Sender<String>>,
@@ -47,6 +52,11 @@ pub struct DispatchRequest {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DispatchResponse {
     pub alert_id: String,
+    pub incident_status: String,
+    pub incident_version: u64,
+    pub control_plane_persisted: bool,
+    pub duplicate_suppressed: bool,
+    pub review_required: bool,
     pub status: String,
     pub victim_junction: Option<String>,
     pub assigned_shelter: Option<ShelterSummary>,
@@ -77,6 +87,11 @@ pub struct ApplyHazardRequest {
     pub duration_hours: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ListQuery {
+    limit: Option<usize>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt::init();
@@ -89,9 +104,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let redis = RedisClient::connect(&config).await?;
     let state_manager = StateManager::new(neo4j.clone());
+    let incident_repository = IncidentRepository::new(neo4j.clone());
 
-    // Ensure Aluva shelters are registered
-    state_manager.seed_aluva_shelters().await?;
+    // Register missing pilot facilities without erasing live allocations.
+    state_manager.ensure_aluva_shelters().await?;
+    state_manager.ensure_operational_schema().await?;
+    incident_repository.setup_schema().await?;
 
     // Setup Redis Streams consumer group
     if let Err(e) = redis
@@ -103,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let extractor = TriageExtractor::new(&config);
     let stages = PipelineStages::new(extractor, state_manager.clone(), redis.clone());
-    let orchestrator = CrisisOrchestrator::new(stages);
+    let orchestrator = PersistedCrisisOrchestrator::new(stages, incident_repository.clone());
 
     // Event broadcast channel for real-time SSE streaming to web dashboard
     let (event_tx, _) = broadcast::channel::<String>(256);
@@ -111,6 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let app_state = AppState {
         orchestrator: orchestrator.clone(),
+        incident_repository: incident_repository.clone(),
         state_manager: state_manager.clone(),
         redis: redis.clone(),
         event_tx: event_tx_arc.clone(),
@@ -133,10 +152,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/api/v1/hazards", post(apply_hazard))
         .route("/api/v1/hazards/clear", post(clear_hazards))
         .route("/api/v1/dispatch", post(handle_dispatch))
+        .route("/api/v1/incidents", get(list_incidents))
+        .route("/api/v1/incidents/{incident_id}", get(get_incident))
+        .route(
+            "/api/v1/incidents/{incident_id}/audit",
+            get(get_incident_audit),
+        )
+        .route(
+            "/api/v1/resources/reservations",
+            get(get_resource_reservations),
+        )
+        .route("/api/v1/admin/graph/summary", get(get_graph_summary))
         // Event-Driven Stream & Real-time Endpoints
         .route("/api/v1/events", get(sse_events))
         .route("/api/v1/sos/stream", post(ingest_sos_stream))
         .route("/api/v1/sos/simulate_spike", post(simulate_spike))
+        // Read-only local demonstration console routes. These deliberately
+        // share one dependency-free frontend application.
+        .route_service("/", ServeFile::new("web/index.html"))
+        .route_service("/dispatch", ServeFile::new("web/index.html"))
+        .route_service("/incidents", ServeFile::new("web/index.html"))
+        .route_service("/hazards", ServeFile::new("web/index.html"))
+        .route_service("/resources", ServeFile::new("web/index.html"))
         // Serve Web Assets from `web/` folder
         .fallback_service(ServeDir::new("web"))
         .layer(CorsLayer::permissive())
@@ -255,7 +292,7 @@ async fn simulate_spike(
 
 fn spawn_stream_worker(
     redis: RedisClient,
-    orchestrator: CrisisOrchestrator,
+    orchestrator: PersistedCrisisOrchestrator<IncidentRepository>,
     state_mgr: StateManager,
     event_tx: Arc<broadcast::Sender<String>>,
 ) {
@@ -289,12 +326,21 @@ fn spawn_stream_worker(
                         };
 
                         // Process through the full 4-stage pipeline
-                        let final_state = orchestrator.process_alert(alert).await;
-                        let response = build_dispatch_response(&final_state, &state_mgr).await;
+                        let result = orchestrator.process_alert(alert).await;
+                        let response = build_dispatch_response(
+                            &result.state,
+                            &result.incident,
+                            result.persistence_healthy,
+                            result.duplicate_suppressed,
+                            &state_mgr,
+                        )
+                        .await;
 
                         // Broadcast to connected web clients (SSE)
-                        if let Ok(json_str) = serde_json::to_string(&response) {
-                            let _ = event_tx.send(json_str);
+                        if !result.duplicate_suppressed {
+                            if let Ok(json_str) = serde_json::to_string(&response) {
+                                let _ = event_tx.send(json_str);
+                            }
                         }
 
                         // Acknowledge stream message
@@ -322,6 +368,81 @@ async fn get_shelters(
         .map(Json)
         .map_err(|e| {
             warn!("Failed to fetch shelters: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn list_incidents(
+    State(state): State<AppState>,
+    Query(params): Query<ListQuery>,
+) -> Result<Json<Vec<Incident>>, StatusCode> {
+    state
+        .incident_repository
+        .list_recent(params.limit.unwrap_or(50))
+        .await
+        .map(Json)
+        .map_err(|error| {
+            warn!("Failed to list incidents: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn get_incident(
+    State(state): State<AppState>,
+    Path(incident_id): Path<String>,
+) -> Result<Json<Incident>, StatusCode> {
+    state
+        .incident_repository
+        .get(&incident_id)
+        .await
+        .map_err(|error| {
+            warn!("Failed to load incident {incident_id}: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn get_incident_audit(
+    State(state): State<AppState>,
+    Path(incident_id): Path<String>,
+) -> Result<Json<Vec<crisis_graph::models::AuditEvent>>, StatusCode> {
+    state
+        .incident_repository
+        .audit_history(&incident_id)
+        .await
+        .map(Json)
+        .map_err(|error| {
+            warn!("Failed to load audit history for {incident_id}: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn get_resource_reservations(
+    State(state): State<AppState>,
+    Query(params): Query<ListQuery>,
+) -> Result<Json<Vec<crisis_graph::db::ResourceReservationInfo>>, StatusCode> {
+    state
+        .state_manager
+        .get_resource_reservations(params.limit.unwrap_or(50))
+        .await
+        .map(Json)
+        .map_err(|error| {
+            warn!("Failed to list resource reservations: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn get_graph_summary(
+    State(state): State<AppState>,
+) -> Result<Json<crisis_graph::db::GraphSummary>, StatusCode> {
+    state
+        .state_manager
+        .get_graph_summary("aluva-periyar-pilot")
+        .await
+        .map(Json)
+        .map_err(|error| {
+            warn!("Failed to get graph summary: {error}");
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }
@@ -394,7 +515,8 @@ async fn apply_hazard(
     let road_status = match payload.status.to_uppercase().as_str() {
         "OPEN" => RoadStatus::Open,
         "BLOCKED" => RoadStatus::Blocked,
-        _ => RoadStatus::Flooded,
+        "FLOODED" => RoadStatus::Flooded,
+        _ => return Err(StatusCode::BAD_REQUEST),
     };
 
     match state
@@ -446,8 +568,15 @@ async fn handle_dispatch(
             .or_else(|| Some("web_dispatcher_api".to_string())),
     };
 
-    let final_state = state.orchestrator.process_alert(alert).await;
-    let response = build_dispatch_response(&final_state, &state.state_manager).await;
+    let result = state.orchestrator.process_alert(alert).await;
+    let response = build_dispatch_response(
+        &result.state,
+        &result.incident,
+        result.persistence_healthy,
+        result.duplicate_suppressed,
+        &state.state_manager,
+    )
+    .await;
 
     // Also broadcast to SSE subscribers
     if let Ok(json_str) = serde_json::to_string(&response) {
@@ -459,6 +588,9 @@ async fn handle_dispatch(
 
 async fn build_dispatch_response(
     final_state: &CrisisState,
+    incident: &Incident,
+    control_plane_persisted: bool,
+    duplicate_suppressed: bool,
     state_mgr: &StateManager,
 ) -> DispatchResponse {
     let route_nodes = final_state.computed_path.clone().unwrap_or_default();
@@ -576,6 +708,17 @@ async fn build_dispatch_response(
 
     DispatchResponse {
         alert_id: final_state.sos.alert_id.clone(),
+        incident_status: incident.status.as_str().to_string(),
+        incident_version: incident.version,
+        control_plane_persisted,
+        duplicate_suppressed,
+        review_required: if duplicate_suppressed {
+            incident.status == IncidentStatus::ReviewRequired
+        } else {
+            !control_plane_persisted
+                || incident.status == IncidentStatus::ReviewRequired
+                || dispatch_status != DispatchStatus::RoutedVerified
+        },
         status: format!("{:?}", dispatch_status),
         victim_junction,
         assigned_shelter,

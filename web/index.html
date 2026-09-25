@@ -1,209 +1,111 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CrisisGraph — Tactical Emergency Dispatch Console</title>
-  
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="CrisisGraph Aluva–Periyar emergency-routing demonstration console">
+  <title>CrisisGraph Operations Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  
-  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="app-container">
-    
-    <!-- TOP HEADER -->
-    <header class="app-header">
-      <div class="header-brand">
-        <div class="brand-badge">CG-EOC</div>
-        <div class="brand-title">
-          <h1>CRISISGRAPH <span>TACTICAL DISPATCH CONSOLE</span></h1>
-          <div class="brand-sub">Aluva–Periyar Disaster Response Area (10 km Pilot Network)</div>
-        </div>
+  <div class="demo-ribbon"><strong>LOCAL DEMONSTRATION ENVIRONMENT</strong><span>Open console · no authentication · not for operational dispatch</span></div>
+  <div class="shell">
+    <aside class="rail">
+      <a class="brand" href="/"><span class="brand-mark"><i></i><i></i><i></i></span><span><b>CrisisGraph</b><small>Aluva EOC pilot</small></span></a>
+      <nav class="nav" aria-label="Primary navigation">
+        <a href="/" data-route="/"><span>01</span>Overview</a>
+        <a href="/dispatch" data-route="/dispatch"><span>02</span>Dispatch lab</a>
+        <a href="/incidents" data-route="/incidents"><span>03</span>Incidents</a>
+        <a href="/hazards" data-route="/hazards"><span>04</span>Hazards</a>
+        <a href="/resources" data-route="/resources"><span>05</span>Resources</a>
+      </nav>
+      <div class="rail-foot">
+        <div class="connection"><i id="stream-dot"></i><span id="stream-label">Connecting live feed</span></div>
+        <div class="connection"><i id="api-dot"></i><span id="api-label">Checking engine</span></div>
+        <p>AI extracts candidate facts.<br>Deterministic code routes and verifies.</p>
       </div>
-      
-      <div class="header-status">
-        <div class="status-indicator" id="stream-indicator">
-          <span class="pulse-dot" style="background-color: #38bdf8; box-shadow: 0 0 10px #38bdf8;"></span>
-          <span class="status-text" id="stream-status-text" style="color: #38bdf8;">REDIS STREAM: CONNECTING</span>
-        </div>
-        <div class="status-indicator">
-          <span class="pulse-dot"></span>
-          <span class="status-text">NEO4J ONLINE</span>
-        </div>
-        <div class="network-stats">
-          <div class="stat-pill"><span class="val">21,256</span> Nodes</div>
-          <div class="stat-pill"><span class="val">48,626</span> Segments</div>
-          <div class="stat-pill"><span class="val">4</span> Relief Hubs</div>
-        </div>
-      </div>
-    </header>
+    </aside>
 
-    <!-- MAIN WORKSPACE -->
-    <div class="app-body">
-      
-      <!-- LEFT SIDEBAR: CONTROLS & SOS INTAKE -->
-      <aside class="sidebar">
-        
-        <!-- SECTION 1: QUICK TEST SCENARIOS -->
-        <div class="sidebar-section">
-          <div class="section-title">QUICK EMERGENCY SCENARIOS</div>
-          <div class="preset-buttons">
-            <button class="preset-btn" onclick="loadScenario('pump_flood')">
-              <span class="preset-icon">🚨</span>
-              <div class="preset-desc">
-                <strong>Pump Junction Flood</strong>
-                <small>GPS (10.1135, 76.3540) • 4 Trapped • Ambulance</small>
-              </div>
-            </button>
-            <button class="preset-btn" onclick="loadScenario('railway_injured')">
-              <span class="preset-icon">🏥</span>
-              <div class="preset-desc">
-                <strong>Aluva Railway Station</strong>
-                <small>3 Injured Passengers • Ambulance to Hospital</small>
-              </div>
-            </button>
-            <button class="preset-btn" onclick="loadScenario('manappuram_boat')">
-              <span class="preset-icon">🚤</span>
-              <div class="preset-desc">
-                <strong>Manappuram Temple Steps</strong>
-                <small>12 Stranded Pilgrims • Rescue Boat</small>
-              </div>
-            </button>
-            <button class="preset-btn warn" onclick="loadScenario('railway_truck')">
-              <span class="preset-icon">🛡️</span>
-              <div class="preset-desc">
-                <strong>Aluva Station Heavy Truck</strong>
-                <small>Fail-Closed Service Alley Vehicle Restriction</small>
-              </div>
-            </button>
+    <main class="content">
+      <header class="topbar">
+        <div><p class="eyebrow" id="page-eyebrow">Emergency operations</p><h1 id="page-title">Operational overview</h1></div>
+        <div class="top-actions"><span class="clock" id="clock">--:--:-- IST</span><a class="button primary compact" href="/dispatch">New SOS intake</a></div>
+      </header>
+
+      <section class="view" id="view-overview" data-view="/">
+        <div class="metric-grid">
+          <article class="metric"><span>Road graph</span><strong id="metric-junctions">—</strong><small>junctions</small></article>
+          <article class="metric"><span>Directed network</span><strong id="metric-segments">—</strong><small>segments</small></article>
+          <article class="metric warning"><span>Requires review</span><strong id="metric-review">—</strong><small>persisted incidents</small></article>
+          <article class="metric danger"><span>Active hazards</span><strong id="metric-hazards">—</strong><small>route-blocking overlays</small></article>
+          <article class="metric success"><span>Reserved assets</span><strong id="metric-reservations">—</strong><small>incident-owned</small></article>
+        </div>
+        <div class="overview-grid">
+          <article class="panel map-panel">
+            <div class="panel-head"><div><p class="kicker">Live operational picture</p><h2>Aluva–Periyar pilot</h2></div><div class="map-legend"><span class="green">Verified route</span><span class="red">Hazard</span><span class="blue">Relief hub</span></div></div>
+            <div class="map" id="overview-map"></div>
+          </article>
+          <div class="stack">
+            <article class="panel"><div class="panel-head"><div><p class="kicker">Control plane</p><h2>Recent incidents</h2></div><a href="/incidents">View all</a></div><div id="overview-incidents" class="incident-feed"><div class="skeleton">Loading persisted incidents…</div></div></article>
+            <article class="panel architecture-card"><p class="kicker">Safety boundary</p><h2>Candidate intelligence, deterministic action</h2><div class="pipeline-mini"><span>Language intake</span><b>→</b><span>Typed extraction</span><b>→</b><span>Graph solver</span><b>→</b><span>100% segment verification</span></div><p>The model never invents, calculates, or certifies a route. Any unresolved critical fact stops the pipeline.</p></article>
           </div>
         </div>
+      </section>
 
-        <!-- SECTION 2: MANUAL SOS DISPATCH FORM -->
-        <div class="sidebar-section">
-          <div class="section-title">INCIDENT SOS INTAKE</div>
-          <form id="dispatch-form" onsubmit="submitDispatch(event)">
-            <label for="sos-text" class="field-label">NATURAL LANGUAGE SOS / GPS ALERT</label>
-            <textarea id="sos-text" rows="3" placeholder="Enter emergency alert, GPS coordinates, headcount, and victim condition..." required></textarea>
-            
-            <div class="field-row">
-              <div>
-                <label for="channel-select" class="field-label">INTAKE CHANNEL</label>
-                <select id="channel-select">
-                  <option value="kerala_disaster_helpline">112 Helpline Intake</option>
-                  <option value="citizen_mobile_app">Citizen SOS App</option>
-                  <option value="police_radio_feed">Police VHF Radio</option>
-                  <option value="field_volunteer_sms">Field Volunteer SMS</option>
-                </select>
-              </div>
-            </div>
-
-            <button type="submit" id="dispatch-btn" class="primary-btn">
-              <span class="btn-text">RUN NEURO-SYMBOLIC DISPATCH</span>
-              <span class="btn-loader" style="display:none;"></span>
-            </button>
-          </form>
-        </div>
-
-        <!-- SECTION 2.5: REDIS STREAMS HIGH-THROUGHPUT INTAKE -->
-        <div class="sidebar-section">
-          <div class="section-title">HIGH-THROUGHPUT REDIS STREAMS</div>
-          <p style="font-size:10px; color:#94a3b8; margin-bottom:10px; line-height:1.4;">
-            Publishes simultaneous emergency incidents into <code>sos:stream:aluva</code>. Background Tokio worker pool consumes in parallel and pushes live dispatches via SSE.
-          </p>
-          <button class="action-btn surge-btn" onclick="triggerStreamSpike()">
-            ⚡ Simulate 5 Concurrent Alerts (Disaster Surge)
-          </button>
-        </div>
-
-        <!-- SECTION 3: HAZARD SIMULATION (TEST DETOUR) -->
-        <div class="sidebar-section">
-          <div class="section-title">DYNAMIC HAZARD SIMULATION</div>
-          <div class="hazard-controls">
-            <button class="action-btn flood-btn" onclick="simulateFlood()">
-              🌊 Flood UC College Approach (Trigger Detour)
-            </button>
-            <div class="btn-group-2">
-              <button class="action-btn" onclick="clearHazards()">Clear Hazards</button>
-              <button class="action-btn" onclick="resetShelters()">Reset Shelters</button>
-            </div>
+      <section class="view" id="view-dispatch" data-view="/dispatch">
+        <div class="dispatch-grid">
+          <div class="stack">
+            <article class="panel intake-card">
+              <div class="panel-head"><div><p class="kicker">Multilingual triage</p><h2>Submit an SOS report</h2></div><span class="tag">Qwen3-4B + guard</span></div>
+              <form id="dispatch-form">
+                <label for="sos-text">Original report</label><textarea id="sos-text" rows="6" maxlength="4000" required placeholder="Describe the location, number of people, and explicitly requested vehicle…"></textarea>
+                <div class="form-row"><div><label for="channel-select">Source channel</label><select id="channel-select"><option value="web_demo_console">Web demonstration console</option><option value="field_radio_transcript">Field radio transcript</option><option value="call_centre_transcript">Call-centre transcript</option><option value="field_team_report">Field team report</option></select></div><div><label>Processing mode</label><div class="locked-field">Synchronous · persisted</div></div></div>
+                <button class="button primary full" id="dispatch-btn" type="submit"><span>Run triage, allocation and routing</span></button>
+              </form>
+            </article>
+            <article class="panel"><div class="panel-head"><div><p class="kicker">Demonstration scripts</p><h2>Real-world scenarios</h2></div></div><div class="scenario-grid">
+              <button class="scenario" data-scenario="verified"><b>Verified ambulance route</b><span>Complete English report</span></button>
+              <button class="scenario" data-scenario="malayalam"><b>Malayalam boat rescue</b><span>Multilingual extraction</span></button>
+              <button class="scenario warning" data-scenario="ambiguous"><b>Ambiguous Manglish</b><span>Must stop for review</span></button>
+              <button class="scenario danger" data-scenario="truck"><b>Restricted heavy vehicle</b><span>Fail-closed route</span></button>
+            </div></article>
           </div>
-          <div id="hazard-status" class="subtle-status">0 Active Road Closures</div>
-        </div>
-
-        <!-- SECTION 4: RELIEF HUBS & FLEETS -->
-        <div class="sidebar-section">
-          <div class="section-title">LIVE RELIEF HUBS & FLEET STATUS</div>
-          <div id="shelters-list" class="shelters-container">
-            <div class="loading-placeholder">Loading live shelter telemetry...</div>
+          <div class="stack">
+            <article class="panel map-panel dispatch-map-panel"><div class="panel-head"><div><p class="kicker">Deterministic output</p><h2>Verified route</h2></div><span id="dispatch-map-state" class="tag muted">Awaiting report</span></div><div class="map" id="dispatch-map"></div></article>
+            <article class="panel result-panel" id="dispatch-result"><div class="empty-state"><div class="empty-icon">◎</div><h3>No incident processed</h3><p>Select a scenario or submit an SOS report. The result will show every automation boundary.</p></div></article>
           </div>
         </div>
+      </section>
 
-      </aside>
-
-      <!-- RIGHT PANEL: INTERACTIVE MAP & TACTICAL ORDER -->
-      <main class="map-workspace">
-        
-        <!-- MAP CONTAINER -->
-        <div id="map"></div>
-
-        <!-- FLOATING TACTICAL ORDER OVERLAY -->
-        <div id="brief-panel" class="brief-overlay" style="display: none;">
-          <div class="brief-header">
-            <div class="brief-title-block">
-              <span id="brief-status-badge" class="badge">ROUTED & VERIFIED</span>
-              <span id="brief-incident-id" class="incident-code">SOS-XXXXXX</span>
-            </div>
-            <button class="close-brief-btn" onclick="closeBrief()">✕</button>
-          </div>
-
-          <div class="brief-metrics-grid">
-            <div class="metric-card">
-              <div class="metric-label">DISTANCE</div>
-              <div id="metric-dist" class="metric-val">-- km</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">EST. TIME</div>
-              <div id="metric-time" class="metric-val">-- min</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">ASSET ALLOCATED</div>
-              <div id="metric-asset" class="metric-val">--</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-label">SHELTER / DEPOT</div>
-              <div id="metric-shelter" class="metric-val">--</div>
-            </div>
-          </div>
-
-          <div class="brief-body">
-            <div class="brief-text-header">
-              <span>CERTIFIED TACTICAL BRIEF</span>
-              <button class="copy-btn" onclick="copyBriefText()">Copy Order</button>
-            </div>
-            <pre id="brief-content" class="tactical-text"></pre>
-          </div>
+      <section class="view" id="view-incidents" data-view="/incidents">
+        <div class="notice"><b>Read-only operational record</b><span>Incidents and audit events are persisted in Neo4j. Review decisions are intentionally outside this demonstration scope.</span></div>
+        <div class="incident-layout">
+          <article class="panel incident-browser"><div class="panel-head"><div><p class="kicker">Persisted control plane</p><h2>Incident registry</h2></div><button class="icon-button" id="refresh-incidents" title="Refresh">↻</button></div><div class="filters"><input id="incident-search" type="search" placeholder="Search ID, message, location…"><select id="incident-filter"><option value="ALL">All states</option><option value="REVIEW_REQUIRED">Review required</option><option value="ROUTE_VERIFIED">Route verified</option><option value="RECEIVED">Received</option></select></div><div id="incident-list" class="incident-list"><div class="skeleton">Loading incidents…</div></div></article>
+          <article class="panel incident-detail" id="incident-detail"><div class="empty-state"><div class="empty-icon">⌁</div><h3>Select an incident</h3><p>Inspect its original message, immutable extraction revision, status, and audit timeline.</p></div></article>
         </div>
+      </section>
 
-      </main>
+      <section class="view" id="view-hazards" data-view="/hazards">
+        <div class="notice warning"><b>Trusted operator simulation</b><span>These open controls directly update the Neo4j operational overlay. Production requires authenticated hazard verification.</span></div>
+        <div class="hazard-layout">
+          <article class="panel map-panel"><div class="panel-head"><div><p class="kicker">Operational overlay</p><h2>Active route restrictions</h2></div><span class="tag danger" id="hazard-count">0 active</span></div><div class="map" id="hazard-map"></div></article>
+          <div class="stack"><article class="panel"><p class="kicker">Simulation controls</p><h2>Inject a known flood condition</h2><p class="supporting">Marks the configured UC College approach segment as flooded for four hours. Baseline OSM geography remains unchanged.</p><button class="button danger full" id="simulate-flood">Apply demonstration flood</button><button class="button ghost full" id="clear-hazards">Clear operational hazards</button></article><article class="panel"><div class="panel-head"><div><p class="kicker">Current evidence</p><h2>Hazard segments</h2></div></div><div id="hazard-list" class="compact-list"><div class="skeleton">Loading overlay…</div></div></article></div>
+        </div>
+      </section>
 
-    </div>
+      <section class="view" id="view-resources" data-view="/resources">
+        <div class="notice"><b>Atomic resource state</b><span>Reservations are owned by incident ID and compensated idempotently after downstream failure.</span></div>
+        <div id="resource-cards" class="resource-grid"><div class="skeleton">Loading relief hubs…</div></div>
+        <article class="panel table-panel"><div class="panel-head"><div><p class="kicker">Reservation ledger</p><h2>Incident-owned allocations</h2></div><button class="button ghost compact" id="reset-resources">Reset demo resources</button></div><div class="table-wrap"><table><thead><tr><th>Incident</th><th>Relief hub</th><th>Asset</th><th>People</th><th>Status</th><th>Reserved</th><th>Disposition</th></tr></thead><tbody id="reservation-table"><tr><td colspan="7" class="muted-cell">Loading reservation history…</td></tr></tbody></table></div></article>
+      </section>
+    </main>
   </div>
-
-  <!-- Leaflet JS -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <!-- Real-time Toast Notifications -->
-  <div id="toast-container" class="toast-container"></div>
-
-  <script src="app.js"></script>
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="/app.js"></script>
 </body>
 </html>

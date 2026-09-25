@@ -166,7 +166,12 @@ impl PipelineStages {
                             // Execute atomic Cypher capacity reservation
                             match self
                                 .state_mgr
-                                .reserve_shelter_asset(&shelter.id, required_asset, headcount)
+                                .reserve_shelter_asset(
+                                    &shelter.id,
+                                    required_asset,
+                                    headcount,
+                                    &state.sos.alert_id,
+                                )
                                 .await
                             {
                                 Ok(Some(reserved_shelter)) => {
@@ -226,6 +231,42 @@ impl PipelineStages {
             }
         }
 
+        state
+    }
+
+    /// Compensate an incident-owned shelter/asset reservation after a later
+    /// control-plane, routing, or verification failure. The database operation
+    /// is idempotent, so retries cannot increment fleet counts twice.
+    pub async fn compensate_resource_allocation(
+        &self,
+        mut state: CrisisState,
+        reason: &str,
+    ) -> CrisisState {
+        if state.assigned_shelter.is_none() && state.assigned_asset.is_none() {
+            return state;
+        }
+
+        match self
+            .state_mgr
+            .release_incident_reservation(&state.sos.alert_id, reason)
+            .await
+        {
+            Ok(true) => {
+                info!(
+                    incident_id = %state.sos.alert_id,
+                    "Released incident resource reservation"
+                );
+                state.assigned_shelter = None;
+                state.assigned_asset = None;
+            }
+            Ok(false) => state.errors.push(
+                "ReservationCompensationError: no active incident reservation was found"
+                    .to_string(),
+            ),
+            Err(error) => state
+                .errors
+                .push(format!("ReservationCompensationError: {error}")),
+        }
         state
     }
 
@@ -438,6 +479,45 @@ impl PipelineStages {
             DispatchStatus::EscalateHumanDispatcher
         };
 
+        let primary_reason = state
+            .triage
+            .as_ref()
+            .filter(|triage| triage.needs_human_review)
+            .and_then(|triage| triage.uncertainty_reasons.first().cloned())
+            .or_else(|| {
+                state
+                    .errors
+                    .iter()
+                    .map(|reason| Self::humanize_pipeline_error(reason))
+                    .find(|reason| !reason.is_empty() && reason != "None")
+            })
+            .or_else(|| verification_notes.first().cloned())
+            .unwrap_or_else(|| "Human dispatcher review was requested".to_string());
+
+        let action_required = if dispatch_status == DispatchStatus::RoutedVerified {
+            "None".to_string()
+        } else if state
+            .errors
+            .iter()
+            .any(|error| error.starts_with("TriageRequiresHumanReview:"))
+        {
+            "Confirm the missing or conflicting incident details, then resubmit.".to_string()
+        } else if state
+            .errors
+            .iter()
+            .any(|error| error.starts_with("TriageLocationResolutionFailed:"))
+        {
+            "Confirm an exact victim or pickup location, then resubmit.".to_string()
+        } else if state
+            .errors
+            .iter()
+            .any(|error| error.starts_with("RoutingError:"))
+        {
+            "Review route constraints and select a safe contingency.".to_string()
+        } else {
+            "Human dispatcher review is required before dispatch.".to_string()
+        };
+
         let shelter_id = shelter
             .as_ref()
             .map(|s| s.id.clone())
@@ -453,7 +533,9 @@ impl PipelineStages {
             "N/A".to_string()
         };
 
-        let waypoints_summary = if path.len() <= 6 {
+        let waypoints_summary = if path.is_empty() {
+            "N/A".to_string()
+        } else if path.len() <= 6 {
             path.join(" -> ")
         } else {
             format!(
@@ -464,18 +546,62 @@ impl PipelineStages {
             )
         };
 
+        let allocation_summary = if shelter.is_some() && state.assigned_asset.is_some() {
+            "COMPLETED"
+        } else if state.has_errors() {
+            "SKIPPED"
+        } else {
+            "INCOMPLETE"
+        };
+        let route_summary = if path.is_empty() {
+            if state.has_errors() {
+                "SKIPPED"
+            } else {
+                "FAILED"
+            }
+        } else {
+            "COMPUTED"
+        };
+        let detour_summary = if path.is_empty() {
+            "N/A (route not computed)"
+        } else {
+            state
+                .detour_reason
+                .as_deref()
+                .unwrap_or("None (Direct Clear Path)")
+        };
+        let verification_summary = if dispatch_status == DispatchStatus::RoutedVerified {
+            "PASSED (100% Segments Independently Verified Safe)".to_string()
+        } else if path.is_empty() {
+            "NOT RUN (route unavailable)".to_string()
+        } else if verification_notes.is_empty() {
+            "FAILED (pipeline reported an unresolved error)".to_string()
+        } else {
+            verification_notes.join("; ")
+        };
+        let headcount_text = state
+            .triage
+            .as_ref()
+            .and_then(|triage| triage.headcount)
+            .map(|value| format!("{value} Persons"))
+            .unwrap_or_else(|| "UNKNOWN".to_string());
+
         let raw_brief = format!(
             "====================================================\n\
              TACTICAL DISPATCH ORDER [CRISISGRAPH ENGINE]\n\
              INCIDENT ID : {}\n\
              TIMESTAMP   : {}\n\
              STATUS      : {:?}\n\
+             PRIMARY REASON : {}\n\
+             ACTION REQUIRED: {}\n\
              ----------------------------------------------------\n\
              VICTIM LOC  : {} (Junction: {})\n\
-             HEADCOUNT   : {} Persons\n\
+             HEADCOUNT   : {}\n\
              DISPATCH    : {}\n\
              FROM SHELTER: {} (Junction: {})\n\
              ----------------------------------------------------\n\
+             ALLOCATION  : {}\n\
+             ROUTE       : {}\n\
              DISTANCE    : {:.2} km\n\
              EST. TIME   : {}\n\
              WAYPOINTS   : {}\n\
@@ -485,28 +611,25 @@ impl PipelineStages {
             incident_id,
             Utc::now().to_rfc3339(),
             dispatch_status,
+            primary_reason,
+            action_required,
             state
                 .triage
                 .as_ref()
                 .and_then(|t| t.victim_location_raw.as_deref())
                 .unwrap_or("Unknown"),
             target_junction,
-            headcount,
+            headcount_text,
             asset,
             shelter.as_ref().map(|s| s.name.as_str()).unwrap_or("None"),
             shelter_junction,
+            allocation_summary,
+            route_summary,
             distance,
             travel_time_text,
             waypoints_summary,
-            state
-                .detour_reason
-                .as_deref()
-                .unwrap_or("None (Direct Clear Path)"),
-            if verification_notes.is_empty() {
-                "PASSED (100% Segments Independently Verified Safe)".to_string()
-            } else {
-                verification_notes.join("; ")
-            }
+            detour_summary,
+            verification_summary
         );
 
         let brief = TacticalBrief {
@@ -528,5 +651,62 @@ impl PipelineStages {
 
         state.brief = Some(brief);
         state
+    }
+
+    fn humanize_pipeline_error(error: &str) -> String {
+        let detail = error
+            .split_once(": ")
+            .map(|(_, detail)| detail)
+            .unwrap_or(error)
+            .trim()
+            .trim_end_matches('.')
+            .to_string();
+
+        if detail.is_empty() {
+            "Human dispatcher review was requested".to_string()
+        } else if detail == "None" {
+            String::new()
+        } else {
+            detail
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PipelineStages;
+
+    #[test]
+    fn humanizes_typed_pipeline_error_for_dispatcher_brief() {
+        assert_eq!(
+            PipelineStages::humanize_pipeline_error(
+                "TriageRequiresHumanReview: Required asset was not specified"
+            ),
+            "Required asset was not specified"
+        );
+    }
+
+    #[test]
+    fn preserves_untyped_pipeline_error_text() {
+        assert_eq!(
+            PipelineStages::humanize_pipeline_error("No shelters have sufficient capacity."),
+            "No shelters have sufficient capacity"
+        );
+    }
+
+    #[test]
+    fn filters_meaningless_none_diagnostic() {
+        assert_eq!(
+            PipelineStages::humanize_pipeline_error("TriageLocationResolutionFailed: None"),
+            ""
+        );
+    }
+
+    #[test]
+    fn replaces_empty_typed_error_with_review_reason() {
+        assert_eq!(
+            PipelineStages::humanize_pipeline_error("TriageRequiresHumanReview: "),
+            "Human dispatcher review was requested"
+        );
     }
 }

@@ -1,10 +1,10 @@
-use chrono::{Duration, Utc};
-use neo4rs::query;
-use serde::{Deserialize, Serialize};
+use super::neo4j::Neo4jClient;
 use crate::geospatial::{AccessFlags, BaselineStatus};
 use crate::models::{AssetType, HazardReport, RoadStatus, Shelter};
 use crate::solver::RoutingEdge;
-use super::neo4j::Neo4jClient;
+use chrono::{Duration, Utc};
+use neo4rs::query;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
 pub struct StateManager {
@@ -38,6 +38,29 @@ pub struct ActiveHazardInfo {
     pub to_lon: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceReservationInfo {
+    pub incident_id: String,
+    pub shelter_id: String,
+    pub shelter_name: String,
+    pub asset_type: String,
+    pub headcount: u32,
+    pub status: String,
+    pub reserved_at: String,
+    pub released_at: Option<String>,
+    pub release_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphSummary {
+    pub dataset: String,
+    pub junctions: u64,
+    pub directed_segments: u64,
+    pub shelters: u64,
+    pub active_hazards: u64,
+    pub active_reservations: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct PassableEdge {
     pub source: String,
@@ -50,8 +73,24 @@ impl StateManager {
         Self { neo4j }
     }
 
+    pub async fn ensure_operational_schema(
+        &self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.neo4j
+            .graph
+            .run(query(
+                "CREATE CONSTRAINT resource_reservation_incident_unique IF NOT EXISTS \
+                 FOR (r:ResourceReservation) REQUIRE r.incident_id IS UNIQUE",
+            ))
+            .await?;
+        Ok(())
+    }
+
     /// Mutate road segment with hazard condition and bi-temporal expiration timestamp
-    pub async fn apply_hazard(&self, hazard: &HazardReport) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn apply_hazard(
+        &self,
+        hazard: &HazardReport,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let parts: Vec<&str> = hazard.road_segment.split('-').collect();
         if parts.len() != 2 {
             return Err(format!("Invalid road segment identifier: {}", hazard.road_segment).into());
@@ -78,7 +117,7 @@ impl StateManager {
              SET r.status = $status, \
                  r.active_weight = $weight, \
                  r.valid_until = datetime($valid_until) \
-             RETURN count(r) AS updated"
+             RETURN count(r) AS updated",
         )
         .param("src", src)
         .param("dst", dst)
@@ -91,11 +130,13 @@ impl StateManager {
     }
 
     /// Fetch all passable edges from Neo4j (edges where status = 'OPEN' OR valid_until < datetime())
-    pub async fn get_passable_subgraph(&self) -> Result<Vec<PassableEdge>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_passable_subgraph(
+        &self,
+    ) -> Result<Vec<PassableEdge>, Box<dyn std::error::Error + Send + Sync>> {
         let q = query(
             "MATCH (a:Junction)-[r:CONNECTS_TO]->(b:Junction) \
              WHERE r.status = 'OPEN' OR r.valid_until < datetime() \
-             RETURN a.id AS source, b.id AS target, r.base_distance_km AS weight"
+             RETURN a.id AS source, b.id AS target, r.base_distance_km AS weight",
         );
 
         let mut result = self.neo4j.graph.execute(q).await?;
@@ -105,7 +146,11 @@ impl StateManager {
             let source: String = row.get("source")?;
             let target: String = row.get("target")?;
             let weight: f64 = row.get("weight")?;
-            edges.push(PassableEdge { source, target, weight });
+            edges.push(PassableEdge {
+                source,
+                target,
+                weight,
+            });
         }
 
         Ok(edges)
@@ -192,7 +237,7 @@ impl StateManager {
             "MATCH ()-[r:CONNECTS_TO {segment_id: $segment_id}]->() \
              SET r.operational_status = $status, \
                  r.valid_until = datetime($valid_until) \
-             RETURN count(r) AS updated"
+             RETURN count(r) AS updated",
         )
         .param("segment_id", segment_id)
         .param("status", status_str)
@@ -216,7 +261,7 @@ impl StateManager {
              WHERE r.operational_status IS NOT NULL \
              SET r.operational_status = NULL, \
                  r.valid_until = NULL \
-             RETURN count(r) AS cleared"
+             RETURN count(r) AS cleared",
         )
         .param("dataset", dataset);
 
@@ -277,8 +322,78 @@ impl StateManager {
         }
     }
 
-    /// Seed relief shelters and depot facilities for the Aluva pilot
-    pub async fn seed_aluva_shelters(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// Register missing Aluva pilot shelters without changing existing
+    /// occupancy, fleet availability, or operational timestamps.
+    pub async fn ensure_aluva_shelters(
+        &self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let cypher = r#"
+            MERGE (s1:Shelter {id: 'S_ALUVA_TOWNHALL'})
+            ON CREATE SET s1.name = 'Aluva Town Hall Relief Hub',
+                s1.junction_id = 'node/4664235729',
+                s1.capacity = 250,
+                s1.current_occupancy = 0,
+                s1.ambulances_available = 6,
+                s1.trucks_available = 4,
+                s1.boats_available = 0,
+                s1.dataset = 'aluva-periyar-pilot',
+                s1.last_updated = datetime()
+
+            MERGE (s2:Shelter {id: 'S_UC_COLLEGE'})
+            ON CREATE SET s2.name = 'UC College Campus Relief Camp',
+                s2.junction_id = 'node/9903123560',
+                s2.capacity = 600,
+                s2.current_occupancy = 0,
+                s2.ambulances_available = 3,
+                s2.trucks_available = 8,
+                s2.boats_available = 0,
+                s2.dataset = 'aluva-periyar-pilot',
+                s2.last_updated = datetime()
+
+            MERGE (s3:Shelter {id: 'S_MANAPPURAM_DEPOT'})
+            ON CREATE SET s3.name = 'Periyar Riverside Rescue Boat Depot',
+                s3.junction_id = 'node/7048449098',
+                s3.capacity = 50,
+                s3.current_occupancy = 0,
+                s3.ambulances_available = 2,
+                s3.trucks_available = 2,
+                s3.boats_available = 10,
+                s3.dataset = 'aluva-periyar-pilot',
+                s3.last_updated = datetime()
+
+            MERGE (s4:Shelter {id: 'S_TALUK_HOSPITAL'})
+            ON CREATE SET s4.name = 'Aluva Taluk Hospital Medical Outpost',
+                s4.junction_id = 'node/343716109',
+                s4.capacity = 120,
+                s4.current_occupancy = 0,
+                s4.ambulances_available = 8,
+                s4.trucks_available = 0,
+                s4.boats_available = 0,
+                s4.dataset = 'aluva-periyar-pilot',
+                s4.last_updated = datetime()
+        "#;
+
+        self.neo4j.graph.run(query(cypher)).await?;
+        Ok(())
+    }
+
+    /// Reset relief shelters and depot facilities to the Aluva pilot baseline.
+    /// This is intentionally destructive to current allocation state and must
+    /// only be called by explicit reset/test workflows.
+    pub async fn seed_aluva_shelters(
+        &self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // This explicit demo reset invalidates any outstanding pilot
+        // reservations so a later compensation cannot over-credit reset fleet
+        // counters.
+        self.neo4j
+            .graph
+            .run(query(
+                "MATCH (r:ResourceReservation {dataset: 'aluva-periyar-pilot'}) \
+                 DETACH DELETE r",
+            ))
+            .await?;
+
         let cypher = r#"
             MERGE (s1:Shelter {id: 'S_ALUVA_TOWNHALL'})
             SET s1.name = 'Aluva Town Hall Relief Hub',
@@ -360,7 +475,11 @@ impl StateManager {
     }
 
     /// Query available shelters capable of accommodating the headcount and asset requirement
-    pub async fn find_candidate_shelters(&self, asset_type: &AssetType, headcount: u32) -> Result<Vec<Shelter>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn find_candidate_shelters(
+        &self,
+        asset_type: &AssetType,
+        headcount: u32,
+    ) -> Result<Vec<Shelter>, Box<dyn std::error::Error + Send + Sync>> {
         let asset_filter = match asset_type {
             AssetType::RescueBoat => "s.boats_available >= 1",
             AssetType::Ambulance => "s.ambulances_available >= 1",
@@ -414,17 +533,39 @@ impl StateManager {
         shelter_id: &str,
         asset_type: &AssetType,
         headcount: u32,
+        incident_id: &str,
     ) -> Result<Option<Shelter>, Box<dyn std::error::Error + Send + Sync>> {
-        let asset_decrement = match asset_type {
-            AssetType::RescueBoat => "s.boats_available = s.boats_available - 1,",
-            AssetType::Ambulance => "s.ambulances_available = s.ambulances_available - 1,",
-            AssetType::EvacTruck => "s.trucks_available = s.trucks_available - 1,",
-            AssetType::Helicopter => "",
+        let (asset_filter, asset_decrement, asset_name) = match asset_type {
+            AssetType::RescueBoat => (
+                "s.boats_available >= 1",
+                "s.boats_available = s.boats_available - 1,",
+                "RESCUE_BOAT",
+            ),
+            AssetType::Ambulance => (
+                "s.ambulances_available >= 1",
+                "s.ambulances_available = s.ambulances_available - 1,",
+                "AMBULANCE",
+            ),
+            AssetType::EvacTruck => (
+                "s.trucks_available >= 1",
+                "s.trucks_available = s.trucks_available - 1,",
+                "EVAC_TRUCK",
+            ),
+            AssetType::Helicopter => ("true", "", "HELICOPTER"),
         };
 
         let cypher = format!(
             "MATCH (s:Shelter {{id: $shelter_id}}) \
-             WHERE (s.capacity - s.current_occupancy) >= $headcount \
+             WHERE (s.capacity - s.current_occupancy) >= $headcount AND {} \
+             OPTIONAL MATCH (existing:ResourceReservation {{incident_id: $incident_id}}) \
+             WITH s, existing \
+             WHERE existing IS NULL \
+             CREATE (reservation:ResourceReservation {{ \
+                 incident_id: $incident_id, shelter_id: $shelter_id, \
+                 asset_type: $asset_type, headcount: $headcount, \
+                 dataset: 'aluva-periyar-pilot', \
+                 status: 'RESERVED', reserved_at: datetime() \
+             }})-[:RESERVES_AT]->(s) \
              SET s.current_occupancy = s.current_occupancy + $headcount, \
                  {} \
                  s.last_updated = datetime() \
@@ -432,12 +573,14 @@ impl StateManager {
                     s.capacity AS capacity, s.current_occupancy AS current_occupancy, \
                     s.boats_available AS boats_available, s.ambulances_available AS ambulances_available, \
                     s.trucks_available AS trucks_available",
-            asset_decrement
+            asset_filter, asset_decrement
         );
 
         let q = query(&cypher)
             .param("shelter_id", shelter_id)
-            .param("headcount", headcount as i64);
+            .param("headcount", headcount as i64)
+            .param("incident_id", incident_id)
+            .param("asset_type", asset_name);
 
         let mut result = self.neo4j.graph.execute(q).await?;
         if let Some(row) = result.next().await? {
@@ -465,6 +608,42 @@ impl StateManager {
         }
     }
 
+    /// Idempotently releases an active reservation owned by an incident.
+    pub async fn release_incident_reservation(
+        &self,
+        incident_id: &str,
+        reason: &str,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query(
+            "MATCH (reservation:ResourceReservation { \
+                 incident_id: $incident_id, status: 'RESERVED' \
+             })-[:RESERVES_AT]->(s:Shelter) \
+             SET s.current_occupancy = CASE \
+                     WHEN s.current_occupancy >= reservation.headcount \
+                     THEN s.current_occupancy - reservation.headcount ELSE 0 END, \
+                 s.boats_available = s.boats_available + CASE \
+                     WHEN reservation.asset_type = 'RESCUE_BOAT' THEN 1 ELSE 0 END, \
+                 s.ambulances_available = s.ambulances_available + CASE \
+                     WHEN reservation.asset_type = 'AMBULANCE' THEN 1 ELSE 0 END, \
+                 s.trucks_available = s.trucks_available + CASE \
+                     WHEN reservation.asset_type = 'EVAC_TRUCK' THEN 1 ELSE 0 END, \
+                 s.last_updated = datetime(), \
+                 reservation.status = 'RELEASED', \
+                 reservation.released_at = datetime(), \
+                 reservation.release_reason = $reason \
+             RETURN count(reservation) AS released",
+        )
+        .param("incident_id", incident_id)
+        .param("reason", reason);
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let released = match result.next().await? {
+            Some(row) => row.get::<i64>("released")? > 0,
+            None => false,
+        };
+        Ok(released)
+    }
+
     /// Retrieve ordered GPS coordinates (lon, lat) for a list of junction IDs
     pub async fn get_junction_coordinates(
         &self,
@@ -479,7 +658,7 @@ impl StateManager {
              WITH idx, $ids[idx] AS jid \
              MATCH (j:Junction {id: jid}) \
              RETURN idx, j.lat AS lat, j.lon AS lon \
-             ORDER BY idx"
+             ORDER BY idx",
         )
         .param("ids", junction_ids.to_vec());
 
@@ -528,6 +707,76 @@ impl StateManager {
         }
 
         Ok(list)
+    }
+
+    /// Read-only reservation projection for the local demonstration console.
+    pub async fn get_resource_reservations(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<ResourceReservationInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let bounded_limit = limit.clamp(1, 200);
+        let q = query(
+            "MATCH (r:ResourceReservation)-[:RESERVES_AT]->(s:Shelter) \
+             RETURN r.incident_id AS incident_id, r.shelter_id AS shelter_id, \
+                    s.name AS shelter_name, r.asset_type AS asset_type, \
+                    r.headcount AS headcount, r.status AS status, \
+                    toString(r.reserved_at) AS reserved_at, \
+                    CASE WHEN r.released_at IS NULL THEN null ELSE toString(r.released_at) END AS released_at, \
+                    r.release_reason AS release_reason \
+             ORDER BY r.reserved_at DESC LIMIT $limit",
+        )
+        .param("limit", bounded_limit as i64);
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let mut reservations = Vec::new();
+        while let Some(row) = result.next().await? {
+            reservations.push(ResourceReservationInfo {
+                incident_id: row.get("incident_id")?,
+                shelter_id: row.get("shelter_id")?,
+                shelter_name: row.get("shelter_name")?,
+                asset_type: row.get("asset_type")?,
+                headcount: row.get::<i64>("headcount")? as u32,
+                status: row.get("status")?,
+                reserved_at: row.get("reserved_at")?,
+                released_at: row.get("released_at")?,
+                release_reason: row.get("release_reason")?,
+            });
+        }
+        Ok(reservations)
+    }
+
+    /// Small bounded inventory used by the operator overview. It exposes
+    /// counts, never arbitrary Cypher or database credentials.
+    pub async fn get_graph_summary(
+        &self,
+        dataset: &str,
+    ) -> Result<GraphSummary, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query(
+            "CALL { MATCH (j:Junction {dataset: $dataset}) RETURN count(j) AS junctions } \
+             CALL { MATCH ()-[r:CONNECTS_TO {dataset: $dataset}]->() RETURN count(r) AS segments } \
+             CALL { MATCH (s:Shelter) RETURN count(s) AS shelters } \
+             CALL { MATCH ()-[h:CONNECTS_TO {dataset: $dataset}]->() \
+                    WHERE h.operational_status IS NOT NULL AND h.operational_status <> 'OPEN' \
+                      AND (h.valid_until IS NULL OR h.valid_until > datetime()) \
+                    RETURN count(h) AS hazards } \
+             CALL { MATCH (rr:ResourceReservation {dataset: $dataset, status: 'RESERVED'}) \
+                    RETURN count(rr) AS reservations } \
+             RETURN junctions, segments, shelters, hazards, reservations",
+        )
+        .param("dataset", dataset);
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let row = result
+            .next()
+            .await?
+            .ok_or("graph summary returned no row")?;
+        Ok(GraphSummary {
+            dataset: dataset.to_string(),
+            junctions: row.get::<i64>("junctions")? as u64,
+            directed_segments: row.get::<i64>("segments")? as u64,
+            shelters: row.get::<i64>("shelters")? as u64,
+            active_hazards: row.get::<i64>("hazards")? as u64,
+            active_reservations: row.get::<i64>("reservations")? as u64,
+        })
     }
 
     /// Query all active operational hazards / road closures
