@@ -213,6 +213,57 @@ pub struct AuditEvent {
     pub occurred_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RouteCostObjective {
+    FastestTime,
+    ShortestDistance,
+}
+
+/// Inputs accepted only after the independent verifier has certified every
+/// traversed segment. IDs, versions and verification timestamps are assigned
+/// by the control plane rather than accepted from a caller.
+#[derive(Debug, Clone)]
+pub struct VerifiedRouteInput {
+    pub dataset: String,
+    pub cost_objective: RouteCostObjective,
+    pub origin_shelter_id: String,
+    pub origin_shelter_name: String,
+    pub origin_junction_id: String,
+    pub victim_junction_id: String,
+    pub assigned_asset_id: String,
+    pub junction_path: Vec<String>,
+    pub segment_path: Vec<String>,
+    pub total_distance_km: f64,
+    pub total_travel_time_s: f64,
+    pub detour_reason: Option<String>,
+}
+
+/// Immutable evidence for a route that passed independent safety
+/// verification. Re-routing appends another decision instead of overwriting
+/// prior operational history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouteDecision {
+    pub route_id: String,
+    pub route_version: u64,
+    pub triage_revision: u64,
+    pub dataset: String,
+    pub cost_objective: RouteCostObjective,
+    pub origin_shelter_id: String,
+    pub origin_shelter_name: String,
+    pub origin_junction_id: String,
+    pub victim_junction_id: String,
+    pub assigned_asset_id: String,
+    pub junction_path: Vec<String>,
+    pub segment_path: Vec<String>,
+    pub total_distance_km: f64,
+    pub total_travel_time_s: f64,
+    pub detour_reason: Option<String>,
+    pub verified_segment_count: usize,
+    pub verified_by: String,
+    pub verified_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Incident {
     pub incident_id: String,
@@ -222,6 +273,8 @@ pub struct Incident {
     pub assigned_reviewer_id: Option<String>,
     pub triage_revisions: Vec<TriageRevision>,
     pub review_decisions: Vec<ReviewDecision>,
+    #[serde(default)]
+    pub route_decisions: Vec<RouteDecision>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -253,6 +306,7 @@ impl Incident {
             assigned_reviewer_id: None,
             triage_revisions: Vec::new(),
             review_decisions: Vec::new(),
+            route_decisions: Vec::new(),
             created_at: now,
             updated_at: now,
         };
@@ -275,6 +329,10 @@ impl Incident {
         self.triage_revisions
             .last()
             .map(|revision| &revision.triage)
+    }
+
+    pub fn current_route(&self) -> Option<&RouteDecision> {
+        self.route_decisions.last()
     }
 
     pub fn append_model_extraction(
@@ -326,9 +384,73 @@ impl Incident {
         {
             return Err(ControlPlaneError::DedicatedReviewActionRequired);
         }
+        if self.status == IncidentStatus::Verifying && next == IncidentStatus::RouteVerified {
+            return Err(ControlPlaneError::DedicatedRouteVerificationActionRequired);
+        }
         let permission = permission_for_transition(self.status, next)?;
         self.require_permission(actor, permission)?;
         self.apply_transition(actor, next, reason, now)
+    }
+
+    pub fn record_verified_route(
+        &mut self,
+        actor: &ActorContext,
+        expected_version: u64,
+        route: VerifiedRouteInput,
+        now: DateTime<Utc>,
+    ) -> Result<AuditEvent, ControlPlaneError> {
+        self.require_version(expected_version)?;
+        self.require_permission(actor, Permission::AdvancePipeline)?;
+        if self.status != IncidentStatus::Verifying {
+            return Err(ControlPlaneError::InvalidTransition {
+                from: self.status,
+                to: IncidentStatus::RouteVerified,
+            });
+        }
+        validate_verified_route(&route)?;
+        let triage_revision = self
+            .triage_revisions
+            .last()
+            .map(|revision| revision.revision)
+            .ok_or(ControlPlaneError::InvalidVerifiedRoute(
+                "a verified route must reference a persisted triage revision",
+            ))?;
+
+        let route_version = self
+            .route_decisions
+            .last()
+            .map_or(1, |decision| decision.route_version + 1);
+        let decision = RouteDecision {
+            route_id: Uuid::new_v4().to_string(),
+            route_version,
+            triage_revision,
+            dataset: route.dataset,
+            cost_objective: route.cost_objective,
+            origin_shelter_id: route.origin_shelter_id,
+            origin_shelter_name: route.origin_shelter_name,
+            origin_junction_id: route.origin_junction_id,
+            victim_junction_id: route.victim_junction_id,
+            assigned_asset_id: route.assigned_asset_id,
+            verified_segment_count: route.segment_path.len(),
+            junction_path: route.junction_path,
+            segment_path: route.segment_path,
+            total_distance_km: route.total_distance_km,
+            total_travel_time_s: route.total_travel_time_s,
+            detour_reason: route.detour_reason,
+            verified_by: actor.actor_id.clone(),
+            verified_at: now,
+        };
+
+        let event = self.apply_transition(
+            actor,
+            IncidentStatus::RouteVerified,
+            format!(
+                "Independent route verification passed; immutable route version {route_version} recorded"
+            ),
+            now,
+        )?;
+        self.route_decisions.push(decision);
+        Ok(event)
     }
 
     pub fn apply_review(
@@ -502,6 +624,43 @@ impl Incident {
     }
 }
 
+fn validate_verified_route(route: &VerifiedRouteInput) -> Result<(), ControlPlaneError> {
+    if route.dataset.trim().is_empty()
+        || route.origin_shelter_id.trim().is_empty()
+        || route.origin_shelter_name.trim().is_empty()
+        || route.origin_junction_id.trim().is_empty()
+        || route.victim_junction_id.trim().is_empty()
+        || route.assigned_asset_id.trim().is_empty()
+    {
+        return Err(ControlPlaneError::InvalidVerifiedRoute(
+            "route identity and allocation fields must be present",
+        ));
+    }
+    if route.junction_path.is_empty()
+        || route.junction_path.first() != Some(&route.origin_junction_id)
+        || route.junction_path.last() != Some(&route.victim_junction_id)
+    {
+        return Err(ControlPlaneError::InvalidVerifiedRoute(
+            "route endpoints must match the ordered junction path",
+        ));
+    }
+    if route.segment_path.len() + 1 != route.junction_path.len() {
+        return Err(ControlPlaneError::InvalidVerifiedRoute(
+            "segment count must be one less than junction count",
+        ));
+    }
+    if !route.total_distance_km.is_finite()
+        || route.total_distance_km < 0.0
+        || !route.total_travel_time_s.is_finite()
+        || route.total_travel_time_s < 0.0
+    {
+        return Err(ControlPlaneError::InvalidVerifiedRoute(
+            "route metrics must be finite and non-negative",
+        ));
+    }
+    Ok(())
+}
+
 pub fn triage_is_dispatch_ready(triage: &TriageReport) -> bool {
     !triage.needs_human_review
         && triage.uncertainty_reasons.is_empty()
@@ -569,4 +728,8 @@ pub enum ControlPlaneError {
     UnexpectedReviewedTriage,
     #[error("review approval/rejection must use the dedicated review action")]
     DedicatedReviewActionRequired,
+    #[error("route verification must use the dedicated verified-route action")]
+    DedicatedRouteVerificationActionRequired,
+    #[error("invalid verified route: {0}")]
+    InvalidVerifiedRoute(&'static str),
 }

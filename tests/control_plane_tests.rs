@@ -1,8 +1,8 @@
 use chrono::{TimeZone, Utc};
 use crisis_graph::models::{
     ActorContext, ActorRole, AssetType, CandidateHazardReport, ControlPlaneError, Incident,
-    IncidentStatus, ReviewDecisionKind, RoadStatus, SosAlert, TriageInferenceMetadata,
-    TriageReport, TriageRevisionSource,
+    IncidentStatus, ReviewDecisionKind, RoadStatus, RouteCostObjective, SosAlert,
+    TriageInferenceMetadata, TriageReport, TriageRevisionSource, VerifiedRouteInput,
 };
 
 fn at(second: u32) -> chrono::DateTime<Utc> {
@@ -64,6 +64,37 @@ fn responder() -> ActorContext {
 
 fn incident() -> Incident {
     Incident::receive(alert(), &system(), at(0)).unwrap().0
+}
+
+fn verifying_incident() -> Incident {
+    let mut incident = incident();
+    incident
+        .append_model_extraction(&system(), 1, triage(false), at(1))
+        .unwrap();
+    incident.status = IncidentStatus::Verifying;
+    incident.version = 7;
+    incident
+}
+
+fn verified_route() -> VerifiedRouteInput {
+    VerifiedRouteInput {
+        dataset: "aluva-periyar-pilot".to_string(),
+        cost_objective: RouteCostObjective::FastestTime,
+        origin_shelter_id: "S_TALUK_HOSPITAL".to_string(),
+        origin_shelter_name: "Aluva Taluk Hospital".to_string(),
+        origin_junction_id: "node/origin".to_string(),
+        victim_junction_id: "node/victim".to_string(),
+        assigned_asset_id: "AMBULANCE_UNIT_1".to_string(),
+        junction_path: vec![
+            "node/origin".to_string(),
+            "node/middle".to_string(),
+            "node/victim".to_string(),
+        ],
+        segment_path: vec!["segment/1".to_string(), "segment/2".to_string()],
+        total_distance_km: 1.25,
+        total_travel_time_s: 210.0,
+        detour_reason: None,
+    }
 }
 
 #[test]
@@ -312,6 +343,76 @@ fn state_machine_prevents_skipping_safety_stages() {
     );
     assert_eq!(incident.status, IncidentStatus::Received);
     assert_eq!(incident.version, 1);
+}
+
+#[test]
+fn verified_route_is_recorded_as_immutable_evidence_with_the_transition() {
+    let mut incident = verifying_incident();
+
+    let audit = incident
+        .record_verified_route(&system(), 7, verified_route(), at(1))
+        .unwrap();
+
+    assert_eq!(incident.status, IncidentStatus::RouteVerified);
+    assert_eq!(incident.version, 8);
+    assert_eq!(incident.route_decisions.len(), 1);
+    let decision = incident.current_route().unwrap();
+    assert_eq!(decision.route_version, 1);
+    assert_eq!(decision.triage_revision, 1);
+    assert_eq!(decision.segment_path, ["segment/1", "segment/2"]);
+    assert_eq!(decision.verified_segment_count, 2);
+    assert_eq!(decision.verified_by, "pipeline");
+    assert_eq!(audit.to_status, IncidentStatus::RouteVerified);
+    assert_eq!(audit.new_version, 8);
+}
+
+#[test]
+fn generic_transition_cannot_mark_route_verified_without_route_evidence() {
+    let mut incident = verifying_incident();
+
+    let error = incident
+        .transition(
+            &system(),
+            7,
+            IncidentStatus::RouteVerified,
+            "Attempted verification without evidence",
+            at(1),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ControlPlaneError::DedicatedRouteVerificationActionRequired
+    );
+    assert!(incident.route_decisions.is_empty());
+    assert_eq!(incident.status, IncidentStatus::Verifying);
+}
+
+#[test]
+fn verified_route_rejects_inconsistent_path_evidence_without_mutation() {
+    let mut incident = verifying_incident();
+    let mut route = verified_route();
+    route.victim_junction_id = "node/other".to_string();
+
+    let error = incident
+        .record_verified_route(&system(), 7, route, at(1))
+        .unwrap_err();
+
+    assert!(matches!(error, ControlPlaneError::InvalidVerifiedRoute(_)));
+    assert_eq!(incident.status, IncidentStatus::Verifying);
+    assert_eq!(incident.version, 7);
+    assert!(incident.route_decisions.is_empty());
+}
+
+#[test]
+fn older_incident_snapshots_deserialize_with_no_route_decisions() {
+    let incident = incident();
+    let mut snapshot = serde_json::to_value(&incident).unwrap();
+    snapshot.as_object_mut().unwrap().remove("route_decisions");
+
+    let restored: Incident = serde_json::from_value(snapshot).unwrap();
+
+    assert!(restored.route_decisions.is_empty());
 }
 
 #[test]

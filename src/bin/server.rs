@@ -27,7 +27,8 @@ use crisis_graph::db::{
 };
 use crisis_graph::ingestion::TriageExtractor;
 use crisis_graph::models::{
-    CrisisState, DispatchStatus, Incident, IncidentStatus, RoadStatus, SosAlert, TriageReport,
+    CrisisState, DispatchStatus, Incident, IncidentStatus, RoadStatus, RouteDecision, SosAlert,
+    TriageReport,
 };
 use crisis_graph::pipeline::{PersistedCrisisOrchestrator, PipelineStages};
 
@@ -78,6 +79,14 @@ pub struct ShelterSummary {
     pub id: String,
     pub name: String,
     pub junction_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IncidentRouteResponse {
+    pub incident_id: String,
+    pub incident_status: IncidentStatus,
+    pub route: RouteDecision,
+    pub geojson: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,6 +163,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/api/v1/dispatch", post(handle_dispatch))
         .route("/api/v1/incidents", get(list_incidents))
         .route("/api/v1/incidents/{incident_id}", get(get_incident))
+        .route(
+            "/api/v1/incidents/{incident_id}/route",
+            get(get_incident_route),
+        )
         .route(
             "/api/v1/incidents/{incident_id}/audit",
             get(get_incident_audit),
@@ -416,6 +429,94 @@ async fn get_incident_audit(
             warn!("Failed to load audit history for {incident_id}: {error}");
             StatusCode::INTERNAL_SERVER_ERROR
         })
+}
+
+async fn get_incident_route(
+    State(state): State<AppState>,
+    Path(incident_id): Path<String>,
+) -> Result<Json<IncidentRouteResponse>, StatusCode> {
+    let incident = state
+        .incident_repository
+        .get(&incident_id)
+        .await
+        .map_err(|error| {
+            warn!("Failed to load incident {incident_id}: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let route = incident
+        .current_route()
+        .cloned()
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let incident_status = incident.status;
+    let coordinates = state
+        .state_manager
+        .get_junction_coordinates(&route.junction_path)
+        .await
+        .map_err(|error| {
+            warn!("Failed to project route for incident {incident_id}: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    if coordinates.len() != route.junction_path.len() {
+        warn!(
+            incident_id,
+            expected = route.junction_path.len(),
+            actual = coordinates.len(),
+            "Persisted route references junctions missing from the baseline graph"
+        );
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let geojson = persisted_route_geojson(&route, &coordinates);
+    Ok(Json(IncidentRouteResponse {
+        incident_id,
+        incident_status,
+        route,
+        geojson,
+    }))
+}
+
+fn persisted_route_geojson(route: &RouteDecision, coordinates: &[[f64; 2]]) -> serde_json::Value {
+    let mut features = Vec::new();
+    if coordinates.len() >= 2 {
+        features.push(json!({
+            "type": "Feature",
+            "geometry": { "type": "LineString", "coordinates": coordinates },
+            "properties": {
+                "type": "route",
+                "route_id": route.route_id,
+                "route_version": route.route_version,
+                "triage_revision": route.triage_revision,
+                "status": "ROUTE_VERIFIED",
+                "distance_km": route.total_distance_km,
+                "travel_time_s": route.total_travel_time_s,
+                "verified_segment_count": route.verified_segment_count
+            }
+        }));
+    }
+    if let Some(origin) = coordinates.first() {
+        features.push(json!({
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": origin },
+            "properties": {
+                "type": "shelter",
+                "id": route.origin_shelter_id,
+                "name": route.origin_shelter_name,
+                "asset": route.assigned_asset_id
+            }
+        }));
+    }
+    if let Some(victim) = coordinates.last() {
+        features.push(json!({
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": victim },
+            "properties": {
+                "type": "victim",
+                "junction_id": route.victim_junction_id
+            }
+        }));
+    }
+    json!({ "type": "FeatureCollection", "features": features })
 }
 
 async fn get_resource_reservations(
@@ -737,5 +838,50 @@ async fn build_dispatch_response(
         tactical_brief: brief_text,
         geojson,
         errors: final_state.errors.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crisis_graph::models::RouteCostObjective;
+
+    #[test]
+    fn persisted_route_projection_contains_line_and_endpoint_evidence() {
+        let route = RouteDecision {
+            route_id: "route-1".to_string(),
+            route_version: 1,
+            triage_revision: 1,
+            dataset: "aluva-periyar-pilot".to_string(),
+            cost_objective: RouteCostObjective::FastestTime,
+            origin_shelter_id: "S_TALUK_HOSPITAL".to_string(),
+            origin_shelter_name: "Aluva Taluk Hospital".to_string(),
+            origin_junction_id: "node/1".to_string(),
+            victim_junction_id: "node/3".to_string(),
+            assigned_asset_id: "AMBULANCE_UNIT_1".to_string(),
+            junction_path: vec![
+                "node/1".to_string(),
+                "node/2".to_string(),
+                "node/3".to_string(),
+            ],
+            segment_path: vec!["segment/1".to_string(), "segment/2".to_string()],
+            total_distance_km: 1.4,
+            total_travel_time_s: 180.0,
+            detour_reason: None,
+            verified_segment_count: 2,
+            verified_by: "crisisgraph-pipeline".to_string(),
+            verified_at: Utc::now(),
+        };
+        let coordinates = [[76.35, 10.10], [76.36, 10.11], [76.37, 10.12]];
+
+        let geojson = persisted_route_geojson(&route, &coordinates);
+
+        let features = geojson["features"].as_array().unwrap();
+        assert_eq!(features.len(), 3);
+        assert_eq!(features[0]["geometry"]["type"], "LineString");
+        assert_eq!(features[0]["properties"]["route_id"], "route-1");
+        assert_eq!(features[0]["properties"]["verified_segment_count"], 2);
+        assert_eq!(features[1]["properties"]["type"], "shelter");
+        assert_eq!(features[2]["properties"]["type"], "victim");
     }
 }

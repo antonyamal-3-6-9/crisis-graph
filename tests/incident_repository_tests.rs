@@ -2,8 +2,8 @@ use chrono::Utc;
 use crisis_graph::config::Config;
 use crisis_graph::db::{IncidentRepository, IncidentRepositoryError, Neo4jClient};
 use crisis_graph::models::{
-    ActorContext, ActorRole, AssetType, Incident, IncidentStatus, ReviewDecisionKind, SosAlert,
-    TriageInferenceMetadata, TriageReport,
+    ActorContext, ActorRole, AssetType, Incident, IncidentStatus, ReviewDecisionKind,
+    RouteCostObjective, SosAlert, TriageInferenceMetadata, TriageReport, VerifiedRouteInput,
 };
 use neo4rs::query;
 use uuid::Uuid;
@@ -165,15 +165,54 @@ async fn neo4j_repository_persists_audit_history_and_rejects_stale_writes() {
             }
         ));
 
+        for (expected_version, next, reason) in [
+            (4, IncidentStatus::Allocating, "Begin allocation"),
+            (5, IncidentStatus::Routing, "Allocation committed"),
+            (6, IncidentStatus::Verifying, "Route calculated"),
+        ] {
+            let event = incident
+                .transition(&system(), expected_version, next, reason, Utc::now())
+                .unwrap();
+            repository.save_transition(&incident, &event).await.unwrap();
+        }
+        let route_event = incident
+            .record_verified_route(
+                &system(),
+                7,
+                VerifiedRouteInput {
+                    dataset: "aluva-periyar-pilot".to_string(),
+                    cost_objective: RouteCostObjective::FastestTime,
+                    origin_shelter_id: "S_TALUK_HOSPITAL".to_string(),
+                    origin_shelter_name: "Aluva Taluk Hospital".to_string(),
+                    origin_junction_id: "node/4664235699".to_string(),
+                    victim_junction_id: "node/4664235699".to_string(),
+                    assigned_asset_id: "AMBULANCE_UNIT_1".to_string(),
+                    junction_path: vec!["node/4664235699".to_string()],
+                    segment_path: vec![],
+                    total_distance_km: 0.0,
+                    total_travel_time_s: 0.0,
+                    detour_reason: None,
+                },
+                Utc::now(),
+            )
+            .unwrap();
+        repository
+            .save_transition(&incident, &route_event)
+            .await
+            .unwrap();
+
         let stored = repository.get(&incident_id).await.unwrap().unwrap();
-        assert_eq!(stored.status, IncidentStatus::TriageApproved);
-        assert_eq!(stored.version, 4);
+        assert_eq!(stored.status, IncidentStatus::RouteVerified);
+        assert_eq!(stored.version, 8);
         assert_eq!(stored.triage_revisions.len(), 2);
+        assert_eq!(stored.route_decisions.len(), 1);
+        assert_eq!(stored.current_route().unwrap().triage_revision, 2);
+        assert_eq!(stored.current_route().unwrap().route_version, 1);
 
         let audit = repository.audit_history(&incident_id).await.unwrap();
-        assert_eq!(audit.len(), 4);
+        assert_eq!(audit.len(), 8);
         assert_eq!(audit.first().unwrap().action, "INCIDENT_RECEIVED");
-        assert_eq!(audit.last().unwrap().new_version, 4);
+        assert_eq!(audit.last().unwrap().new_version, 8);
     }
     .await;
 

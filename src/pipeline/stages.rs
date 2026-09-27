@@ -479,20 +479,11 @@ impl PipelineStages {
             DispatchStatus::EscalateHumanDispatcher
         };
 
-        let primary_reason = state
-            .triage
-            .as_ref()
-            .filter(|triage| triage.needs_human_review)
-            .and_then(|triage| triage.uncertainty_reasons.first().cloned())
-            .or_else(|| {
-                state
-                    .errors
-                    .iter()
-                    .map(|reason| Self::humanize_pipeline_error(reason))
-                    .find(|reason| !reason.is_empty() && reason != "None")
-            })
-            .or_else(|| verification_notes.first().cloned())
-            .unwrap_or_else(|| "Human dispatcher review was requested".to_string());
+        let primary_reason = Self::primary_dispatch_reason(
+            &state,
+            &verification_notes,
+            dispatch_status == DispatchStatus::RoutedVerified,
+        );
 
         let action_required = if dispatch_status == DispatchStatus::RoutedVerified {
             "None".to_string()
@@ -670,6 +661,33 @@ impl PipelineStages {
             detail
         }
     }
+
+    fn primary_dispatch_reason(
+        state: &CrisisState,
+        verification_notes: &[String],
+        route_verified: bool,
+    ) -> String {
+        state
+            .triage
+            .as_ref()
+            .filter(|triage| triage.needs_human_review)
+            .and_then(|triage| triage.uncertainty_reasons.first().cloned())
+            .or_else(|| {
+                state
+                    .errors
+                    .iter()
+                    .map(|reason| Self::humanize_pipeline_error(reason))
+                    .find(|reason| !reason.is_empty() && reason != "None")
+            })
+            .or_else(|| verification_notes.first().cloned())
+            .unwrap_or_else(|| {
+                if route_verified {
+                    "All dispatch-critical facts were complete and the route passed independent safety verification".to_string()
+                } else {
+                    "Human dispatcher review was requested".to_string()
+                }
+            })
+    }
 }
 
 #[cfg(test)]
@@ -706,6 +724,25 @@ mod tests {
     fn replaces_empty_typed_error_with_review_reason() {
         assert_eq!(
             PipelineStages::humanize_pipeline_error("TriageRequiresHumanReview: "),
+            "Human dispatcher review was requested"
+        );
+    }
+
+    #[test]
+    fn verified_dispatch_does_not_use_human_review_fallback_reason() {
+        let state = crate::models::CrisisState::new(crate::models::SosAlert {
+            alert_id: "SOS-TEST".to_string(),
+            raw_text: "Test dispatch".to_string(),
+            timestamp: chrono::Utc::now(),
+            source_channel: None,
+        });
+
+        assert_eq!(
+            PipelineStages::primary_dispatch_reason(&state, &[], true),
+            "All dispatch-critical facts were complete and the route passed independent safety verification"
+        );
+        assert_eq!(
+            PipelineStages::primary_dispatch_reason(&state, &[], false),
             "Human dispatcher review was requested"
         );
     }

@@ -2,7 +2,7 @@
 
 const API = "/api/v1";
 const ALUVA = [10.10816, 76.35651];
-const state = { incidents: [], shelters: [], hazards: null, reservations: [], graph: null, maps: {}, layers: {}, selectedIncident: null };
+const state = { incidents: [], shelters: [], hazards: null, reservations: [], graph: null, maps: {}, layers: {}, selectedIncident: null, incidentRouteMap: null };
 
 const pageMeta = {
   "/": ["Emergency operations", "Operational overview"],
@@ -59,6 +59,13 @@ function startClock() {
 
 async function fetchJson(url, options) {
   const response = await fetch(url, options);
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json();
+}
+
+async function fetchOptionalJson(url) {
+  const response = await fetch(url);
+  if (response.status === 404) return null;
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json();
 }
@@ -210,11 +217,23 @@ async function selectIncident(id) {
   state.selectedIncident = id;
   renderIncidentList();
   const target = document.getElementById("incident-detail");
+  if (state.incidentRouteMap) {
+    state.incidentRouteMap.remove();
+    state.incidentRouteMap = null;
+  }
   target.innerHTML = '<div class="skeleton">Loading incident evidence and audit history…</div>';
   try {
-    const [incident, audit] = await Promise.all([fetchJson(`${API}/incidents/${encodeURIComponent(id)}`), fetchJson(`${API}/incidents/${encodeURIComponent(id)}/audit`)]);
+    const encodedId = encodeURIComponent(id);
+    const [incident, audit, persistedRoute] = await Promise.all([
+      fetchJson(`${API}/incidents/${encodedId}`),
+      fetchJson(`${API}/incidents/${encodedId}/audit`),
+      fetchOptionalJson(`${API}/incidents/${encodedId}/route`).catch((error) => ({ projection_error: error.message })),
+    ]);
     const triage = currentTriage(incident);
     const reasons = triage?.uncertainty_reasons || [];
+    const route = persistedRoute?.route;
+    const routeIsActive = ["ROUTE_VERIFIED", "ASSIGNED", "ACKNOWLEDGED", "EN_ROUTE", "ARRIVED"].includes(incident.status);
+    const routeIsInvalidated = incident.status === "ROUTE_INVALIDATED";
     target.innerHTML = `<div class="detail-title"><div><code>${escapeHtml(incident.incident_id)}</code><p>Version ${incident.version} · ${escapeHtml(incident.original_sos.source_channel || "unknown source")} · ${formatTime(incident.created_at)}</p></div>${statusBadge(incident.status)}</div>
       <div class="raw-message">${escapeHtml(incident.original_sos.raw_text)}</div>
       <div class="facts">
@@ -222,10 +241,32 @@ async function selectIncident(id) {
         ${fact("Requested asset", triage?.required_asset)}${fact("Confidence label", triage?.confidence_score)}${fact("Human review", triage?.needs_human_review == null ? null : triage.needs_human_review ? "Required" : "Not required")}
       </div>
       ${reasons.length ? `<div class="notice warning detail-notice"><b>Uncertainty</b><span>${reasons.map(escapeHtml).join(" · ")}</span></div>` : ""}
+      ${route ? `<section class="route-record"><div class="route-record-head"><div><p class="kicker">Immutable route evidence</p><h3>${routeIsInvalidated ? "Invalidated" : routeIsActive ? "Verified" : "Historical"} route v${route.route_version}</h3></div><span class="tag ${routeIsInvalidated ? "danger" : routeIsActive ? "success" : "muted"}">${routeIsInvalidated ? "Do not use" : routeIsActive ? `${route.verified_segment_count} segments certified` : "Audit evidence"}</span></div>
+        <div class="incident-route-map" id="incident-route-map"></div>
+        <div class="facts route-facts">${fact("Origin", route.origin_shelter_name)}${fact("Assigned unit", route.assigned_asset_id)}${fact("Triage revision", `v${route.triage_revision}`)}${fact("Distance", `${Number(route.total_distance_km).toFixed(2)} km`)}${fact("Travel time", `${(Number(route.total_travel_time_s) / 60).toFixed(1)} min`)}${fact("Objective", route.cost_objective)}${fact("Verified at", formatTime(route.verified_at))}</div>
+        <p class="route-proof"><code>${escapeHtml(route.route_id)}</code> · ${escapeHtml(route.dataset)} · ${escapeHtml(route.detour_reason || "Direct clear path")} · current incident state ${escapeHtml(incident.status)}</p>
+      </section>` : persistedRoute?.projection_error ? `<div class="notice warning detail-notice"><b>Route projection unavailable</b><span>The incident record remains readable, but its stored junction path could not be projected onto the current baseline map.</span></div>` : `<div class="notice detail-notice"><b>No persisted verified route</b><span>This incident stopped before route certification, or predates immutable route evidence storage.</span></div>`}
       <div class="timeline"><h3>Immutable audit timeline</h3>${audit.length ? audit.map((event) => `<div class="timeline-row"><b>${escapeHtml(event.action)}</b><p>${escapeHtml(event.from_status)} → ${escapeHtml(event.to_status)} · ${escapeHtml(event.reason)}</p><small>v${event.previous_version} → v${event.new_version} · ${formatTime(event.occurred_at)} · ${escapeHtml(event.actor_id)}</small></div>`).join("") : '<p class="supporting">No audit events found.</p>'}</div>`;
+    if (persistedRoute?.geojson) renderIncidentRoute(persistedRoute.geojson, routeIsActive, routeIsInvalidated);
   } catch (error) {
     target.innerHTML = '<div class="empty-state"><h3>Incident unavailable</h3><p>The persisted record could not be loaded.</p></div>';
   }
+}
+
+function renderIncidentRoute(geojson, isActive, isInvalidated) {
+  const container = document.getElementById("incident-route-map");
+  if (!container || !window.L || !geojson?.features?.length) return;
+  const map = L.map(container, { minZoom: 12, maxZoom: 18, maxBounds: [[10.0, 76.24], [10.22, 76.47]], maxBoundsViscosity: 1 }).setView(ALUVA, 13);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+  const layer = L.geoJSON(geojson, {
+    style: { color: isInvalidated ? "#b13e36" : isActive ? "#1f8a62" : "#647873", weight: 6, opacity: .9, dashArray: isActive ? null : "7 6" },
+    pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 8, color: "#fff", weight: 2, fillColor: feature.properties.type === "victim" ? "#b13e36" : "#245c7c", fillOpacity: 1 }),
+    onEachFeature: (feature, featureLayer) => featureLayer.bindPopup(feature.properties.type === "victim" ? `Victim junction<br><small>${escapeHtml(feature.properties.junction_id)}</small>` : feature.properties.type === "shelter" ? `<b>${escapeHtml(feature.properties.name)}</b><br>${escapeHtml(feature.properties.asset)}` : `Verified route v${escapeHtml(feature.properties.route_version)}`),
+  }).addTo(map);
+  const bounds = layer.getBounds();
+  if (bounds.isValid()) map.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
+  state.incidentRouteMap = map;
+  setTimeout(() => map.invalidateSize(), 30);
 }
 
 async function submitDispatch(event) {

@@ -5,7 +5,7 @@ use super::PipelineStages;
 use crate::db::IncidentStore;
 use crate::models::{
     triage_is_dispatch_ready, ActorContext, ActorRole, CrisisState, DispatchStatus, Incident,
-    IncidentStatus, SosAlert, TriageReport,
+    IncidentStatus, RouteCostObjective, SosAlert, TriageReport, VerifiedRouteInput,
 };
 
 #[derive(Debug, Clone)]
@@ -216,12 +216,35 @@ where
             return persisted_result(state, incident);
         }
 
+        let verified_route = match verified_route_from_state(&state) {
+            Ok(route) => route,
+            Err(error) => {
+                state
+                    .errors
+                    .push(format!("VerifiedRouteEvidenceError: {error}"));
+                state = self
+                    .stages
+                    .compensate_resource_allocation(state, "Verified route evidence was incomplete")
+                    .await;
+                if let Err(persistence_error) = self
+                    .persist_transition(
+                        &mut incident,
+                        IncidentStatus::ReviewRequired,
+                        format!("Verified route evidence was incomplete: {error}"),
+                    )
+                    .await
+                {
+                    return self
+                        .stop_on_persistence_failure(state, incident, persistence_error)
+                        .await;
+                }
+                state = self.stages.stage_4_verifier_and_brief(state).await;
+                return persisted_result(state, incident);
+            }
+        };
+
         if let Err(error) = self
-            .persist_transition(
-                &mut incident,
-                IncidentStatus::RouteVerified,
-                "Independent route verification passed",
-            )
+            .persist_verified_route(&mut incident, verified_route)
             .await
         {
             return self
@@ -264,6 +287,23 @@ where
                 reason,
                 Utc::now(),
             )
+            .map_err(|error| error.to_string())?;
+        self.store
+            .save_incident_transition(&candidate, &event)
+            .await
+            .map_err(|error| error.to_string())?;
+        *incident = candidate;
+        Ok(())
+    }
+
+    async fn persist_verified_route(
+        &self,
+        incident: &mut Incident,
+        route: VerifiedRouteInput,
+    ) -> Result<(), String> {
+        let mut candidate = incident.clone();
+        let event = candidate
+            .record_verified_route(&self.system_actor, incident.version, route, Utc::now())
             .map_err(|error| error.to_string())?;
         self.store
             .save_incident_transition(&candidate, &event)
@@ -330,6 +370,49 @@ fn review_reason(state: &CrisisState, fallback: &str) -> String {
     } else {
         state.errors.join("; ")
     }
+}
+
+fn verified_route_from_state(state: &CrisisState) -> Result<VerifiedRouteInput, &'static str> {
+    let shelter = state
+        .assigned_shelter
+        .as_ref()
+        .ok_or("assigned shelter is missing")?;
+    let assigned_asset_id = state
+        .assigned_asset
+        .clone()
+        .ok_or("assigned asset is missing")?;
+    let victim_junction_id = state
+        .triage
+        .as_ref()
+        .and_then(|triage| triage.resolved_junction_id.clone())
+        .ok_or("resolved victim junction is missing")?;
+    let junction_path = state
+        .computed_path
+        .clone()
+        .ok_or("ordered junction path is missing")?;
+    let segment_path = state
+        .segment_path
+        .clone()
+        .ok_or("ordered segment path is missing")?;
+    let total_distance_km = state.total_distance_km.ok_or("route distance is missing")?;
+    let total_travel_time_s = state
+        .total_travel_time_s
+        .ok_or("route travel time is missing")?;
+
+    Ok(VerifiedRouteInput {
+        dataset: "aluva-periyar-pilot".to_string(),
+        cost_objective: RouteCostObjective::FastestTime,
+        origin_shelter_id: shelter.id.clone(),
+        origin_shelter_name: shelter.name.clone(),
+        origin_junction_id: shelter.junction_id.clone(),
+        victim_junction_id,
+        assigned_asset_id,
+        junction_path,
+        segment_path,
+        total_distance_km,
+        total_travel_time_s,
+        detour_reason: state.detour_reason.clone(),
+    })
 }
 
 fn persisted_result(state: CrisisState, incident: Incident) -> PersistedProcessResult {
