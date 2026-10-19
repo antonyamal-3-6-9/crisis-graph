@@ -269,35 +269,98 @@ function renderIncidentRoute(geojson, isActive, isInvalidated) {
   setTimeout(() => map.invalidateSize(), 30);
 }
 
+let dispatchTimer = null;
+
 async function submitDispatch(event) {
   event.preventDefault();
   const input = document.getElementById("sos-text");
   const button = document.getElementById("dispatch-btn");
+  const resultPanel = document.getElementById("dispatch-result");
   const rawText = input.value.trim();
   if (!rawText) return;
+
   button.disabled = true;
-  button.querySelector("span").textContent = "Running persisted safety pipeline…";
+  button.innerHTML = '<i class="button-spinner"></i><span>Running safety pipeline…</span>';
   document.getElementById("dispatch-map-state").textContent = "Processing";
+
+  const startTime = performance.now();
+  if (resultPanel) {
+    resultPanel.innerHTML = `
+      <div class="processing-card">
+        <div class="circular-progress">
+          <svg viewBox="0 0 50 50">
+            <circle class="bg" cx="25" cy="25" r="20" fill="none" stroke-width="4"></circle>
+            <circle class="meter" cx="25" cy="25" r="20" fill="none" stroke-width="4"></circle>
+          </svg>
+        </div>
+        <h3>Processing emergency dispatch</h3>
+        <p class="processing-stage" id="stage-desc">Stage 1: Evaluating report via local Qwen3-4B-Instruct...</p>
+        <div class="processing-timer" id="pipeline-timer">Elapsed: 0.0s</div>
+      </div>
+    `;
+  }
+
+  if (dispatchTimer) clearInterval(dispatchTimer);
+  dispatchTimer = setInterval(() => {
+    const elapsedSec = ((performance.now() - startTime) / 1000).toFixed(1);
+    const timerEl = document.getElementById("pipeline-timer");
+    const descEl = document.getElementById("stage-desc");
+    if (timerEl) timerEl.textContent = `Elapsed: ${elapsedSec}s`;
+    if (descEl) {
+      if (elapsedSec < 2.5) {
+        descEl.textContent = "Stage 1: Evaluating report via local Qwen3-4B-Instruct...";
+      } else if (elapsedSec < 8.0) {
+        descEl.textContent = "Stage 1: Generating typed triage JSON schema (4B CPU inference)...";
+      } else {
+        descEl.textContent = "Stage 2–4: Reserving resources with Redis lock & verifying road topology in Neo4j...";
+      }
+    }
+  }, 100);
+
   try {
-    const result = await fetchJson(`${API}/dispatch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ raw_text: rawText, source_channel: document.getElementById("channel-select").value }) });
+    const result = await fetchJson(`${API}/dispatch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        raw_text: rawText,
+        source_channel: document.getElementById("channel-select").value
+      })
+    });
+    if (dispatchTimer) clearInterval(dispatchTimer);
     renderDispatchResult(result);
     await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations(), loadGraphSummary()]);
   } catch (error) {
+    if (dispatchTimer) clearInterval(dispatchTimer);
     showToast("Dispatch failed", error.message, true);
-    document.getElementById("dispatch-result").innerHTML = `<div class="empty-state"><h3>Pipeline unavailable</h3><p>${escapeHtml(error.message)}</p></div>`;
+    if (resultPanel) {
+      resultPanel.innerHTML = `<div class="empty-state"><h3>Pipeline unavailable</h3><p>${escapeHtml(error.message)}</p></div>`;
+    }
   } finally {
+    if (dispatchTimer) clearInterval(dispatchTimer);
     button.disabled = false;
-    button.querySelector("span").textContent = "Run triage, allocation and routing";
+    button.innerHTML = '<span>Run triage, allocation and routing</span>';
   }
 }
 
 function renderDispatchResult(data, fromStream = false) {
   const verified = data.status === "RoutedVerified" && data.incident_status === "ROUTE_VERIFIED";
   const triage = data.triage || {};
+  const inference = triage.inference || {};
+  const latencySec = inference.latency_ms ? (inference.latency_ms / 1000).toFixed(2) + "s" : null;
+  const speed = inference.tokens_per_second ? inference.tokens_per_second.toFixed(1) + " tok/s" : null;
+  const ttft = inference.prompt_eval_ms ? (inference.prompt_eval_ms / 1000).toFixed(2) + "s" : null;
+  const tokens = inference.completion_tokens ? `${inference.completion_tokens} tokens` : null;
+
   const target = document.getElementById("dispatch-result");
   if (target) target.innerHTML = `<div class="result-head"><div><p class="kicker">${verified ? "Certified deterministic result" : "Fail-closed outcome"}</p><h2>${verified ? "Route verified for dispatch proposal" : "Human escalation required"}</h2><code>${escapeHtml(data.alert_id)} · incident v${data.incident_version}</code></div>${statusBadge(data.incident_status)}</div>
     <div class="result-metrics"><div><span>Distance</span><b>${data.distance_km ? data.distance_km.toFixed(2) + " km" : "Not computed"}</b></div><div><span>Travel time</span><b>${data.travel_time_s ? (data.travel_time_s / 60).toFixed(1) + " min" : "Not computed"}</b></div><div><span>Asset</span><b>${escapeHtml(data.assigned_asset || "Unassigned")}</b></div><div><span>Segments verified</span><b>${number(data.segment_count || 0)}</b></div></div>
     <div class="evidence-grid"><div class="evidence"><h3>AI candidate extraction</h3><dl><dt>Location</dt><dd>${value(triage.victim_location_raw)}</dd><dt>Headcount</dt><dd>${value(triage.headcount)}</dd><dt>Requested asset</dt><dd>${value(triage.required_asset)}</dd><dt>Confidence</dt><dd>${value(triage.confidence_score)}</dd><dt>Review flag</dt><dd>${data.review_required ? "Required" : "Clear"}</dd></dl></div><div class="evidence"><h3>Deterministic controls</h3><dl><dt>Persistence</dt><dd>${data.control_plane_persisted ? "Neo4j committed" : "Failed"}</dd><dt>Duplicate</dt><dd>${data.duplicate_suppressed ? "Suppressed" : "No"}</dd><dt>Junction</dt><dd>${value(data.victim_junction)}</dd><dt>Origin</dt><dd>${value(data.assigned_shelter?.name)}</dd><dt>Route</dt><dd>${verified ? "100% segments passed" : "Unavailable / rejected"}</dd></dl></div></div>
+    <div class="inference-telemetry">
+      <div><span>Inference Latency</span><b>${latencySec || "N/A"}</b></div>
+      <div><span>Prompt Eval (TTFT)</span><b>${ttft || "N/A"}</b></div>
+      <div><span>Generation Speed</span><b>${speed || "N/A"}</b></div>
+      <div><span>Output Tokens</span><b>${tokens || "N/A"}</b></div>
+    </div>
     ${(triage.uncertainty_reasons || []).length ? `<ul class="error-list">${triage.uncertainty_reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${data.errors?.length ? `<ul class="error-list">${data.errors.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`;
   setText("dispatch-map-state", verified ? "Route verified" : "No dispatchable route");
   renderRoute(data.geojson, verified);

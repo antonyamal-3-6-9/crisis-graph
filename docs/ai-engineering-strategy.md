@@ -208,15 +208,21 @@ unrestricted model with authority over the specialists or operational stores.
 1. Complete the V3 runtime integration and two-case end-to-end gate: one
    complete request must route and verify; one incomplete request must escalate
    before allocation or routing.
-2. Finish and test the normal event-driven incident workflow, including stale
+2. Implement the typed `HazardObservation` lifecycle (`PENDING`, `VERIFIED`,
+   `REJECTED`, `EXPIRED`). Candidate reports remain non-authoritative; only an
+   authenticated authorized transition to `VERIFIED`, followed by deterministic
+   segment resolution, may mutate the routing overlay.
+3. Add reservation compensation or two-phase semantics so routing or
+   verification failure cannot strand shelter capacity or fleet inventory.
+4. Finish and test the normal event-driven incident workflow, including stale
    evidence, concurrent reservations, and fail-closed escalation.
-3. Define typed escalation reasons and the `ContingencyProposal` contract.
-4. Implement read-only deterministic tools and replayable fixtures.
-5. Add a single-agent ReAct-style loop with strict step, time, and tool budgets.
-6. Add dispatcher review, amendment, approval, rejection, expiry, and audit
+5. Define typed escalation reasons and the `ContingencyProposal` contract.
+6. Implement read-only deterministic tools and replayable fixtures.
+7. Add a single-agent ReAct-style loop with strict step, time, and tool budgets.
+8. Add dispatcher review, amendment, approval, rejection, expiry, and audit
    events.
-7. Revalidate every approved proposal through existing deterministic services.
-8. Evaluate the copilot on recorded simulations before considering multiple
+9. Revalidate every approved proposal through existing deterministic services.
+10. Evaluate the copilot on recorded simulations before considering multiple
    agents.
 
 ## Agent evaluation gates

@@ -46,6 +46,9 @@ fn triage(review: bool) -> TriageReport {
             prompt_version: "triage-extraction-v2.1.1".to_string(),
             schema_version: "triage-extraction-v2".to_string(),
             latency_ms: 10,
+            tokens_per_second: None,
+            prompt_eval_ms: None,
+            completion_tokens: None,
         },
     }
 }

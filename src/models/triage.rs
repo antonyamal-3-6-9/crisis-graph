@@ -60,6 +60,12 @@ pub struct TriageInferenceMetadata {
     pub prompt_version: String,
     pub schema_version: String,
     pub latency_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_per_second: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_eval_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

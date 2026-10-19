@@ -127,3 +127,63 @@ complete request must reach `RoutedVerified`; an incomplete request must reach
 Because the complete case mutates operational allocation state, the test must
 snapshot or isolate state and restore it deliberately rather than blindly
 resetting a shared database.
+
+Server startup uses `ensure_aluva_shelters`, which creates missing pilot
+facilities but preserves existing occupancy and fleet counts. Resetting those
+values is restricted to the explicit `POST /api/v1/shelters/reset` endpoint and
+test setup that deliberately calls `seed_aluva_shelters`.
+
+## Controlled end-to-end safety gate
+
+On 2026-09-22, the complete Axum → llama.cpp/V3 → Neo4j/Redis → Petgraph →
+segment-verifier path was exercised against the imported Aluva graph. The API
+used an isolated non-persistent Redis instance; shelter state was captured before
+the run and restored afterward.
+
+| Case | Expected | Observed |
+|---|---|---|
+| Missing requested vehicle | Escalate before allocation/routing | `EscalateHumanDispatcher`; null asset and shelter; zero distance and segments |
+| Complete ambulance request | Allocate, route, and verify | `RoutedVerified`; UC College ambulance; 4.107 km; 52 verified directed segments |
+
+The incomplete case left every shelter occupancy and fleet count unchanged. The
+complete case changed only UC College by `+3` occupants and `-1` ambulance, as
+expected; those values were restored to the pre-test snapshot. Both responses
+carried the configured V3 adapter hash and prompt/schema provenance.
+
+This test exposed and fixed a lifecycle defect before execution: API startup had
+called the destructive baseline seeder and would have erased existing
+allocations. Startup now performs non-destructive registration, while explicit
+reset behavior remains available for test/demo workflows. This two-case gate is
+integration evidence for the configured prototype, not load testing, field
+validation, or a production-safety claim.
+
+## Next feature milestone: verified hazard observations
+
+Add a typed `HazardObservation` intake pipeline with an explicit lifecycle:
+
+```text
+PENDING -> VERIFIED -> EXPIRED
+    |
+    +----> REJECTED
+```
+
+- `PENDING`: an unverified report extracted from a citizen message, call-centre
+  transcript, or connected feed. It may contain nullable road, status, or
+  duration fields and must retain source and inference provenance.
+- `VERIFIED`: an authorized dispatcher or trusted field-source policy has
+  accepted the observation and deterministic resolution has mapped it to exact
+  OSM segment IDs. Only this transition may update the operational overlay.
+- `REJECTED`: an authorized reviewer found the observation incorrect,
+  duplicated, malicious, or too ambiguous to act on. It remains auditable but
+  never affects routing.
+- `EXPIRED`: the verified observation's validity interval ended or an authorized
+  reopening superseded it. Its overlay effect is removed while history remains.
+
+The LLM may extract and organize candidate facts, but it cannot verify a report,
+resolve authority, close or reopen a segment, or write to the routing overlay.
+Overlay mutation requires authenticated authorization, deterministic road-name
+resolution, a validity interval, and an audit event.
+
+This is the next feature milestone after the current integration gate. A
+separate safety-hardening task must also add compensation or two-phase semantics
+for reservations when routing or final verification fails after allocation.

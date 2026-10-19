@@ -33,6 +33,34 @@ pub struct TriageExtractor {
 #[derive(Debug, Serialize, Deserialize)]
 struct OpenAiChatResponse {
     choices: Vec<OpenAiChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
+    #[serde(default)]
+    timings: Option<OpenAiTimings>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OpenAiUsage {
+    #[serde(default)]
+    completion_tokens: Option<u32>,
+    #[serde(default)]
+    prompt_tokens: Option<u32>,
+    #[serde(default)]
+    total_tokens: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OpenAiTimings {
+    #[serde(default)]
+    prompt_ms: Option<f64>,
+    #[serde(default)]
+    prompt_per_second: Option<f64>,
+    #[serde(default)]
+    predicted_ms: Option<f64>,
+    #[serde(default)]
+    predicted_per_second: Option<f64>,
+    #[serde(default)]
+    predicted_n: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -130,8 +158,28 @@ impl TriageExtractor {
             .message
             .content;
         let raw = Self::parse_model_content(&content)?;
+        let timings = response.timings;
+        let usage = response.usage;
+        let mut tokens_per_second = timings.as_ref().and_then(|t| t.predicted_per_second);
+        let prompt_eval_ms = timings.as_ref().and_then(|t| t.prompt_ms);
+        let completion_tokens = usage.as_ref().and_then(|u| u.completion_tokens);
+        let latency_ms = started.elapsed().as_millis() as u64;
 
-        self.build_triage_report(raw, started.elapsed().as_millis() as u64)
+        if tokens_per_second.is_none() {
+            if let Some(tokens) = completion_tokens {
+                if latency_ms > 0 {
+                    tokens_per_second = Some((tokens as f64) / (latency_ms as f64 / 1000.0));
+                }
+            }
+        }
+
+        self.build_triage_report(
+            raw,
+            latency_ms,
+            tokens_per_second,
+            prompt_eval_ms,
+            completion_tokens,
+        )
     }
 
     fn parse_model_content(content: &str) -> ExtractResult<RawLlmExtraction> {
@@ -213,6 +261,9 @@ impl TriageExtractor {
         &self,
         raw: RawLlmExtraction,
         latency_ms: u64,
+        tokens_per_second: Option<f64>,
+        prompt_eval_ms: Option<f64>,
+        completion_tokens: Option<u32>,
     ) -> ExtractResult<TriageReport> {
         if raw.schema_version != TRIAGE_SCHEMA_VERSION {
             return Err(format!(
@@ -371,6 +422,9 @@ impl TriageExtractor {
                 prompt_version: TRIAGE_PROMPT_VERSION.to_string(),
                 schema_version: TRIAGE_SCHEMA_VERSION.to_string(),
                 latency_ms,
+                tokens_per_second,
+                prompt_eval_ms,
+                completion_tokens,
             },
         })
     }
