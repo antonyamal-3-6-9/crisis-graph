@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, Request, State},
+    extract::{ConnectInfo, Path, Query, Request, State},
     http::StatusCode,
     middleware::{from_fn, Next},
     response::{
@@ -114,24 +114,52 @@ struct ListQuery {
 }
 
 async fn http_request_logger(req: Request, next: Next) -> Response {
+    let client_ip = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.to_string())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
     let method = req.method().clone();
-    let uri = req.uri().path().to_string();
-    let start = std::time::Instant::now();
+    let uri = req.uri().to_string();
+    let version = format!("{:?}", req.version());
 
-    let response = next.run(req).await;
+    let is_sse = uri.starts_with("/api/v1/events");
 
-    let latency = start.elapsed();
-    let status = response.status();
-
-    if uri.starts_with("/api/") && uri != "/api/v1/events" {
+    if !is_sse {
         info!(
             target: "http",
-            "{} {} {} in {:.2?}",
-            method,
-            uri,
-            status.as_u16(),
-            latency
+            "--> {client_ip} \"{method} {uri} {version}\""
         );
+    }
+
+    let start = std::time::Instant::now();
+    let response = next.run(req).await;
+    let elapsed = start.elapsed();
+    let status = response.status();
+    let status_code = status.as_u16();
+    let reason = status.canonical_reason().unwrap_or("");
+
+    let elapsed_str = if elapsed.as_secs() > 0 {
+        format!("{:.2}s", elapsed.as_secs_f64())
+    } else if elapsed.as_millis() > 0 {
+        format!("{:.2}ms", elapsed.as_secs_f64() * 1000.0)
+    } else {
+        format!("{}µs", elapsed.as_micros())
+    };
+
+    if !is_sse {
+        if elapsed.as_millis() >= 500 {
+            warn!(
+                target: "http",
+                "<-- {client_ip} \"{method} {uri} {version}\" {status_code} {reason} [SLOW: {elapsed_str}]"
+            );
+        } else {
+            info!(
+                target: "http",
+                "<-- {client_ip} \"{method} {uri} {version}\" {status_code} {reason} [{elapsed_str}]"
+            );
+        }
     }
 
     response
@@ -140,10 +168,12 @@ async fn http_request_logger(req: Request, next: Next) -> Response {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "crisis_graph=info,server=info,tower_http=info".into());
+        .unwrap_or_else(|_| "crisis_graph=info,server=info,http=info".into());
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
+        .with_target(true)
+        .compact()
         .init();
 
     info!("Starting CrisisGraph Emergency Dispatch Server...");
@@ -248,7 +278,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Web Dispatcher Console active at http://localhost:{}", port);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router).await?;
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
