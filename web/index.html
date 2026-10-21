@@ -12,7 +12,6 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="demo-ribbon"><strong>LOCAL DEMONSTRATION ENVIRONMENT</strong><span>Open console · no authentication · not for operational dispatch</span></div>
   <div class="shell">
     <aside class="rail">
       <a class="brand" href="/"><span class="brand-mark"><i></i><i></i><i></i></span><span><b>CrisisGraph</b><small>Aluva EOC pilot</small></span></a>
@@ -82,7 +81,6 @@
       </section>
 
       <section class="view" id="view-incidents" data-view="/incidents">
-        <div class="notice"><b>Interactive Dispatcher Console</b><span>Incidents requiring human clarification can be reviewed, updated, and certified for dispatch directly by an operator.</span></div>
         <div class="incident-layout">
           <article class="panel incident-browser"><div class="panel-head"><div><p class="kicker">Persisted control plane</p><h2>Incident registry</h2></div><button class="icon-button" id="refresh-incidents" title="Refresh">↻</button></div><div class="filters"><input id="incident-search" type="search" placeholder="Search ID, message, location…"><select id="incident-filter"><option value="ALL">All states</option><option value="REVIEW_REQUIRED">Review required</option><option value="ROUTE_VERIFIED">Route verified</option><option value="RECEIVED">Received</option></select></div><div id="incident-list" class="incident-list"><div class="skeleton">Loading incidents…</div></div></article>
           <article class="panel incident-detail" id="incident-detail"><div class="empty-state"><div class="empty-icon">⌁</div><h3>Select an incident</h3><p>Inspect its original message, immutable extraction revision, status, and audit timeline.</p></div></article>
@@ -90,7 +88,6 @@
       </section>
 
       <section class="view" id="view-hazards" data-view="/hazards">
-        <div class="notice warning"><b>Trusted operator simulation</b><span>These open controls directly update the Neo4j operational overlay. Production requires authenticated hazard verification.</span></div>
         <div class="hazard-layout">
           <article class="panel map-panel"><div class="panel-head"><div><p class="kicker">Operational overlay</p><h2>Active route restrictions</h2></div><span class="tag danger" id="hazard-count">0 active</span></div><div class="map" id="hazard-map"></div></article>
           <div class="stack"><article class="panel"><p class="kicker">Simulation controls</p><h2>Inject a known flood condition</h2><p class="supporting">Marks the configured UC College approach segment as flooded for four hours. Baseline OSM geography remains unchanged.</p><button class="button danger full" id="simulate-flood">Apply demonstration flood</button><button class="button ghost full" id="clear-hazards">Clear operational hazards</button></article><article class="panel"><div class="panel-head"><div><p class="kicker">Current evidence</p><h2>Hazard segments</h2></div></div><div id="hazard-list" class="compact-list"><div class="skeleton">Loading overlay…</div></div></article></div>
@@ -98,7 +95,6 @@
       </section>
 
       <section class="view" id="view-resources" data-view="/resources">
-        <div class="notice"><b>Atomic resource state</b><span>Reservations are owned by incident ID and compensated idempotently after downstream failure.</span></div>
         <div id="resource-cards" class="resource-grid"><div class="skeleton">Loading relief hubs…</div></div>
         <article class="panel table-panel"><div class="panel-head"><div><p class="kicker">Reservation ledger</p><h2>Incident-owned allocations</h2></div><button class="button ghost compact" id="reset-resources">Reset demo resources</button></div><div class="table-wrap"><table><thead><tr><th>Incident</th><th>Relief hub</th><th>Asset</th><th>People</th><th>Status</th><th>Reserved</th><th>Disposition</th></tr></thead><tbody id="reservation-table"><tr><td colspan="7" class="muted-cell">Loading reservation history…</td></tr></tbody></table></div></article>
       </section>

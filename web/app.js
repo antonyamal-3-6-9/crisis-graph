@@ -78,17 +78,59 @@ function startClock() {
   setInterval(update, 1000);
 }
 
-async function fetchJson(url, options) {
-  const response = await fetch(url, options);
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  return response.json();
+async function fetchJson(url, options = {}) {
+  const method = options.method || "GET";
+  const start = performance.now();
+  console.groupCollapsed(`%c[API] %c${method} %c${url}`, "color:#3b82f6;font-weight:bold;", "color:#10b981;font-weight:bold;", "color:#6b7280;");
+  if (options.body) {
+    try { console.log("Request Body:", JSON.parse(options.body)); } catch (_) { console.log("Request Body:", options.body); }
+  }
+  try {
+    const response = await fetch(url, options);
+    const elapsed = (performance.now() - start).toFixed(1);
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`Status: ${response.status} ${response.statusText} (${elapsed}ms)`, errText);
+      console.groupEnd();
+      throw new Error(`${response.status} ${response.statusText}: ${errText}`);
+    }
+    const data = await response.json();
+    console.log(`Response (${elapsed}ms):`, data);
+    console.groupEnd();
+    return data;
+  } catch (err) {
+    console.error("API Error:", err);
+    console.groupEnd();
+    throw err;
+  }
 }
 
 async function fetchOptionalJson(url) {
-  const response = await fetch(url);
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  return response.json();
+  const start = performance.now();
+  console.groupCollapsed(`%c[API Optional] %cGET %c${url}`, "color:#8b5cf6;font-weight:bold;", "color:#10b981;font-weight:bold;", "color:#6b7280;");
+  try {
+    const response = await fetch(url);
+    const elapsed = (performance.now() - start).toFixed(1);
+    if (response.status === 404) {
+      console.log(`Status 404 (Not Found) in ${elapsed}ms`);
+      console.groupEnd();
+      return null;
+    }
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`Status: ${response.status} ${response.statusText} (${elapsed}ms)`, errText);
+      console.groupEnd();
+      throw new Error(`${response.status} ${response.statusText}: ${errText}`);
+    }
+    const data = await response.json();
+    console.log(`Response (${elapsed}ms):`, data);
+    console.groupEnd();
+    return data;
+  } catch (err) {
+    console.error("Optional fetch error:", err);
+    console.groupEnd();
+    throw err;
+  }
 }
 
 async function loadHealth() {
@@ -149,6 +191,10 @@ async function loadIncidents() {
     setText("metric-review", number(reviewCount));
     renderOverviewIncidents();
     renderIncidentList();
+    if (!state.selectedIncident && state.incidents.length > 0) {
+      const reviewItem = state.incidents.find((i) => i.status === "REVIEW_REQUIRED");
+      selectIncident((reviewItem || state.incidents[0]).incident_id);
+    }
   } catch (error) {
     renderFailure("overview-incidents", "Incident registry could not be loaded.");
     renderFailure("incident-list", "Incident registry could not be loaded.");
@@ -241,6 +287,175 @@ function renderIncidentList() {
   target.querySelectorAll("[data-incident-id]").forEach((row) => row.addEventListener("click", () => selectIncident(row.dataset.incidentId)));
 }
 
+function renderReviewCardHtml(prefix, incidentId, version, triage) {
+  let suggestedJunction = triage?.resolved_junction_id || "";
+  if (!suggestedJunction && triage?.victim_location_raw) {
+    const loc = triage.victim_location_raw.toLowerCase();
+    if (loc.includes("bank")) suggestedJunction = "node/4742583964";
+    else if (loc.includes("railway") || loc.includes("station")) suggestedJunction = "node/4664235699";
+    else if (loc.includes("manappuram") || loc.includes("temple")) suggestedJunction = "node/7048449098";
+    else if (loc.includes("pump")) suggestedJunction = "node/7992454789";
+    else if (loc.includes("town hall")) suggestedJunction = "node/1085737525";
+    else if (loc.includes("hospital")) suggestedJunction = "node/343716109";
+    else if (loc.includes("uc") || loc.includes("college")) suggestedJunction = "node/9903123560";
+  }
+  if (!suggestedJunction) suggestedJunction = "node/4742583964";
+
+  const suggestedHeadcount = triage?.headcount || 4;
+  const suggestedAsset = triage?.required_asset || "AMBULANCE";
+  const suggestedNotes = triage?.uncertainty_reasons?.length
+    ? "Resolved ambiguous report: verified victim count, vehicle class, and road access."
+    : "Dispatcher verified and authorized dispatch.";
+
+  return `
+    <section class="review-action-card" id="${prefix}-card">
+      <div class="review-action-head">
+        <div>
+          <p class="kicker">Human-in-the-loop governance</p>
+          <h3>Dispatcher Review & Authorization</h3>
+        </div>
+        <span class="status review">Awaiting Dispatcher Decision</span>
+      </div>
+      <p class="supporting" style="margin: 4px 0 14px; font-size: 11px;">
+        The candidate extraction flagged uncertainties. Automated dispatch was safely halted. Review candidate facts below to authorize allocation and routing:
+      </p>
+      <form id="${prefix}-form" onsubmit="return false;">
+        <div class="form-row" style="margin-bottom: 8px;">
+          <div>
+            <label for="${prefix}-headcount">Headcount (Persons)</label>
+            <input type="number" id="${prefix}-headcount" min="1" max="100" value="${suggestedHeadcount}" required />
+          </div>
+          <div>
+            <label for="${prefix}-asset">Authorized Asset Class</label>
+            <select id="${prefix}-asset" required>
+              <option value="AMBULANCE" ${suggestedAsset === "AMBULANCE" ? "selected" : ""}>Ambulance (Road)</option>
+              <option value="EVAC_TRUCK" ${suggestedAsset === "EVAC_TRUCK" ? "selected" : ""}>Evacuation Truck (Heavy/Flood)</option>
+              <option value="RESCUE_BOAT" ${suggestedAsset === "RESCUE_BOAT" ? "selected" : ""}>Rescue Boat (Water)</option>
+              <option value="HELICOPTER" ${suggestedAsset === "HELICOPTER" ? "selected" : ""}>Helicopter (Air)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row" style="margin-bottom: 8px;">
+          <div>
+            <label for="${prefix}-junction">Resolved OSM Junction</label>
+            <input type="text" id="${prefix}-junction" list="landmark-junctions" value="${escapeHtml(suggestedJunction)}" placeholder="e.g. node/4742583964" required />
+            <datalist id="landmark-junctions">
+              <option value="node/4742583964">Bank Junction (Aluva)</option>
+              <option value="node/4664235699">Aluva Railway Station</option>
+              <option value="node/7992454789">Pump Junction</option>
+              <option value="node/7048449098">Manappuram Shiva Temple</option>
+              <option value="node/1085737525">Aluva Town Hall</option>
+              <option value="node/9903123560">UC College</option>
+              <option value="node/343716109">Taluk Hospital</option>
+            </datalist>
+          </div>
+          <div>
+            <label for="${prefix}-callsign">Dispatcher Call-sign</label>
+            <input type="text" id="${prefix}-callsign" value="dispatcher_station_1" required />
+          </div>
+        </div>
+        <div style="margin-bottom: 8px;">
+          <label for="${prefix}-notes">Audit Log / Justification</label>
+          <input type="text" id="${prefix}-notes" value="${escapeHtml(suggestedNotes)}" placeholder="Enter reason for audit record..." required />
+        </div>
+        <div class="review-btn-row">
+          <button type="button" class="button primary" id="${prefix}-approve-btn">
+            <span>✓ Authorize & Dispatch</span>
+          </button>
+          <button type="button" class="button danger" id="${prefix}-reject-btn">
+            <span>✕ Reject Incident</span>
+          </button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function bindReviewCardActions(prefix, incidentId, version, onComplete) {
+  const approveBtn = document.getElementById(`${prefix}-approve-btn`);
+  const rejectBtn = document.getElementById(`${prefix}-reject-btn`);
+  if (!approveBtn || !rejectBtn) return;
+
+  const encodedId = encodeURIComponent(incidentId);
+
+  approveBtn.addEventListener("click", async () => {
+    const headcount = parseInt(document.getElementById(`${prefix}-headcount`)?.value, 10);
+    const required_asset = document.getElementById(`${prefix}-asset`)?.value;
+    const resolved_junction_id = document.getElementById(`${prefix}-junction`)?.value.trim();
+    const reviewer_id = document.getElementById(`${prefix}-callsign`)?.value.trim() || "dispatcher_station_1";
+    const reason = document.getElementById(`${prefix}-notes`)?.value.trim() || "Dispatcher verified and authorized dispatch";
+
+    if (!headcount || isNaN(headcount) || headcount < 1) {
+      showToast("Validation Error", "Please provide a valid headcount (>= 1).", true);
+      return;
+    }
+    if (!resolved_junction_id) {
+      showToast("Validation Error", "Please provide a valid victim junction ID.", true);
+      return;
+    }
+
+    approveBtn.disabled = true;
+    rejectBtn.disabled = true;
+    approveBtn.innerHTML = '<i class="button-spinner"></i><span>Authorizing dispatch…</span>';
+
+    try {
+      const res = await fetchJson(`${API}/incidents/${encodedId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision: "APPROVE",
+          expected_version: version,
+          reason,
+          reviewer_id,
+          headcount,
+          required_asset,
+          resolved_junction_id,
+        }),
+      });
+
+      showToast("Dispatch Authorized", `Incident ${incidentId} routed and verified!`);
+      await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations(), loadGraphSummary()]);
+      if (onComplete) onComplete(res);
+    } catch (err) {
+      showToast("Authorization Failed", err.message, true);
+      approveBtn.disabled = false;
+      rejectBtn.disabled = false;
+      approveBtn.innerHTML = '<span>✓ Authorize & Dispatch</span>';
+    }
+  });
+
+  rejectBtn.addEventListener("click", async () => {
+    const reviewer_id = document.getElementById(`${prefix}-callsign`)?.value.trim() || "dispatcher_station_1";
+    const reason = document.getElementById(`${prefix}-notes`)?.value.trim() || "Rejected by dispatcher";
+
+    approveBtn.disabled = true;
+    rejectBtn.disabled = true;
+    rejectBtn.innerHTML = '<i class="button-spinner"></i><span>Rejecting…</span>';
+
+    try {
+      const res = await fetchJson(`${API}/incidents/${encodedId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision: "REJECT",
+          expected_version: version,
+          reason,
+          reviewer_id,
+        }),
+      });
+
+      showToast("Incident Rejected", `Incident ${incidentId} marked as rejected.`);
+      await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations(), loadGraphSummary()]);
+      if (onComplete) onComplete(res);
+    } catch (err) {
+      showToast("Rejection Failed", err.message, true);
+      approveBtn.disabled = false;
+      rejectBtn.disabled = false;
+      rejectBtn.innerHTML = '<span>✕ Reject Incident</span>';
+    }
+  });
+}
+
 async function selectIncident(id) {
   state.selectedIncident = id;
   renderIncidentList();
@@ -264,25 +479,6 @@ async function selectIncident(id) {
     const routeIsInvalidated = incident.status === "ROUTE_INVALIDATED";
     const needsReview = incident.status === "REVIEW_REQUIRED";
 
-    let suggestedJunction = triage?.resolved_junction_id || "";
-    if (!suggestedJunction && triage?.victim_location_raw) {
-      const loc = triage.victim_location_raw.toLowerCase();
-      if (loc.includes("bank")) suggestedJunction = "node/4742583964";
-      else if (loc.includes("railway") || loc.includes("station")) suggestedJunction = "node/4664235699";
-      else if (loc.includes("manappuram") || loc.includes("temple")) suggestedJunction = "node/7048449098";
-      else if (loc.includes("pump")) suggestedJunction = "node/7992454789";
-      else if (loc.includes("town hall")) suggestedJunction = "node/1085737525";
-      else if (loc.includes("hospital")) suggestedJunction = "node/343716109";
-      else if (loc.includes("uc") || loc.includes("college")) suggestedJunction = "node/9903123560";
-    }
-    if (!suggestedJunction) suggestedJunction = "node/4742583964";
-
-    const suggestedHeadcount = triage?.headcount || 4;
-    const suggestedAsset = triage?.required_asset || "AMBULANCE";
-    const suggestedNotes = triage?.uncertainty_reasons?.length
-      ? "Resolved ambiguous report: verified victim count, vehicle class, and road access."
-      : "Dispatcher verified and authorized dispatch.";
-
     target.innerHTML = `<div class="detail-title"><div><code>${escapeHtml(incident.incident_id)}</code><p>Version ${incident.version} · ${escapeHtml(incident.original_sos.source_channel || "unknown source")} · ${formatTime(incident.created_at)}</p></div>${statusBadge(incident.status)}</div>
       <div class="raw-message">${escapeHtml(incident.original_sos.raw_text)}</div>
       <div class="facts">
@@ -290,68 +486,7 @@ async function selectIncident(id) {
         ${fact("Requested asset", triage?.required_asset)}${fact("Confidence label", triage?.confidence_score)}${fact("Human review", triage?.needs_human_review == null ? null : triage.needs_human_review ? "Required" : "Not required")}
       </div>
       ${reasons.length ? `<div class="notice warning detail-notice"><b>Uncertainty</b><span>${reasons.map(escapeHtml).join(" · ")}</span></div>` : ""}
-      ${needsReview ? `
-      <section class="review-action-card" id="review-card">
-        <div class="review-action-head">
-          <div>
-            <p class="kicker">Human-in-the-loop governance</p>
-            <h3>Dispatcher Review & Authorization</h3>
-          </div>
-          <span class="status review">Awaiting Dispatcher</span>
-        </div>
-        <p class="supporting" style="margin: 4px 0 14px; font-size: 11px;">
-          The local model flagged ambiguities or missing fields. Automated dispatch was safely halted. Review candidate facts below and confirm allocation and routing.
-        </p>
-        <form id="review-form" onsubmit="return false;">
-          <div class="form-row" style="margin-bottom: 8px;">
-            <div>
-              <label for="review-headcount">Headcount (Persons)</label>
-              <input type="number" id="review-headcount" min="1" max="100" value="${suggestedHeadcount}" required />
-            </div>
-            <div>
-              <label for="review-asset">Authorized Asset Class</label>
-              <select id="review-asset" required>
-                <option value="AMBULANCE" ${suggestedAsset === "AMBULANCE" ? "selected" : ""}>Ambulance (Road)</option>
-                <option value="EVAC_TRUCK" ${suggestedAsset === "EVAC_TRUCK" ? "selected" : ""}>Evacuation Truck (Heavy/Flood)</option>
-                <option value="RESCUE_BOAT" ${suggestedAsset === "RESCUE_BOAT" ? "selected" : ""}>Rescue Boat (Water)</option>
-                <option value="HELICOPTER" ${suggestedAsset === "HELICOPTER" ? "selected" : ""}>Helicopter (Air)</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row" style="margin-bottom: 8px;">
-            <div>
-              <label for="review-junction">Resolved OSM Junction</label>
-              <input type="text" id="review-junction" list="landmark-junctions" value="${escapeHtml(suggestedJunction)}" placeholder="e.g. node/4742583964" required />
-              <datalist id="landmark-junctions">
-                <option value="node/4742583964">Bank Junction (Aluva)</option>
-                <option value="node/4664235699">Aluva Railway Station</option>
-                <option value="node/7992454789">Pump Junction</option>
-                <option value="node/7048449098">Manappuram Shiva Temple</option>
-                <option value="node/1085737525">Aluva Town Hall</option>
-                <option value="node/9903123560">UC College</option>
-                <option value="node/343716109">Taluk Hospital</option>
-              </datalist>
-            </div>
-            <div>
-              <label for="review-callsign">Dispatcher Call-sign</label>
-              <input type="text" id="review-callsign" value="dispatcher_station_1" required />
-            </div>
-          </div>
-          <div style="margin-bottom: 8px;">
-            <label for="review-notes">Audit Log / Justification</label>
-            <input type="text" id="review-notes" value="${escapeHtml(suggestedNotes)}" placeholder="Enter reason for audit record..." required />
-          </div>
-          <div class="review-btn-row">
-            <button type="button" class="button primary" id="btn-review-approve">
-              <span>✓ Authorize & Dispatch</span>
-            </button>
-            <button type="button" class="button danger" id="btn-review-reject">
-              <span>✕ Reject Report</span>
-            </button>
-          </div>
-        </form>
-      </section>
-      ` : ""}
+      ${needsReview ? renderReviewCardHtml("incident-review", incident.incident_id, incident.version, triage) : ""}
       ${route ? `<section class="route-record"><div class="route-record-head"><div><p class="kicker">Immutable route evidence</p><h3>${routeIsInvalidated ? "Invalidated" : routeIsActive ? "Verified" : "Historical"} route v${route.route_version}</h3></div><span class="tag ${routeIsInvalidated ? "danger" : routeIsActive ? "success" : "muted"}">${routeIsInvalidated ? "Do not use" : routeIsActive ? `${route.verified_segment_count} segments certified` : "Audit evidence"}</span></div>
         <div class="incident-route-map" id="incident-route-map"></div>
         <div class="facts route-facts">${fact("Origin", route.origin_shelter_name)}${fact("Assigned unit", route.assigned_asset_id)}${fact("Triage revision", `v${route.triage_revision}`)}${fact("Distance", `${Number(route.total_distance_km).toFixed(2)} km`)}${fact("Travel time", `${(Number(route.total_travel_time_s) / 60).toFixed(1)} min`)}${fact("Objective", route.cost_objective)}${fact("Verified at", formatTime(route.verified_at))}</div>
@@ -360,84 +495,8 @@ async function selectIncident(id) {
       <div class="timeline"><h3>Immutable audit timeline</h3>${audit.length ? audit.map((event) => `<div class="timeline-row"><b>${escapeHtml(event.action)}</b><p>${escapeHtml(event.from_status)} → ${escapeHtml(event.to_status)} · ${escapeHtml(event.reason)}</p><small>v${event.previous_version} → v${event.new_version} · ${formatTime(event.occurred_at)} · ${escapeHtml(event.actor_id)}</small></div>`).join("") : '<p class="supporting">No audit events found.</p>'}</div>`;
 
     if (needsReview) {
-      const approveBtn = document.getElementById("btn-review-approve");
-      const rejectBtn = document.getElementById("btn-review-reject");
-
-      approveBtn?.addEventListener("click", async () => {
-        const headcount = parseInt(document.getElementById("review-headcount")?.value, 10);
-        const required_asset = document.getElementById("review-asset")?.value;
-        const resolved_junction_id = document.getElementById("review-junction")?.value.trim();
-        const reviewer_id = document.getElementById("review-callsign")?.value.trim() || "dispatcher_station_1";
-        const reason = document.getElementById("review-notes")?.value.trim() || "Dispatcher verified and authorized dispatch";
-
-        if (!headcount || isNaN(headcount) || headcount < 1) {
-          showToast("Validation Error", "Please provide a valid headcount (>= 1).", true);
-          return;
-        }
-        if (!resolved_junction_id) {
-          showToast("Validation Error", "Please provide a valid victim junction ID.", true);
-          return;
-        }
-
-        approveBtn.disabled = true;
-        rejectBtn.disabled = true;
-        approveBtn.innerHTML = '<i class="button-spinner"></i><span>Authorizing dispatch…</span>';
-
-        try {
-          await fetchJson(`${API}/incidents/${encodedId}/review`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              decision: "APPROVE",
-              expected_version: incident.version,
-              reason,
-              reviewer_id,
-              headcount,
-              required_asset,
-              resolved_junction_id,
-            }),
-          });
-
-          showToast("Dispatch Authorized", `Incident ${incident.incident_id} routed and verified!`);
-          await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations(), loadGraphSummary()]);
-          await selectIncident(incident.incident_id);
-        } catch (err) {
-          showToast("Authorization Failed", err.message, true);
-          approveBtn.disabled = false;
-          rejectBtn.disabled = false;
-          approveBtn.innerHTML = '<span>✓ Authorize & Dispatch</span>';
-        }
-      });
-
-      rejectBtn?.addEventListener("click", async () => {
-        const reviewer_id = document.getElementById("review-callsign")?.value.trim() || "dispatcher_station_1";
-        const reason = document.getElementById("review-notes")?.value.trim() || "Rejected by dispatcher";
-
-        approveBtn.disabled = true;
-        rejectBtn.disabled = true;
-        rejectBtn.innerHTML = '<i class="button-spinner"></i><span>Rejecting…</span>';
-
-        try {
-          await fetchJson(`${API}/incidents/${encodedId}/review`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              decision: "REJECT",
-              expected_version: incident.version,
-              reason,
-              reviewer_id,
-            }),
-          });
-
-          showToast("Incident Rejected", `Incident ${incident.incident_id} marked as rejected.`);
-          await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations(), loadGraphSummary()]);
-          await selectIncident(incident.incident_id);
-        } catch (err) {
-          showToast("Rejection Failed", err.message, true);
-          approveBtn.disabled = false;
-          rejectBtn.disabled = false;
-          rejectBtn.innerHTML = '<span>✕ Reject Report</span>';
-        }
+      bindReviewCardActions("incident-review", incident.incident_id, incident.version, () => {
+        selectIncident(incident.incident_id);
       });
     }
 
@@ -558,18 +617,13 @@ function renderDispatchResult(data, fromStream = false) {
       <div><span>Output Tokens</span><b>${tokens || "N/A"}</b></div>
     </div>
     ${(triage.uncertainty_reasons || []).length ? `<ul class="error-list">${triage.uncertainty_reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${data.errors?.length ? `<ul class="error-list">${data.errors.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
-    ${reviewRequired ? `
-    <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-      <span style="font-size: 11px; color: var(--muted);">Human intervention required under safety protocol</span>
-      <button type="button" class="button warning compact" id="open-dispatcher-review">
-        <span>Open in Review Console ↗</span>
-      </button>
-    </div>` : ""}`;
+    ${reviewRequired ? renderReviewCardHtml("dispatch-review", data.alert_id, data.incident_version, data.triage) : ""}`;
 
-    document.getElementById("open-dispatcher-review")?.addEventListener("click", () => {
-      navigateTo("/incidents");
-      selectIncident(data.alert_id);
-    });
+    if (reviewRequired) {
+      bindReviewCardActions("dispatch-review", data.alert_id, data.incident_version, (res) => {
+        renderDispatchResult(res);
+      });
+    }
   }
   setText("dispatch-map-state", verified ? "Route verified" : "No dispatchable route");
   renderRoute(data.geojson, verified);

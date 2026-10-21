@@ -18,6 +18,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -114,7 +115,12 @@ struct ListQuery {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    tracing_subscriber::fmt::init();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "crisis_graph=info,server=info,tower_http=info".into());
+
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .init();
 
     info!("Starting CrisisGraph Emergency Dispatch Server...");
 
@@ -204,6 +210,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route_service("/resources", ServeFile::new("web/index.html"))
         // Serve Web Assets from `web/` folder
         .fallback_service(ServeDir::new("web"))
+        .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(app_state);
 
@@ -454,6 +461,14 @@ async fn handle_incident_review(
     let reviewer = req
         .reviewer_id
         .unwrap_or_else(|| "dispatcher_console".to_string());
+
+    info!(
+        incident_id = %incident_id,
+        decision = ?req.decision,
+        reviewer = %reviewer,
+        reason = %req.reason,
+        "--> [HTTP API] Processing dispatcher incident review"
+    );
 
     match req.decision {
         ReviewDecisionKind::Approve => {
@@ -807,7 +822,17 @@ async fn handle_dispatch(
             .or_else(|| Some("web_dispatcher_api".to_string())),
     };
 
-    let result = state.orchestrator.process_alert(alert).await;
+    info!(
+        alert_id = %alert.alert_id,
+        channel = ?alert.source_channel,
+        "--> [HTTP API] Received SOS dispatch request: \"{}\"",
+        alert.raw_text
+    );
+
+    let start = std::time::Instant::now();
+    let result = state.orchestrator.process_alert(alert.clone()).await;
+    let elapsed = start.elapsed();
+
     let response = build_dispatch_response(
         &result.state,
         &result.incident,
@@ -816,6 +841,22 @@ async fn handle_dispatch(
         &state.state_manager,
     )
     .await;
+
+    let brief_status = result
+        .state
+        .brief
+        .as_ref()
+        .map(|b| format!("{:?}", b.status))
+        .unwrap_or_else(|| "NoBrief".to_string());
+
+    info!(
+        alert_id = %alert.alert_id,
+        incident_id = %result.incident.incident_id,
+        incident_status = %result.incident.status.as_str(),
+        pipeline_status = %brief_status,
+        elapsed_ms = elapsed.as_millis(),
+        "<-- [HTTP API] SOS dispatch pipeline complete"
+    );
 
     // Also broadcast to SSE subscribers
     if let Ok(json_str) = serde_json::to_string(&response) {
