@@ -27,8 +27,8 @@ use crisis_graph::db::{
 };
 use crisis_graph::ingestion::TriageExtractor;
 use crisis_graph::models::{
-    CrisisState, DispatchStatus, Incident, IncidentStatus, RoadStatus, RouteDecision, SosAlert,
-    TriageReport,
+    AssetType, CrisisState, DispatchStatus, Incident, IncidentStatus, ReviewDecisionKind,
+    RoadStatus, RouteDecision, SosAlert, TriageReport,
 };
 use crisis_graph::pipeline::{PersistedCrisisOrchestrator, PipelineStages};
 
@@ -87,6 +87,17 @@ pub struct IncidentRouteResponse {
     pub incident_status: IncidentStatus,
     pub route: RouteDecision,
     pub geojson: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IncidentReviewRequest {
+    pub decision: ReviewDecisionKind,
+    pub expected_version: u64,
+    pub reason: String,
+    pub reviewer_id: Option<String>,
+    pub headcount: Option<u32>,
+    pub required_asset: Option<AssetType>,
+    pub resolved_junction_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +181,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route(
             "/api/v1/incidents/{incident_id}/audit",
             get(get_incident_audit),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/review",
+            post(handle_incident_review),
         )
         .route(
             "/api/v1/resources/reservations",
@@ -429,6 +444,129 @@ async fn get_incident_audit(
             warn!("Failed to load audit history for {incident_id}: {error}");
             StatusCode::INTERNAL_SERVER_ERROR
         })
+}
+
+async fn handle_incident_review(
+    State(state): State<AppState>,
+    Path(incident_id): Path<String>,
+    Json(req): Json<IncidentReviewRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let reviewer = req
+        .reviewer_id
+        .unwrap_or_else(|| "dispatcher_console".to_string());
+
+    match req.decision {
+        ReviewDecisionKind::Approve => {
+            let current = state
+                .incident_repository
+                .get(&incident_id)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+                .ok_or_else(|| (StatusCode::NOT_FOUND, "Incident not found".to_string()))?;
+
+            let base_triage = current
+                .triage_revisions
+                .last()
+                .map(|r| r.triage.clone())
+                .unwrap_or_else(|| TriageReport {
+                    victim_location_raw: None,
+                    resolved_junction_id: None,
+                    headcount: None,
+                    required_asset: None,
+                    hazards: vec![],
+                    confidence_score: 1.0,
+                    needs_human_review: false,
+                    uncertainty_reasons: vec![],
+                    inference: crisis_graph::models::TriageInferenceMetadata {
+                        backend: "dispatcher_override".to_string(),
+                        model: "human_review".to_string(),
+                        adapter_id: None,
+                        adapter_sha256: None,
+                        prompt_version: "manual".to_string(),
+                        schema_version: "manual".to_string(),
+                        latency_ms: 0,
+                        tokens_per_second: None,
+                        prompt_eval_ms: None,
+                        completion_tokens: None,
+                    },
+                });
+
+            let mut reviewed_triage = base_triage;
+            if let Some(h) = req.headcount {
+                reviewed_triage.headcount = Some(h);
+            }
+            if let Some(a) = req.required_asset {
+                reviewed_triage.required_asset = Some(a);
+            }
+            if let Some(j) = req.resolved_junction_id {
+                reviewed_triage.resolved_junction_id = Some(j);
+            }
+            reviewed_triage.needs_human_review = false;
+            reviewed_triage.uncertainty_reasons.clear();
+            reviewed_triage.confidence_score = 1.0;
+            reviewed_triage.hazards.retain(|h| {
+                h.road_segment.is_some() && h.status.is_some() && h.duration_hours.is_some()
+            });
+
+            let result = state
+                .orchestrator
+                .process_review_approval(
+                    &incident_id,
+                    req.expected_version,
+                    &req.reason,
+                    reviewed_triage,
+                    &reviewer,
+                )
+                .await
+                .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+            let response = build_dispatch_response(
+                &result.state,
+                &result.incident,
+                result.persistence_healthy,
+                result.duplicate_suppressed,
+                &state.state_manager,
+            )
+            .await;
+
+            if let Ok(json_str) = serde_json::to_string(&response) {
+                let _ = state.event_tx.send(json_str);
+            }
+
+            Ok(Json(json!(response)))
+        }
+        ReviewDecisionKind::Reject => {
+            let incident = state
+                .orchestrator
+                .process_review_rejection(
+                    &incident_id,
+                    req.expected_version,
+                    &req.reason,
+                    &reviewer,
+                )
+                .await
+                .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+            let response = json!({
+                "incident_id": incident.incident_id,
+                "status": "REJECTED",
+                "incident_status": incident.status,
+                "version": incident.version,
+                "decision": "REJECT",
+                "reason": req.reason,
+            });
+
+            if let Ok(json_str) = serde_json::to_string(&response) {
+                let _ = state.event_tx.send(json_str);
+            }
+
+            Ok(Json(response))
+        }
+        ReviewDecisionKind::RequestChanges => Err((
+            StatusCode::BAD_REQUEST,
+            "RequestChanges is not supported in the demonstration console".to_string(),
+        )),
+    }
 }
 
 async fn get_incident_route(

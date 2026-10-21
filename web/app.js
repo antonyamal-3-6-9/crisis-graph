@@ -29,6 +29,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   invalidateVisibleMaps();
 });
 
+function navigateTo(path) {
+  if (location.pathname !== path) {
+    history.pushState(null, "", path);
+  }
+  configurePage();
+  invalidateVisibleMaps();
+}
+
 function configurePage() {
   const path = pageMeta[location.pathname] ? location.pathname : "/";
   document.querySelectorAll(".view").forEach((el) => el.classList.toggle("active", el.dataset.view === path));
@@ -38,6 +46,19 @@ function configurePage() {
 }
 
 function bindEvents() {
+  window.addEventListener("popstate", () => {
+    configurePage();
+    invalidateVisibleMaps();
+  });
+  document.querySelectorAll(".nav a, .top-actions a[href], .brand").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      const href = link.getAttribute("href");
+      if (href && href.startsWith("/") && pageMeta[href]) {
+        e.preventDefault();
+        navigateTo(href);
+      }
+    });
+  });
   document.getElementById("dispatch-form")?.addEventListener("submit", submitDispatch);
   document.querySelectorAll("[data-scenario]").forEach((button) => button.addEventListener("click", () => {
     document.getElementById("sos-text").value = scenarios[button.dataset.scenario];
@@ -196,7 +217,14 @@ function renderOverviewIncidents() {
   const target = document.getElementById("overview-incidents");
   if (!target) return;
   const incidents = state.incidents.slice(0, 7);
-  target.innerHTML = incidents.length ? incidents.map((incident) => `<a class="feed-row" href="/incidents"><b>${escapeHtml(incident.incident_id)}</b>${statusBadge(incident.status)}<p>${escapeHtml(incident.original_sos.raw_text)}</p></a>`).join("") : '<div class="empty-state"><h3>No persisted incidents</h3><p>Use Dispatch Lab to begin the demonstration.</p></div>';
+  target.innerHTML = incidents.length ? incidents.map((incident) => `<a class="feed-row" href="/incidents" data-incident-id="${escapeHtml(incident.incident_id)}"><b>${escapeHtml(incident.incident_id)}</b>${statusBadge(incident.status)}<p>${escapeHtml(incident.original_sos.raw_text)}</p></a>`).join("") : '<div class="empty-state"><h3>No persisted incidents</h3><p>Use Dispatch Lab to begin the demonstration.</p></div>';
+  target.querySelectorAll("[data-incident-id]").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      navigateTo("/incidents");
+      selectIncident(link.dataset.incidentId);
+    });
+  });
 }
 
 function renderIncidentList() {
@@ -234,6 +262,27 @@ async function selectIncident(id) {
     const route = persistedRoute?.route;
     const routeIsActive = ["ROUTE_VERIFIED", "ASSIGNED", "ACKNOWLEDGED", "EN_ROUTE", "ARRIVED"].includes(incident.status);
     const routeIsInvalidated = incident.status === "ROUTE_INVALIDATED";
+    const needsReview = incident.status === "REVIEW_REQUIRED";
+
+    let suggestedJunction = triage?.resolved_junction_id || "";
+    if (!suggestedJunction && triage?.victim_location_raw) {
+      const loc = triage.victim_location_raw.toLowerCase();
+      if (loc.includes("bank")) suggestedJunction = "node/4742583964";
+      else if (loc.includes("railway") || loc.includes("station")) suggestedJunction = "node/4664235699";
+      else if (loc.includes("manappuram") || loc.includes("temple")) suggestedJunction = "node/7048449098";
+      else if (loc.includes("pump")) suggestedJunction = "node/7992454789";
+      else if (loc.includes("town hall")) suggestedJunction = "node/1085737525";
+      else if (loc.includes("hospital")) suggestedJunction = "node/343716109";
+      else if (loc.includes("uc") || loc.includes("college")) suggestedJunction = "node/9903123560";
+    }
+    if (!suggestedJunction) suggestedJunction = "node/4742583964";
+
+    const suggestedHeadcount = triage?.headcount || 4;
+    const suggestedAsset = triage?.required_asset || "AMBULANCE";
+    const suggestedNotes = triage?.uncertainty_reasons?.length
+      ? "Resolved ambiguous report: verified victim count, vehicle class, and road access."
+      : "Dispatcher verified and authorized dispatch.";
+
     target.innerHTML = `<div class="detail-title"><div><code>${escapeHtml(incident.incident_id)}</code><p>Version ${incident.version} · ${escapeHtml(incident.original_sos.source_channel || "unknown source")} · ${formatTime(incident.created_at)}</p></div>${statusBadge(incident.status)}</div>
       <div class="raw-message">${escapeHtml(incident.original_sos.raw_text)}</div>
       <div class="facts">
@@ -241,12 +290,157 @@ async function selectIncident(id) {
         ${fact("Requested asset", triage?.required_asset)}${fact("Confidence label", triage?.confidence_score)}${fact("Human review", triage?.needs_human_review == null ? null : triage.needs_human_review ? "Required" : "Not required")}
       </div>
       ${reasons.length ? `<div class="notice warning detail-notice"><b>Uncertainty</b><span>${reasons.map(escapeHtml).join(" · ")}</span></div>` : ""}
+      ${needsReview ? `
+      <section class="review-action-card" id="review-card">
+        <div class="review-action-head">
+          <div>
+            <p class="kicker">Human-in-the-loop governance</p>
+            <h3>Dispatcher Review & Authorization</h3>
+          </div>
+          <span class="status review">Awaiting Dispatcher</span>
+        </div>
+        <p class="supporting" style="margin: 4px 0 14px; font-size: 11px;">
+          The local model flagged ambiguities or missing fields. Automated dispatch was safely halted. Review candidate facts below and confirm allocation and routing.
+        </p>
+        <form id="review-form" onsubmit="return false;">
+          <div class="form-row" style="margin-bottom: 8px;">
+            <div>
+              <label for="review-headcount">Headcount (Persons)</label>
+              <input type="number" id="review-headcount" min="1" max="100" value="${suggestedHeadcount}" required />
+            </div>
+            <div>
+              <label for="review-asset">Authorized Asset Class</label>
+              <select id="review-asset" required>
+                <option value="AMBULANCE" ${suggestedAsset === "AMBULANCE" ? "selected" : ""}>Ambulance (Road)</option>
+                <option value="EVAC_TRUCK" ${suggestedAsset === "EVAC_TRUCK" ? "selected" : ""}>Evacuation Truck (Heavy/Flood)</option>
+                <option value="RESCUE_BOAT" ${suggestedAsset === "RESCUE_BOAT" ? "selected" : ""}>Rescue Boat (Water)</option>
+                <option value="HELICOPTER" ${suggestedAsset === "HELICOPTER" ? "selected" : ""}>Helicopter (Air)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" style="margin-bottom: 8px;">
+            <div>
+              <label for="review-junction">Resolved OSM Junction</label>
+              <input type="text" id="review-junction" list="landmark-junctions" value="${escapeHtml(suggestedJunction)}" placeholder="e.g. node/4742583964" required />
+              <datalist id="landmark-junctions">
+                <option value="node/4742583964">Bank Junction (Aluva)</option>
+                <option value="node/4664235699">Aluva Railway Station</option>
+                <option value="node/7992454789">Pump Junction</option>
+                <option value="node/7048449098">Manappuram Shiva Temple</option>
+                <option value="node/1085737525">Aluva Town Hall</option>
+                <option value="node/9903123560">UC College</option>
+                <option value="node/343716109">Taluk Hospital</option>
+              </datalist>
+            </div>
+            <div>
+              <label for="review-callsign">Dispatcher Call-sign</label>
+              <input type="text" id="review-callsign" value="dispatcher_station_1" required />
+            </div>
+          </div>
+          <div style="margin-bottom: 8px;">
+            <label for="review-notes">Audit Log / Justification</label>
+            <input type="text" id="review-notes" value="${escapeHtml(suggestedNotes)}" placeholder="Enter reason for audit record..." required />
+          </div>
+          <div class="review-btn-row">
+            <button type="button" class="button primary" id="btn-review-approve">
+              <span>✓ Authorize & Dispatch</span>
+            </button>
+            <button type="button" class="button danger" id="btn-review-reject">
+              <span>✕ Reject Report</span>
+            </button>
+          </div>
+        </form>
+      </section>
+      ` : ""}
       ${route ? `<section class="route-record"><div class="route-record-head"><div><p class="kicker">Immutable route evidence</p><h3>${routeIsInvalidated ? "Invalidated" : routeIsActive ? "Verified" : "Historical"} route v${route.route_version}</h3></div><span class="tag ${routeIsInvalidated ? "danger" : routeIsActive ? "success" : "muted"}">${routeIsInvalidated ? "Do not use" : routeIsActive ? `${route.verified_segment_count} segments certified` : "Audit evidence"}</span></div>
         <div class="incident-route-map" id="incident-route-map"></div>
         <div class="facts route-facts">${fact("Origin", route.origin_shelter_name)}${fact("Assigned unit", route.assigned_asset_id)}${fact("Triage revision", `v${route.triage_revision}`)}${fact("Distance", `${Number(route.total_distance_km).toFixed(2)} km`)}${fact("Travel time", `${(Number(route.total_travel_time_s) / 60).toFixed(1)} min`)}${fact("Objective", route.cost_objective)}${fact("Verified at", formatTime(route.verified_at))}</div>
         <p class="route-proof"><code>${escapeHtml(route.route_id)}</code> · ${escapeHtml(route.dataset)} · ${escapeHtml(route.detour_reason || "Direct clear path")} · current incident state ${escapeHtml(incident.status)}</p>
-      </section>` : persistedRoute?.projection_error ? `<div class="notice warning detail-notice"><b>Route projection unavailable</b><span>The incident record remains readable, but its stored junction path could not be projected onto the current baseline map.</span></div>` : `<div class="notice detail-notice"><b>No persisted verified route</b><span>This incident stopped before route certification, or predates immutable route evidence storage.</span></div>`}
+      </section>` : persistedRoute?.projection_error ? `<div class="notice warning detail-notice"><b>Route projection unavailable</b><span>The incident record remains readable, but its stored junction path could not be projected onto the current baseline map.</span></div>` : !needsReview ? `<div class="notice detail-notice"><b>No persisted verified route</b><span>This incident stopped before route certification, or predates immutable route evidence storage.</span></div>` : ""}
       <div class="timeline"><h3>Immutable audit timeline</h3>${audit.length ? audit.map((event) => `<div class="timeline-row"><b>${escapeHtml(event.action)}</b><p>${escapeHtml(event.from_status)} → ${escapeHtml(event.to_status)} · ${escapeHtml(event.reason)}</p><small>v${event.previous_version} → v${event.new_version} · ${formatTime(event.occurred_at)} · ${escapeHtml(event.actor_id)}</small></div>`).join("") : '<p class="supporting">No audit events found.</p>'}</div>`;
+
+    if (needsReview) {
+      const approveBtn = document.getElementById("btn-review-approve");
+      const rejectBtn = document.getElementById("btn-review-reject");
+
+      approveBtn?.addEventListener("click", async () => {
+        const headcount = parseInt(document.getElementById("review-headcount")?.value, 10);
+        const required_asset = document.getElementById("review-asset")?.value;
+        const resolved_junction_id = document.getElementById("review-junction")?.value.trim();
+        const reviewer_id = document.getElementById("review-callsign")?.value.trim() || "dispatcher_station_1";
+        const reason = document.getElementById("review-notes")?.value.trim() || "Dispatcher verified and authorized dispatch";
+
+        if (!headcount || isNaN(headcount) || headcount < 1) {
+          showToast("Validation Error", "Please provide a valid headcount (>= 1).", true);
+          return;
+        }
+        if (!resolved_junction_id) {
+          showToast("Validation Error", "Please provide a valid victim junction ID.", true);
+          return;
+        }
+
+        approveBtn.disabled = true;
+        rejectBtn.disabled = true;
+        approveBtn.innerHTML = '<i class="button-spinner"></i><span>Authorizing dispatch…</span>';
+
+        try {
+          await fetchJson(`${API}/incidents/${encodedId}/review`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              decision: "APPROVE",
+              expected_version: incident.version,
+              reason,
+              reviewer_id,
+              headcount,
+              required_asset,
+              resolved_junction_id,
+            }),
+          });
+
+          showToast("Dispatch Authorized", `Incident ${incident.incident_id} routed and verified!`);
+          await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations(), loadGraphSummary()]);
+          await selectIncident(incident.incident_id);
+        } catch (err) {
+          showToast("Authorization Failed", err.message, true);
+          approveBtn.disabled = false;
+          rejectBtn.disabled = false;
+          approveBtn.innerHTML = '<span>✓ Authorize & Dispatch</span>';
+        }
+      });
+
+      rejectBtn?.addEventListener("click", async () => {
+        const reviewer_id = document.getElementById("review-callsign")?.value.trim() || "dispatcher_station_1";
+        const reason = document.getElementById("review-notes")?.value.trim() || "Rejected by dispatcher";
+
+        approveBtn.disabled = true;
+        rejectBtn.disabled = true;
+        rejectBtn.innerHTML = '<i class="button-spinner"></i><span>Rejecting…</span>';
+
+        try {
+          await fetchJson(`${API}/incidents/${encodedId}/review`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              decision: "REJECT",
+              expected_version: incident.version,
+              reason,
+              reviewer_id,
+            }),
+          });
+
+          showToast("Incident Rejected", `Incident ${incident.incident_id} marked as rejected.`);
+          await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations(), loadGraphSummary()]);
+          await selectIncident(incident.incident_id);
+        } catch (err) {
+          showToast("Rejection Failed", err.message, true);
+          approveBtn.disabled = false;
+          rejectBtn.disabled = false;
+          rejectBtn.innerHTML = '<span>✕ Reject Report</span>';
+        }
+      });
+    }
+
     if (persistedRoute?.geojson) renderIncidentRoute(persistedRoute.geojson, routeIsActive, routeIsInvalidated);
   } catch (error) {
     target.innerHTML = '<div class="empty-state"><h3>Incident unavailable</h3><p>The persisted record could not be loaded.</p></div>';
@@ -350,9 +544,11 @@ function renderDispatchResult(data, fromStream = false) {
   const speed = inference.tokens_per_second ? inference.tokens_per_second.toFixed(1) + " tok/s" : null;
   const ttft = inference.prompt_eval_ms ? (inference.prompt_eval_ms / 1000).toFixed(2) + "s" : null;
   const tokens = inference.completion_tokens ? `${inference.completion_tokens} tokens` : null;
+  const reviewRequired = data.review_required || data.incident_status === "REVIEW_REQUIRED";
 
   const target = document.getElementById("dispatch-result");
-  if (target) target.innerHTML = `<div class="result-head"><div><p class="kicker">${verified ? "Certified deterministic result" : "Fail-closed outcome"}</p><h2>${verified ? "Route verified for dispatch proposal" : "Human escalation required"}</h2><code>${escapeHtml(data.alert_id)} · incident v${data.incident_version}</code></div>${statusBadge(data.incident_status)}</div>
+  if (target) {
+    target.innerHTML = `<div class="result-head"><div><p class="kicker">${verified ? "Certified deterministic result" : "Fail-closed outcome"}</p><h2>${verified ? "Route verified for dispatch proposal" : "Human escalation required"}</h2><code>${escapeHtml(data.alert_id)} · incident v${data.incident_version}</code></div>${statusBadge(data.incident_status)}</div>
     <div class="result-metrics"><div><span>Distance</span><b>${data.distance_km ? data.distance_km.toFixed(2) + " km" : "Not computed"}</b></div><div><span>Travel time</span><b>${data.travel_time_s ? (data.travel_time_s / 60).toFixed(1) + " min" : "Not computed"}</b></div><div><span>Asset</span><b>${escapeHtml(data.assigned_asset || "Unassigned")}</b></div><div><span>Segments verified</span><b>${number(data.segment_count || 0)}</b></div></div>
     <div class="evidence-grid"><div class="evidence"><h3>AI candidate extraction</h3><dl><dt>Location</dt><dd>${value(triage.victim_location_raw)}</dd><dt>Headcount</dt><dd>${value(triage.headcount)}</dd><dt>Requested asset</dt><dd>${value(triage.required_asset)}</dd><dt>Confidence</dt><dd>${value(triage.confidence_score)}</dd><dt>Review flag</dt><dd>${data.review_required ? "Required" : "Clear"}</dd></dl></div><div class="evidence"><h3>Deterministic controls</h3><dl><dt>Persistence</dt><dd>${data.control_plane_persisted ? "Neo4j committed" : "Failed"}</dd><dt>Duplicate</dt><dd>${data.duplicate_suppressed ? "Suppressed" : "No"}</dd><dt>Junction</dt><dd>${value(data.victim_junction)}</dd><dt>Origin</dt><dd>${value(data.assigned_shelter?.name)}</dd><dt>Route</dt><dd>${verified ? "100% segments passed" : "Unavailable / rejected"}</dd></dl></div></div>
     <div class="inference-telemetry">
@@ -361,7 +557,20 @@ function renderDispatchResult(data, fromStream = false) {
       <div><span>Generation Speed</span><b>${speed || "N/A"}</b></div>
       <div><span>Output Tokens</span><b>${tokens || "N/A"}</b></div>
     </div>
-    ${(triage.uncertainty_reasons || []).length ? `<ul class="error-list">${triage.uncertainty_reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${data.errors?.length ? `<ul class="error-list">${data.errors.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}`;
+    ${(triage.uncertainty_reasons || []).length ? `<ul class="error-list">${triage.uncertainty_reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${data.errors?.length ? `<ul class="error-list">${data.errors.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
+    ${reviewRequired ? `
+    <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+      <span style="font-size: 11px; color: var(--muted);">Human intervention required under safety protocol</span>
+      <button type="button" class="button warning compact" id="open-dispatcher-review">
+        <span>Open in Review Console ↗</span>
+      </button>
+    </div>` : ""}`;
+
+    document.getElementById("open-dispatcher-review")?.addEventListener("click", () => {
+      navigateTo("/incidents");
+      selectIncident(data.alert_id);
+    });
+  }
   setText("dispatch-map-state", verified ? "Route verified" : "No dispatchable route");
   renderRoute(data.geojson, verified);
   if (fromStream) showToast(data.alert_id, verified ? "Stream incident routed and verified." : "Stream incident requires human review.", !verified);
@@ -430,7 +639,12 @@ function initEventStream() {
 }
 
 function currentTriage(incident) { return incident.triage_revisions?.at(-1)?.triage || null; }
-function statusBadge(status) { const kind = status === "REVIEW_REQUIRED" || status === "RELEASED" ? "review" : status === "ROUTE_VERIFIED" || status === "RESERVED" || status === "COMPLETED" ? "verified" : "progress"; return `<span class="status ${kind}">${escapeHtml(status || "UNKNOWN")}</span>`; }
+function statusBadge(status) {
+  const kind = status === "REVIEW_REQUIRED" || status === "RELEASED" ? "review" :
+               status === "REJECTED" || status === "ROUTE_INVALIDATED" ? "danger" :
+               status === "ROUTE_VERIFIED" || status === "RESERVED" || status === "COMPLETED" ? "verified" : "progress";
+  return `<span class="status ${kind}">${escapeHtml(status || "UNKNOWN")}</span>`;
+}
 function fact(label, content) { return `<div class="fact"><span>${escapeHtml(label)}</span><b>${value(content)}</b></div>`; }
 function value(content) { return content === null || content === undefined || content === "" ? "Not supplied" : escapeHtml(String(content)); }
 function number(content) { return new Intl.NumberFormat("en-IN").format(content || 0); }

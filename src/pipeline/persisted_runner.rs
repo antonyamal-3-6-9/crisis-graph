@@ -5,7 +5,8 @@ use super::PipelineStages;
 use crate::db::IncidentStore;
 use crate::models::{
     triage_is_dispatch_ready, ActorContext, ActorRole, CrisisState, DispatchStatus, Incident,
-    IncidentStatus, RouteCostObjective, SosAlert, TriageReport, VerifiedRouteInput,
+    IncidentStatus, ReviewDecisionKind, RouteCostObjective, SosAlert, TriageReport,
+    VerifiedRouteInput,
 };
 
 #[derive(Debug, Clone)]
@@ -134,6 +135,15 @@ where
                 .stop_on_persistence_failure(state, incident, error)
                 .await;
         }
+        self.process_from_triage_approved(state, incident).await
+    }
+
+    /// Progress an incident from TriageApproved through allocating, routing, and verification.
+    pub async fn process_from_triage_approved(
+        &self,
+        mut state: CrisisState,
+        mut incident: Incident,
+    ) -> PersistedProcessResult {
         if let Err(error) = self
             .persist_transition(
                 &mut incident,
@@ -253,6 +263,85 @@ where
         }
 
         persisted_result(state, incident)
+    }
+
+    /// Applies a dispatcher approval to an incident in ReviewRequired, advancing it through
+    /// TriageApproved, allocation, routing, and independent safety verification.
+    pub async fn process_review_approval(
+        &self,
+        incident_id: &str,
+        expected_version: u64,
+        reason: &str,
+        reviewed_triage: TriageReport,
+        reviewer_id: &str,
+    ) -> Result<PersistedProcessResult, String> {
+        let Some(mut incident) = self
+            .store
+            .load_incident(incident_id)
+            .await
+            .map_err(|e| e.to_string())?
+        else {
+            return Err(format!("Incident '{incident_id}' not found"));
+        };
+
+        let reviewer = ActorContext::new(reviewer_id, [ActorRole::Dispatcher]);
+        let event = incident
+            .apply_review(
+                &reviewer,
+                expected_version,
+                ReviewDecisionKind::Approve,
+                reason,
+                Some(reviewed_triage.clone()),
+                Utc::now(),
+            )
+            .map_err(|e| e.to_string())?;
+
+        self.store
+            .save_incident_transition(&incident, &event)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut state = CrisisState::new(incident.original_sos.clone());
+        state.triage = Some(reviewed_triage);
+
+        Ok(self.process_from_triage_approved(state, incident).await)
+    }
+
+    /// Applies a dispatcher rejection to an incident in ReviewRequired.
+    pub async fn process_review_rejection(
+        &self,
+        incident_id: &str,
+        expected_version: u64,
+        reason: &str,
+        reviewer_id: &str,
+    ) -> Result<Incident, String> {
+        let Some(mut incident) = self
+            .store
+            .load_incident(incident_id)
+            .await
+            .map_err(|e| e.to_string())?
+        else {
+            return Err(format!("Incident '{incident_id}' not found"));
+        };
+
+        let reviewer = ActorContext::new(reviewer_id, [ActorRole::Dispatcher]);
+        let event = incident
+            .apply_review(
+                &reviewer,
+                expected_version,
+                ReviewDecisionKind::Reject,
+                reason,
+                None,
+                Utc::now(),
+            )
+            .map_err(|e| e.to_string())?;
+
+        self.store
+            .save_incident_transition(&incident, &event)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(incident)
     }
 
     async fn persist_model_extraction(
