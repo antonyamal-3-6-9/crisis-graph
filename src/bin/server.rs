@@ -1,9 +1,10 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query, Request, State},
     http::StatusCode,
+    middleware::{from_fn, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
-        Json,
+        Json, Response,
     },
     routing::{get, post},
     Router,
@@ -18,7 +19,6 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
-use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -111,6 +111,30 @@ pub struct ApplyHazardRequest {
 #[derive(Debug, Deserialize)]
 struct ListQuery {
     limit: Option<usize>,
+}
+
+async fn http_request_logger(req: Request, next: Next) -> Response {
+    let method = req.method().clone();
+    let uri = req.uri().path().to_string();
+    let start = std::time::Instant::now();
+
+    let response = next.run(req).await;
+
+    let latency = start.elapsed();
+    let status = response.status();
+
+    if uri.starts_with("/api/") && uri != "/api/v1/events" {
+        info!(
+            target: "http",
+            "{} {} {} in {:.2?}",
+            method,
+            uri,
+            status.as_u16(),
+            latency
+        );
+    }
+
+    response
 }
 
 #[tokio::main]
@@ -210,7 +234,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route_service("/resources", ServeFile::new("web/index.html"))
         // Serve Web Assets from `web/` folder
         .fallback_service(ServeDir::new("web"))
-        .layer(TraceLayer::new_for_http())
+        .layer(from_fn(http_request_logger))
         .layer(CorsLayer::permissive())
         .with_state(app_state);
 
@@ -467,7 +491,7 @@ async fn handle_incident_review(
         decision = ?req.decision,
         reviewer = %reviewer,
         reason = %req.reason,
-        "--> [HTTP API] Processing dispatcher incident review"
+        "Processing dispatcher incident review"
     );
 
     match req.decision {
@@ -822,16 +846,7 @@ async fn handle_dispatch(
             .or_else(|| Some("web_dispatcher_api".to_string())),
     };
 
-    info!(
-        alert_id = %alert.alert_id,
-        channel = ?alert.source_channel,
-        "--> [HTTP API] Received SOS dispatch request: \"{}\"",
-        alert.raw_text
-    );
-
-    let start = std::time::Instant::now();
     let result = state.orchestrator.process_alert(alert.clone()).await;
-    let elapsed = start.elapsed();
 
     let response = build_dispatch_response(
         &result.state,
@@ -841,22 +856,6 @@ async fn handle_dispatch(
         &state.state_manager,
     )
     .await;
-
-    let brief_status = result
-        .state
-        .brief
-        .as_ref()
-        .map(|b| format!("{:?}", b.status))
-        .unwrap_or_else(|| "NoBrief".to_string());
-
-    info!(
-        alert_id = %alert.alert_id,
-        incident_id = %result.incident.incident_id,
-        incident_status = %result.incident.status.as_str(),
-        pipeline_status = %brief_status,
-        elapsed_ms = elapsed.as_millis(),
-        "<-- [HTTP API] SOS dispatch pipeline complete"
-    );
 
     // Also broadcast to SSE subscribers
     if let Ok(json_str) = serde_json::to_string(&response) {
