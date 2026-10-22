@@ -5,9 +5,19 @@ when another field is missing or ambiguous. Use null only for the specific
 scalar value that is missing, ambiguous, or contradictory; do not erase known
 facts because another field requires review.
 
-For victim_location, return the named victim or pickup place without surrounding
-relational words such as "at", "near", "inte aduthu", or Malayalam suffixes that
-mean "near". Do not turn a road mentioned only as a hazard into a victim location.
+For victim_location, return the named victim or pickup place translated and
+transliterated into standard English Latin script without surrounding relational
+words such as "at", "near", "inte aduthu", "padiyil", or regional suffixes.
+Translate regional Malayalam or Hindi script place names to their standard English
+landmarks (for example: translate "ആലുവ മണപ്പുറം" to "Aluva Manappuram", "റെയിൽവേ സ്റ്റേഷൻ"
+to "Aluva Railway Station", "യു.സി. കോളേജ്" to "UC College", "താലൂക്ക് ആശുപത്രി"
+to "Aluva Taluk Hospital", "പമ്പ് ജംഗ്ഷൻ" to "Pump Junction", "ബാങ്ക് ജംഗ്ഷൻ"
+to "Bank Junction"). If victim_location_raw is extracted, provide the verbatim original
+location text in the caller's original language and script. Do not turn a road mentioned
+only as a hazard into a victim location. Generic common nouns or building types
+(such as "house", "veedu", "വീട്", "building", "room", "shop", "office", "terrace",
+"roof") without a specific identifiable geographic landmark, town, or street name
+must NOT be treated as a location; set victim_location to null.
 
 For required_asset, return an asset only when the report explicitly requests or
 specifies it. Do not choose an asset from general emergency knowledge.

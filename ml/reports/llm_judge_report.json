@@ -1,0 +1,384 @@
+{
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "pass_rate_pct": 80.0,
+  "average_score": 90.0,
+  "cases_evaluated": 10,
+  "results": [
+    {
+      "case_id": "ml-malayalam-manappuram-001",
+      "language": "ml_script",
+      "input": "ആലുവ മണപ്പുറം ക്ഷേത്രപ്പടികളിൽ വെള്ളം കയറി 4 പേർ കുടുങ്ങി, ബോട്ട് വേണം.",
+      "extraction": {
+        "schema_version": "triage-extraction-v2",
+        "victim_location": "Aluva Manappuram",
+        "headcount": 4,
+        "required_asset": "RESCUE_BOAT",
+        "hazards": [
+          {
+            "road_segment": null,
+            "status": "FLOODED",
+            "duration_hours": null
+          }
+        ],
+        "confidence_score": 0.55,
+        "needs_human_review": true,
+        "uncertainty_reasons": [
+          "Hazard road was not specifically identified"
+        ]
+      },
+      "resolved_junction": "node/7048449098",
+      "refinement_triggered": false,
+      "expected": {
+        "victim_location": "Aluva Manappuram",
+        "headcount": 4,
+        "required_asset": "RESCUE_BOAT",
+        "resolved_junction": "node/7048449098",
+        "needs_human_review": true
+      },
+      "judge_verdict": {
+        "total_score": 95,
+        "verdict": "PASS",
+        "location_fidelity_score": 30,
+        "factuality_score": 30,
+        "safety_score": 20,
+        "snapability_score": 20,
+        "critique": "The Malayalam location was accurately transliterated to Aluva Manappuram, matching the expected location. All facts were preserved with no hallucinations. The model correctly flagged uncertainty due to the missing hazard road, and the confidence score was appropriately set to 55% with needs_human_review enabled."
+      },
+      "latency_ms": 38023.09259399772
+    },
+    {
+      "case_id": "ml-malayalam-uc-college-002",
+      "language": "ml_script",
+      "input": "യു.സി. കോളേജ് ക്യാമ്പസിൽ 18 പേരെ ഒഴിപ്പിക്കാൻ ഇവാക്വേഷൻ ട്രക്ക് വേണം.",
+      "extraction": {
+        "schema_version": "triage-extraction-v2",
+        "victim_location": "UC College Campus",
+        "headcount": 18,
+        "required_asset": "EVAC_TRUCK",
+        "hazards": [],
+        "confidence_score": 0.95,
+        "needs_human_review": false,
+        "uncertainty_reasons": []
+      },
+      "resolved_junction": "node/9903123560",
+      "refinement_triggered": false,
+      "expected": {
+        "victim_location": "UC College",
+        "headcount": 18,
+        "required_asset": "EVAC_TRUCK",
+        "resolved_junction": "node/9903123560",
+        "needs_human_review": false
+      },
+      "judge_verdict": {
+        "total_score": 95,
+        "verdict": "PASS",
+        "location_fidelity_score": 25,
+        "factuality_score": 30,
+        "safety_score": 20,
+        "snapability_score": 20,
+        "critique": "The model correctly extracted the headcount and asset from the Malayalam report, with only a minor location translation discrepancy between 'UC College Campus' and the ground truth 'UC College'"
+      },
+      "latency_ms": 23957.339182001306
+    },
+    {
+      "case_id": "ml-malayalam-railway-station-003",
+      "language": "ml_script",
+      "input": "ആലുവ റെയിൽവേ സ്റ്റേഷനിൽ രണ്ട് പേർക്ക് പരിക്കേറ്റു. പെട്ടെന്ന് ഒരു ആംബുലൻസ് അയക്കണം.",
+      "extraction": {
+        "schema_version": "triage-extraction-v2",
+        "victim_location": "Aluva Railway Station",
+        "headcount": 2,
+        "required_asset": "AMBULANCE",
+        "hazards": [],
+        "confidence_score": 0.95,
+        "needs_human_review": false,
+        "uncertainty_reasons": []
+      },
+      "resolved_junction": "node/4664235699",
+      "refinement_triggered": false,
+      "expected": {
+        "victim_location": "Aluva Railway Station",
+        "headcount": 2,
+        "required_asset": "AMBULANCE",
+        "resolved_junction": "node/4664235699",
+        "needs_human_review": false
+      },
+      "judge_verdict": {
+        "total_score": 95,
+        "verdict": "PASS",
+        "location_fidelity_score": 30,
+        "factuality_score": 30,
+        "safety_score": 20,
+        "snapability_score": 20,
+        "critique": "The Malayalam location was accurately transliterated to English without hallucination. All facts were preserved exactly as reported with no invented hazards or assets. Confidence was appropriately set to 0.95 given the clear, unambiguous location and triage needs."
+      },
+      "latency_ms": 26067.661259992747
+    },
+    {
+      "case_id": "ml-manglish-manappuram-004",
+      "language": "manglish",
+      "input": "Aluva Manappurathu vellam keri 3 per stranded aanu, rescue boat ayakkamo.",
+      "extraction": {
+        "schema_version": "triage-extraction-v2",
+        "victim_location": "Aluva Manappuram",
+        "headcount": 3,
+        "required_asset": "RESCUE_BOAT",
+        "hazards": [],
+        "confidence_score": 0.95,
+        "needs_human_review": false,
+        "uncertainty_reasons": []
+      },
+      "resolved_junction": "node/7048449098",
+      "refinement_triggered": false,
+      "expected": {
+        "victim_location": "Aluva Manappuram",
+        "headcount": 3,
+        "required_asset": "RESCUE_BOAT",
+        "resolved_junction": "node/7048449098",
+        "needs_human_review": false
+      },
+      "judge_verdict": {
+        "total_score": 95,
+        "verdict": "PASS",
+        "location_fidelity_score": 30,
+        "factuality_score": 30,
+        "safety_score": 20,
+        "snapability_score": 20,
+        "critique": "The Malayalam location was accurately transliterated to standard English. All facts were preserved with no hallucinations. The confidence score was appropriately set to 0.95 given the clear, unambiguous report and resolved to a valid OSM junction."
+      },
+      "latency_ms": 24834.228849009378
+    },
+    {
+      "case_id": "ml-manglish-townhall-005",
+      "language": "manglish",
+      "input": "Aluva Town hallinte aduthu aalkkar undu, vellam kayari kidakkukayanu. Ambulance venam.",
+      "extraction": {
+        "schema_version": "triage-extraction-v2",
+        "victim_location": "Aluva Town Hall",
+        "headcount": null,
+        "required_asset": "AMBULANCE",
+        "hazards": [],
+        "confidence_score": 0.55,
+        "needs_human_review": true,
+        "uncertainty_reasons": [
+          "Headcount was not provided"
+        ]
+      },
+      "resolved_junction": "node/4664235729",
+      "refinement_triggered": false,
+      "expected": {
+        "victim_location": "Aluva Town Hall",
+        "headcount": null,
+        "required_asset": "AMBULANCE",
+        "resolved_junction": "node/4664235729",
+        "needs_human_review": true
+      },
+      "judge_verdict": {
+        "total_score": 95,
+        "verdict": "PASS",
+        "location_fidelity_score": 30,
+        "factuality_score": 30,
+        "safety_score": 20,
+        "snapability_score": 20,
+        "critique": "The location was accurately transliterated from Malayalam script to standard English. All facts were preserved with no hallucinations. The model correctly flagged uncertainty due to missing headcount and set needs_human_review to true. The location was successfully snapped to a valid OSM junction node."
+      },
+      "latency_ms": 25491.509840998333
+    },
+    {
+      "case_id": "ml-missing-location-006",
+      "language": "ml_script",
+      "input": "വീട്ടിൽ വെള്ളം കയറി 4 പേർ കുടുങ്ങിയിരിക്കുകയാണ്, പെട്ടെന്ന് രക്ഷിക്കണം. ബോട്ട് വേണം.",
+      "extraction": {
+        "schema_version": "triage-extraction-v2",
+        "victim_location": null,
+        "headcount": 4,
+        "required_asset": "RESCUE_BOAT",
+        "hazards": [],
+        "confidence_score": 0.55,
+        "needs_human_review": true,
+        "uncertainty_reasons": [
+          "Victim location was not provided"
+        ]
+      },
+      "resolved_junction": null,
+      "refinement_triggered": false,
+      "expected": {
+        "victim_location": null,
+        "headcount": 4,
+        "required_asset": "RESCUE_BOAT",
+        "resolved_junction": null,
+        "needs_human_review": true
+      },
+      "judge_verdict": {
+        "total_score": 65,
+        "verdict": "BORDERLINE",
+        "location_fidelity_score": 0,
+        "factuality_score": 30,
+        "safety_score": 20,
+        "snapability_score": 0,
+        "critique": "The report explicitly stated a location was missing, yet the extraction model hallucinated a victim location when none was provided, violating factual accuracy. The headcount and asset were correctly extracted, and confidence was appropriately lowered to 55% with a valid uncertainty reason."
+      },
+      "latency_ms": 26769.959930010373
+    },
+    {
+      "case_id": "ml-hindi-railway-007",
+      "language": "hindi",
+      "input": "Aluva Railway Station ke paas 5 log paani me phanse hain, rescue boat bhejiye.",
+      "extraction": {
+        "schema_version": "triage-extraction-v2",
+        "victim_location": "Aluva Railway Station",
+        "headcount": 5,
+        "required_asset": "RESCUE_BOAT",
+        "hazards": [
+          {
+            "road_segment": null,
+            "status": "FLOODED",
+            "duration_hours": null
+          }
+        ],
+        "confidence_score": 0.55,
+        "needs_human_review": true,
+        "uncertainty_reasons": [
+          "Hazard road was not specifically identified"
+        ]
+      },
+      "resolved_junction": "node/4664235699",
+      "refinement_triggered": false,
+      "expected": {
+        "victim_location": "Aluva Railway Station",
+        "headcount": 5,
+        "required_asset": "RESCUE_BOAT",
+        "resolved_junction": "node/4664235699",
+        "needs_human_review": false
+      },
+      "judge_verdict": {
+        "total_score": 75,
+        "verdict": "BORDERLINE",
+        "location_fidelity_score": 30,
+        "factuality_score": 30,
+        "safety_score": 0,
+        "snapability_score": 20,
+        "critique": "The location was accurately translated from Malayalam to English and correctly snapped to an OSM junction. All factual elements were preserved, but the model incorrectly set needs_human_review to true when the hazard was clearly specified despite lacking a road segment."
+      },
+      "latency_ms": 27712.85706400522
+    },
+    {
+      "case_id": "ml-english-hospital-008",
+      "language": "en",
+      "input": "Three injured civilians at Aluva Taluk Hospital require ambulance dispatch.",
+      "extraction": {
+        "schema_version": "triage-extraction-v2",
+        "victim_location": "Aluva Taluk Hospital",
+        "headcount": 3,
+        "required_asset": "AMBULANCE",
+        "hazards": [],
+        "confidence_score": 0.95,
+        "needs_human_review": false,
+        "uncertainty_reasons": []
+      },
+      "resolved_junction": "node/343716109",
+      "refinement_triggered": false,
+      "expected": {
+        "victim_location": "Aluva Taluk Hospital",
+        "headcount": 3,
+        "required_asset": "AMBULANCE",
+        "resolved_junction": "node/343716109",
+        "needs_human_review": false
+      },
+      "judge_verdict": {
+        "total_score": 95,
+        "verdict": "PASS",
+        "location_fidelity_score": 30,
+        "factuality_score": 30,
+        "safety_score": 20,
+        "snapability_score": 20,
+        "critique": "The model accurately transliterated the Malayalam location name and preserved all factual elements from the report without hallucination. It correctly identified the hospital as a valid OSM node with high confidence, and the extraction was fully grounded in the citizen's message."
+      },
+      "latency_ms": 23728.43308300071
+    },
+    {
+      "case_id": "ml-manglish-bank-junction-009",
+      "language": "manglish",
+      "input": "Bank Junctionil vellam keri 2 per stranded aanu. Road block aanu.",
+      "extraction": {
+        "schema_version": "triage-extraction-v2",
+        "victim_location": "Bank Junction",
+        "headcount": 2,
+        "required_asset": null,
+        "hazards": [
+          {
+            "road_segment": "Bank Junction",
+            "status": "BLOCKED",
+            "duration_hours": null
+          }
+        ],
+        "confidence_score": 0.55,
+        "needs_human_review": true,
+        "uncertainty_reasons": [
+          "Hazard duration was not provided"
+        ]
+      },
+      "resolved_junction": "node/4742583964",
+      "refinement_triggered": false,
+      "expected": {
+        "victim_location": "Bank Junction",
+        "headcount": 2,
+        "required_asset": null,
+        "resolved_junction": "node/4742583964",
+        "needs_human_review": true
+      },
+      "judge_verdict": {
+        "total_score": 95,
+        "verdict": "PASS",
+        "location_fidelity_score": 30,
+        "factuality_score": 30,
+        "safety_score": 20,
+        "snapability_score": 20,
+        "critique": "The location was accurately translated from the Malayalam script and precisely snapped to an OSM junction. All facts were faithfully preserved with no hallucinations. The model correctly flagged uncertainty due to missing hazard duration and required human review."
+      },
+      "latency_ms": 25831.846312008565
+    },
+    {
+      "case_id": "ml-malayalam-pump-junction-010",
+      "language": "ml_script",
+      "input": "പമ്പ് ജംഗ്ഷനിൽ വെള്ളം കയറി റോഡ് ബ്ലോക്കായി, ഒരാൾക്ക് അടിയന്തര ചികിത്സ വേണം, ആംബുലൻസ് വേണം.",
+      "extraction": {
+        "schema_version": "triage-extraction-v2",
+        "victim_location": "Pump Junction",
+        "headcount": 1,
+        "required_asset": "AMBULANCE",
+        "hazards": [
+          {
+            "road_segment": "Pump Junction",
+            "status": "FLOODED",
+            "duration_hours": null
+          }
+        ],
+        "confidence_score": 0.55,
+        "needs_human_review": true,
+        "uncertainty_reasons": [
+          "Hazard duration was not provided"
+        ]
+      },
+      "resolved_junction": "node/7992454789",
+      "refinement_triggered": false,
+      "expected": {
+        "victim_location": "Pump Junction",
+        "headcount": 1,
+        "required_asset": "AMBULANCE",
+        "resolved_junction": "node/7992454789",
+        "needs_human_review": true
+      },
+      "judge_verdict": {
+        "total_score": 95,
+        "verdict": "PASS",
+        "location_fidelity_score": 30,
+        "factuality_score": 30,
+        "safety_score": 20,
+        "snapability_score": 20,
+        "critique": "The location was accurately transliterated from Malayalam script to standard English. All facts were strictly preserved with no hallucinations. The model correctly flagged uncertainty due to missing hazard duration and required human review."
+      },
+      "latency_ms": 28928.904033004073
+    }
+  ]
+}

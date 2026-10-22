@@ -26,6 +26,14 @@ pub struct ShelterWithLocation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpiredReservation {
+    pub incident_id: String,
+    pub shelter_id: String,
+    pub asset_type: String,
+    pub headcount: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveHazardInfo {
     pub segment_id: String,
     pub road_name: String,
@@ -218,6 +226,84 @@ impl StateManager {
         }
 
         Ok(edges)
+    }
+
+    /// Retrieve the complete directed topology along with the set of currently active hazard segment IDs.
+    pub async fn get_directed_topology_with_hazards(
+        &self,
+        dataset: &str,
+    ) -> Result<(Vec<RoutingEdge>, std::collections::HashSet<String>), Box<dyn std::error::Error + Send + Sync>> {
+        let q_edges = query(
+            "MATCH (a:Junction {dataset: $dataset})-[r:CONNECTS_TO {dataset: $dataset}]->(b:Junction {dataset: $dataset}) \
+             RETURN r.segment_id AS segment_id, \
+                    a.id AS source, \
+                    b.id AS target, \
+                    r.length_m AS length_m, \
+                    r.travel_time_s AS travel_time_s, \
+                    r.road_class AS road_class, \
+                    r.oneway AS oneway, \
+                    r.emergency AS emergency, \
+                    r.motorcar AS motorcar, \
+                    r.hgv AS hgv, \
+                    r.baseline_status AS baseline_status"
+        )
+        .param("dataset", dataset);
+
+        let mut result = self.neo4j.graph.execute(q_edges).await?;
+        let mut edges = Vec::new();
+
+        while let Some(row) = result.next().await? {
+            let segment_id: String = row.get("segment_id")?;
+            let source: String = row.get("source")?;
+            let target: String = row.get("target")?;
+            let length_m: f64 = row.get("length_m")?;
+            let travel_time_s: f64 = row.get("travel_time_s")?;
+            let road_class: String = row.get("road_class")?;
+            let oneway: bool = row.get("oneway")?;
+            let emergency: bool = row.get("emergency")?;
+            let motorcar: bool = row.get("motorcar")?;
+            let hgv: bool = row.get("hgv")?;
+            let status_str: String = row.get("baseline_status")?;
+            let baseline_status = match status_str.as_str() {
+                "OPEN" => BaselineStatus::Open,
+                "RESTRICTED" => BaselineStatus::Restricted,
+                _ => BaselineStatus::Unsuitable,
+            };
+
+            edges.push(RoutingEdge {
+                segment_id,
+                source,
+                target,
+                length_m,
+                travel_time_s,
+                road_class,
+                access: AccessFlags {
+                    motorcar,
+                    emergency,
+                    hgv,
+                },
+                baseline_status,
+                oneway,
+            });
+        }
+
+        let q_hazards = query(
+            "MATCH ()-[r:CONNECTS_TO {dataset: $dataset}]->() \
+             WHERE r.operational_status IS NOT NULL \
+               AND r.operational_status <> 'OPEN' \
+               AND (r.valid_until IS NULL OR r.valid_until >= datetime()) \
+             RETURN r.segment_id AS segment_id"
+        )
+        .param("dataset", dataset);
+
+        let mut haz_result = self.neo4j.graph.execute(q_hazards).await?;
+        let mut blocked_segments = std::collections::HashSet::new();
+        while let Some(row) = haz_result.next().await? {
+            let segment_id: String = row.get("segment_id")?;
+            blocked_segments.insert(segment_id);
+        }
+
+        Ok((edges, blocked_segments))
     }
 
     /// Mutate a specific road segment with an operational hazard and bi-temporal expiration timestamp
@@ -557,16 +643,23 @@ impl StateManager {
         let cypher = format!(
             "MATCH (s:Shelter {{id: $shelter_id}}) \
              WHERE (s.capacity - s.current_occupancy) >= $headcount AND {} \
-             OPTIONAL MATCH (existing:ResourceReservation {{incident_id: $incident_id}}) \
-             WITH s, existing \
-             WHERE existing IS NULL \
-             CREATE (reservation:ResourceReservation {{ \
-                 incident_id: $incident_id, shelter_id: $shelter_id, \
-                 asset_type: $asset_type, headcount: $headcount, \
-                 dataset: 'aluva-periyar-pilot', \
-                 status: 'RESERVED', reserved_at: datetime() \
-             }})-[:RESERVES_AT]->(s) \
-             SET s.current_occupancy = s.current_occupancy + $headcount, \
+             OPTIONAL MATCH (active:ResourceReservation {{incident_id: $incident_id, status: 'RESERVED'}}) \
+             WITH s, active \
+             WHERE active IS NULL \
+             MERGE (reservation:ResourceReservation {{incident_id: $incident_id}}) \
+             WITH s, reservation \
+             OPTIONAL MATCH (reservation)-[old_rel:RESERVES_AT]->() \
+             DELETE old_rel \
+             MERGE (reservation)-[:RESERVES_AT]->(s) \
+             SET reservation.shelter_id = $shelter_id, \
+                 reservation.asset_type = $asset_type, \
+                 reservation.headcount = $headcount, \
+                 reservation.dataset = 'aluva-periyar-pilot', \
+                 reservation.status = 'RESERVED', \
+                 reservation.reserved_at = datetime(), \
+                 reservation.released_at = NULL, \
+                 reservation.release_reason = NULL, \
+                 s.current_occupancy = s.current_occupancy + $headcount, \
                  {} \
                  s.last_updated = datetime() \
              RETURN s.id AS id, s.name AS name, s.junction_id AS junction_id, \
@@ -642,6 +735,85 @@ impl StateManager {
             None => false,
         };
         Ok(released)
+    }
+
+    /// Modify shelter available fleet counts or capacity dynamically by delta (+/-)
+    pub async fn modify_shelter_fleet(
+        &self,
+        shelter_id: &str,
+        delta_ambulances: i32,
+        delta_trucks: i32,
+        delta_boats: i32,
+        delta_capacity: i32,
+    ) -> Result<Option<ShelterWithLocation>, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query(
+            "MATCH (s:Shelter {id: $shelter_id}) \
+             OPTIONAL MATCH (j:Junction {id: s.junction_id}) \
+             SET s.ambulances_available = CASE \
+                     WHEN s.ambulances_available + $delta_amb >= 0 THEN s.ambulances_available + $delta_amb ELSE 0 END, \
+                 s.trucks_available = CASE \
+                     WHEN s.trucks_available + $delta_trk >= 0 THEN s.trucks_available + $delta_trk ELSE 0 END, \
+                 s.boats_available = CASE \
+                     WHEN s.boats_available + $delta_boat >= 0 THEN s.boats_available + $delta_boat ELSE 0 END, \
+                 s.capacity = CASE \
+                     WHEN s.capacity + $delta_cap >= 0 THEN s.capacity + $delta_cap ELSE 0 END, \
+                 s.last_updated = datetime() \
+             RETURN s.id AS id, s.name AS name, s.junction_id AS junction_id, \
+                    s.capacity AS capacity, s.current_occupancy AS current_occupancy, \
+                    s.boats_available AS boats_available, s.ambulances_available AS ambulances_available, \
+                    s.trucks_available AS trucks_available, \
+                    coalesce(j.lat, 10.108) AS lat, coalesce(j.lon, 76.356) AS lon"
+        )
+        .param("shelter_id", shelter_id)
+        .param("delta_amb", delta_ambulances as i64)
+        .param("delta_trk", delta_trucks as i64)
+        .param("delta_boat", delta_boats as i64)
+        .param("delta_cap", delta_capacity as i64);
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        if let Some(row) = result.next().await? {
+            Ok(Some(ShelterWithLocation {
+                id: row.get("id")?,
+                name: row.get("name")?,
+                junction_id: row.get("junction_id")?,
+                capacity: row.get::<i64>("capacity")? as u32,
+                current_occupancy: row.get::<i64>("current_occupancy")? as u32,
+                boats_available: row.get::<i64>("boats_available")? as u32,
+                ambulances_available: row.get::<i64>("ambulances_available")? as u32,
+                trucks_available: row.get::<i64>("trucks_available")? as u32,
+                lat: row.get("lat")?,
+                lon: row.get("lon")?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Retrieve active reservations that have exceeded their TTL duration
+    pub async fn get_expired_reservations(
+        &self,
+        ttl_seconds: u64,
+    ) -> Result<Vec<ExpiredReservation>, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query(
+            "MATCH (r:ResourceReservation {status: 'RESERVED'}) \
+             WHERE r.reserved_at IS NOT NULL \
+               AND datetime() > r.reserved_at + duration({seconds: $ttl_seconds}) \
+             RETURN r.incident_id AS incident_id, r.shelter_id AS shelter_id, \
+                    r.asset_type AS asset_type, r.headcount AS headcount"
+        )
+        .param("ttl_seconds", ttl_seconds as i64);
+
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let mut list = Vec::new();
+        while let Some(row) = result.next().await? {
+            list.push(ExpiredReservation {
+                incident_id: row.get("incident_id")?,
+                shelter_id: row.get("shelter_id")?,
+                asset_type: row.get("asset_type")?,
+                headcount: row.get::<i64>("headcount")? as u32,
+            });
+        }
+        Ok(list)
     }
 
     /// Retrieve ordered GPS coordinates (lon, lat) for a list of junction IDs

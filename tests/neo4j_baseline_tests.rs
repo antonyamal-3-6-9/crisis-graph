@@ -3,7 +3,7 @@ use neo4rs::query;
 use crisis_graph::config::Config;
 use crisis_graph::db::{Neo4jClient, StateManager};
 use crisis_graph::models::{AssetType, RoadStatus};
-use crisis_graph::solver::{DeterministicPathfinder, PathfinderError, RoutingQuery};
+use crisis_graph::solver::{DeterministicPathfinder, RoutingQuery};
 
 #[tokio::test]
 async fn test_neo4j_pilot_graph_and_operational_overlay() {
@@ -85,17 +85,27 @@ async fn test_neo4j_pilot_graph_and_operational_overlay() {
         "Flooded segment must not appear in passable edges"
     );
 
-    // 6. Pathfinding with flooded edge missing in Neo4j snapshot
-    let route_after_flood = DeterministicPathfinder::find_directed_route(&post_flood_edges, &clear_query);
-    match route_after_flood {
-        Ok(detour) => {
-            assert!(!detour.segment_path.contains(&flood_segment.to_string()));
-            assert!(detour.is_detour);
-        }
-        Err(PathfinderError::NoPassableRouteFound { .. }) => {
-            // Fails closed safely if no alternative route exists
-        }
-        Err(e) => panic!("Unexpected error during flood routing: {:?}", e),
+    // 6. Multi-modal cut-edge detection with live Neo4j topology & active hazard
+    let (all_edges, active_hazards) = state_mgr
+        .get_directed_topology_with_hazards(dataset)
+        .await
+        .expect("Fetch complete directed topology with hazards");
+    assert!(active_hazards.contains(flood_segment), "Active hazards must contain the flooded segment");
+
+    let multimodal_query = RoutingQuery::new(origin, destination)
+        .with_asset_type(AssetType::Ambulance)
+        .with_blocked_segments(active_hazards);
+
+    let plan = DeterministicPathfinder::find_multimodal_route(&all_edges, &multimodal_query)
+        .expect("Multi-modal route must resolve cut-edge even when direct route is blocked");
+
+    assert_eq!(plan.origin, origin);
+    assert_eq!(plan.destination, destination);
+    // If a detour existed, plan.requires_mitigation is false; if no dry detour existed, it requires mitigation
+    if plan.requires_mitigation {
+        assert!(plan.staging_junction.is_some());
+        assert_eq!(plan.mitigation_asset, Some(crisis_graph::models::AssetType::RescueBoat));
+        assert!(plan.legs.iter().any(|l| l.is_hazard_stretch));
     }
 
     // 7. Cleanup: clear operational hazards

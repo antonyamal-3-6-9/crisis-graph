@@ -9,7 +9,7 @@ pub use neo4j::Neo4jClient;
 pub use incident_repository::{IncidentRepository, IncidentRepositoryError, IncidentStore};
 pub use redis_client::RedisClient;
 pub use state_manager::{
-    ActiveHazardInfo, GraphSummary, PassableEdge, ResourceReservationInfo,
+    ActiveHazardInfo, ExpiredReservation, GraphSummary, PassableEdge, ResourceReservationInfo,
     ShelterWithLocation, StateManager,
 };
 pub use seed::seed_database;

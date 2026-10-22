@@ -96,12 +96,38 @@
 
       <section class="view" id="view-resources" data-view="/resources">
         <div id="resource-cards" class="resource-grid"><div class="skeleton">Loading relief hubs…</div></div>
+        <article class="panel table-panel" id="waiting-queue-panel" style="margin-bottom: 16px;">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">Dynamic Logistics Queue</p>
+              <h2>FIFO Waiting Incidents (Depleted Fleet)</h2>
+            </div>
+            <span class="tag" id="queue-count-badge">0 in queue</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Queue Pos</th>
+                  <th>Incident ID</th>
+                  <th>Status</th>
+                  <th>Requested Asset</th>
+                  <th>Headcount</th>
+                  <th>Victim Location</th>
+                </tr>
+              </thead>
+              <tbody id="waiting-queue-table">
+                <tr><td colspan="6" class="muted-cell">No incidents currently waiting in queue.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
         <article class="panel table-panel"><div class="panel-head"><div><p class="kicker">Reservation ledger</p><h2>Incident-owned allocations</h2></div><button class="button ghost compact" id="reset-resources">Reset demo resources</button></div><div class="table-wrap"><table><thead><tr><th>Incident</th><th>Relief hub</th><th>Asset</th><th>People</th><th>Status</th><th>Reserved</th><th>Disposition</th></tr></thead><tbody id="reservation-table"><tr><td colspan="7" class="muted-cell">Loading reservation history…</td></tr></tbody></table></div></article>
       </section>
     </main>
   </div>
   <div id="toast-region" class="toast-region" aria-live="polite"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script src="/app.js?v=2"></script>
+  <script src="/app.js?v=4"></script>
 </body>
 </html>

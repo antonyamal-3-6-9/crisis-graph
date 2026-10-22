@@ -198,10 +198,10 @@ where
         }
 
         state = self.stages.stage_4_verifier_and_brief(state).await;
-        let verified = state
-            .brief
-            .as_ref()
-            .is_some_and(|brief| brief.status == DispatchStatus::RoutedVerified);
+        let verified = state.brief.as_ref().is_some_and(|brief| {
+            brief.status == DispatchStatus::RoutedVerified
+                || brief.status == DispatchStatus::MitigationRequired
+        });
         if !verified {
             state.errors.push(
                 "RouteVerificationFailed: independent safety verification failed".to_string(),

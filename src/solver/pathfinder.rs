@@ -37,6 +37,78 @@ impl Default for CostMetric {
     }
 }
 
+/// Constant penalty in seconds added to blocked/hazardous edges during relaxed cut-edge search.
+/// Must be strictly greater than any conceivable dry path across the pilot bounding region.
+pub const HAZARD_PENALTY_S: f64 = 1_000_000.0;
+
+/// Transportation mode for a discrete leg of an evacuation route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransportMode {
+    /// Wheeled road vehicle (Ambulance, Evacuation Truck)
+    RoadVehicle,
+    /// Watercraft bridging flooded road or river corridor (Rescue Boat, Inflatable)
+    Watercraft,
+    /// Foot evacuation or stretcher carry on an isolated dry pocket or shallow edge
+    FootWading,
+    /// Direct aerial evacuation bypassing surface bottlenecks entirely
+    Aerial,
+}
+
+/// A discrete leg within a multi-modal evacuation plan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouteLeg {
+    /// Zero-based leg index in transit sequence
+    pub leg_index: usize,
+    /// Transportation mode used for this leg
+    pub mode: TransportMode,
+    /// Starting junction ID for this leg
+    pub origin_junction: String,
+    /// Ending junction ID for this leg
+    pub destination_junction: String,
+    /// Sequence of junction IDs traversed in this leg
+    pub waypoints: Vec<String>,
+    /// Sequence of OSM directed segment IDs traversed in this leg
+    pub segment_ids: Vec<String>,
+    /// Total distance in kilometers for this leg
+    pub distance_km: f64,
+    /// Estimated travel time in seconds for this leg
+    pub travel_time_s: f64,
+    /// Whether this leg traverses active hazard/flooded segments
+    pub is_hazard_stretch: bool,
+    /// Specific hazard condition if applicable (e.g. "FLOODED", "BLOCKED")
+    pub hazard_type: Option<String>,
+}
+
+/// High-level topological classification of the route bottleneck.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MitigationTopology {
+    /// 100% open dry road network (no mitigation required)
+    DirectPassable,
+    /// Terminal hazard: Road transit to dry staging hub, watercraft across final flooded corridor to victim
+    TerminalHazard,
+    /// Island hazard: Road transit to staging, watercraft crossing, followed by dry island/pocket to victim
+    IslandHazard,
+    /// Fragmented cut: Multiple alternating hazard barriers requiring aerial evacuation
+    FragmentedCut,
+}
+
+/// Synthesized actionable multi-modal disaster mitigation plan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiModalPlan {
+    pub origin: String,
+    pub destination: String,
+    pub requires_mitigation: bool,
+    pub topology: MitigationTopology,
+    pub staging_junction: Option<String>,
+    pub landfall_junction: Option<String>,
+    pub legs: Vec<RouteLeg>,
+    pub total_distance_km: f64,
+    pub total_travel_time_s: f64,
+    pub primary_asset: AssetType,
+    pub mitigation_asset: Option<AssetType>,
+    pub recommendation_summary: String,
+}
+
 /// A strongly-typed directed routing edge with multi-modal capability attributes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingEdge {
@@ -321,6 +393,393 @@ impl DeterministicPathfinder {
         })
     }
 
+    /// Actionable Multi-Modal Routing & Cut-Edge Mitigation Solver.
+    ///
+    /// 1. Primary Pass: Evaluates strict passable directed routing via `find_directed_route`.
+    ///    If an uncompromised path exists, returns a single-leg `DirectPassable` plan.
+    ///
+    /// 2. Secondary Pass (Penalty Dijkstra): If all direct paths are blocked by hazards,
+    ///    runs relaxed Dijkstra where flooded/blocked segments incur `HAZARD_PENALTY_S`.
+    ///    Mathematically forces Petgraph to maximize dry road travel and isolate the exact
+    ///    transition boundary (staging junction) where water begins.
+    ///
+    /// 3. Leg Segmentation: Decomposes the traversed segments into homogeneous operational legs
+    ///    (Road Vehicle -> Staging Junction -> Rescue Boat -> Destination).
+    pub fn find_multimodal_route(
+        edges: &[RoutingEdge],
+        query: &RoutingQuery,
+    ) -> Result<MultiModalPlan, PathfinderError> {
+        let primary_asset = query.asset_type.clone().unwrap_or(AssetType::Ambulance);
+
+        if query.origin == query.destination {
+            let single_leg = RouteLeg {
+                leg_index: 0,
+                mode: TransportMode::RoadVehicle,
+                origin_junction: query.origin.clone(),
+                destination_junction: query.destination.clone(),
+                waypoints: vec![query.origin.clone()],
+                segment_ids: Vec::new(),
+                distance_km: 0.0,
+                travel_time_s: 0.0,
+                is_hazard_stretch: false,
+                hazard_type: None,
+            };
+
+            return Ok(MultiModalPlan {
+                origin: query.origin.clone(),
+                destination: query.destination.clone(),
+                requires_mitigation: false,
+                topology: MitigationTopology::DirectPassable,
+                staging_junction: None,
+                landfall_junction: None,
+                legs: vec![single_leg],
+                total_distance_km: 0.0,
+                total_travel_time_s: 0.0,
+                primary_asset,
+                mitigation_asset: None,
+                recommendation_summary: "Origin and destination are identical; unit on site.".into(),
+            });
+        }
+
+        // Pass 1: Try strict passable directed route
+        match Self::find_directed_route(edges, query) {
+            Ok(direct_route) => {
+                let single_leg = RouteLeg {
+                    leg_index: 0,
+                    mode: TransportMode::RoadVehicle,
+                    origin_junction: query.origin.clone(),
+                    destination_junction: query.destination.clone(),
+                    waypoints: direct_route.path,
+                    segment_ids: direct_route.segment_path,
+                    distance_km: direct_route.total_distance_km,
+                    travel_time_s: direct_route.total_travel_time_s,
+                    is_hazard_stretch: false,
+                    hazard_type: None,
+                };
+
+                return Ok(MultiModalPlan {
+                    origin: query.origin.clone(),
+                    destination: query.destination.clone(),
+                    requires_mitigation: false,
+                    topology: MitigationTopology::DirectPassable,
+                    staging_junction: None,
+                    landfall_junction: None,
+                    legs: vec![single_leg],
+                    total_distance_km: direct_route.total_distance_km,
+                    total_travel_time_s: direct_route.total_travel_time_s,
+                    primary_asset,
+                    mitigation_asset: None,
+                    recommendation_summary: format!(
+                        "Direct passable road corridor verified ({:.2} km, {:.0} s). No hazard mitigation required.",
+                        direct_route.total_distance_km, direct_route.total_travel_time_s
+                    ),
+                });
+            }
+            Err(PathfinderError::NoPassableRouteFound { .. }) => {
+                // Pass 1 failed because all routes are blocked or restricted.
+                // Fall through to Pass 2: Big-M Penalty Dijkstra.
+            }
+            Err(e) => return Err(e), // Origin or Destination not found in graph
+        }
+
+        // Pass 2: Relaxed Dijkstra with Big-M Hazard Penalty
+        let mut graph = DiGraph::<String, RoutingEdge>::new();
+        let mut node_map_indices: HashMap<String, NodeIndex> = HashMap::new();
+        let mut index_to_node_name: HashMap<NodeIndex, String> = HashMap::new();
+
+        let get_or_create_node = |name: &str,
+                                  g: &mut DiGraph<String, RoutingEdge>,
+                                  map: &mut HashMap<String, NodeIndex>,
+                                  rev: &mut HashMap<NodeIndex, String>| {
+            if let Some(&idx) = map.get(name) {
+                idx
+            } else {
+                let idx = g.add_node(name.to_string());
+                map.insert(name.to_string(), idx);
+                rev.insert(idx, name.to_string());
+                idx
+            }
+        };
+
+        for edge in edges {
+            let u = get_or_create_node(
+                &edge.source,
+                &mut graph,
+                &mut node_map_indices,
+                &mut index_to_node_name,
+            );
+            let v = get_or_create_node(
+                &edge.target,
+                &mut graph,
+                &mut node_map_indices,
+                &mut index_to_node_name,
+            );
+            graph.add_edge(u, v, edge.clone());
+        }
+
+        let start_idx = *node_map_indices
+            .get(&query.origin)
+            .ok_or_else(|| PathfinderError::OriginNotFound(query.origin.clone()))?;
+        let target_idx = *node_map_indices
+            .get(&query.destination)
+            .ok_or_else(|| PathfinderError::DestinationNotFound(query.destination.clone()))?;
+
+        // Cost function: Dry edges cost normal travel_time_s; blocked or vehicle-restricted edges cost time + HAZARD_PENALTY_S
+        let penalty_cost_fn = |edge_ref: petgraph::graph::EdgeReference<RoutingEdge>| -> f64 {
+            let edge = edge_ref.weight();
+            let is_blocked = query.blocked_segments.contains(&edge.segment_id);
+
+            let is_accessible = match query.asset_type {
+                Some(AssetType::EvacTruck) => {
+                    edge.access.hgv && edge.baseline_status != BaselineStatus::Unsuitable
+                }
+                Some(AssetType::Ambulance) => {
+                    edge.access.emergency && edge.baseline_status != BaselineStatus::Unsuitable
+                }
+                Some(AssetType::RescueBoat) => false,
+                Some(AssetType::Helicopter) => true,
+                None => edge.access.motorcar || edge.access.emergency,
+            };
+
+            let base_cost = match query.cost_metric {
+                CostMetric::FastestTime => edge.travel_time_s.max(0.01),
+                CostMetric::ShortestDistance => (edge.length_m / 1_000.0).max(0.0001),
+            };
+
+            if is_blocked || !is_accessible {
+                base_cost + HAZARD_PENALTY_S
+            } else {
+                base_cost
+            }
+        };
+
+        let distances = dijkstra(&graph, start_idx, Some(target_idx), penalty_cost_fn);
+
+        let _target_distance = distances
+            .get(&target_idx)
+            .copied()
+            .filter(|d| !d.is_infinite())
+            .ok_or_else(|| PathfinderError::NoPassableRouteFound {
+                origin: query.origin.clone(),
+                destination: query.destination.clone(),
+            })?;
+
+        // Backtrack path
+        let mut current = target_idx;
+        let mut path_nodes = vec![current];
+        let mut traversed_edges: Vec<RoutingEdge> = Vec::new();
+        let max_hops = graph.node_count();
+
+        while current != start_idx {
+            if path_nodes.len() > max_hops {
+                return Err(PathfinderError::Internal(
+                    "Cycle detected during relaxed path backtracking".into(),
+                ));
+            }
+
+            let mut best_prev = None;
+            let mut best_edge = None;
+            let mut best_diff = f64::MAX;
+            let current_dist = distances[&current];
+
+            for in_edge in graph.edges_directed(current, Direction::Incoming) {
+                let prev = in_edge.source();
+                let cost = penalty_cost_fn(in_edge);
+                if cost.is_infinite() {
+                    continue;
+                }
+
+                if let Some(&prev_dist) = distances.get(&prev) {
+                    let diff = (prev_dist + cost - current_dist).abs();
+                    // Tolerance accounts for float accumulation with 1e6 penalty weights
+                    if diff < 1e-2 && diff < best_diff {
+                        best_diff = diff;
+                        best_prev = Some(prev);
+                        best_edge = Some(in_edge.weight().clone());
+                    }
+                }
+            }
+
+            match (best_prev, best_edge) {
+                (Some(prev), Some(edge)) => {
+                    path_nodes.push(prev);
+                    traversed_edges.push(edge);
+                    current = prev;
+                }
+                _ => {
+                    return Err(PathfinderError::Internal(
+                        "Incomplete path reconstruction during relaxed backtracking".into(),
+                    ));
+                }
+            }
+        }
+
+        path_nodes.reverse();
+        traversed_edges.reverse();
+
+        // Pass 3: Decompose traversed edges into operational legs
+        let is_edge_hazard = |edge: &RoutingEdge| -> bool {
+            query.blocked_segments.contains(&edge.segment_id)
+        };
+
+        struct RawLeg {
+            is_hazard: bool,
+            edges: Vec<RoutingEdge>,
+        }
+
+        let mut raw_legs: Vec<RawLeg> = Vec::new();
+
+        for edge in traversed_edges {
+            let is_hz = is_edge_hazard(&edge);
+            if let Some(last_leg) = raw_legs.last_mut() {
+                if last_leg.is_hazard == is_hz {
+                    last_leg.edges.push(edge);
+                    continue;
+                }
+            }
+            raw_legs.push(RawLeg {
+                is_hazard: is_hz,
+                edges: vec![edge],
+            });
+        }
+
+        let mut legs: Vec<RouteLeg> = Vec::new();
+        let mut staging_junction: Option<String> = None;
+        let mut landfall_junction: Option<String> = None;
+
+        let is_boat_mission = primary_asset == AssetType::RescueBoat;
+
+        for (idx, raw_leg) in raw_legs.iter().enumerate() {
+            let mode = if is_boat_mission || raw_leg.is_hazard {
+                TransportMode::Watercraft
+            } else if idx > 0 && raw_legs[idx - 1].is_hazard {
+                // Dry leg following a water stretch represents an isolated island pocket
+                TransportMode::FootWading
+            } else {
+                TransportMode::RoadVehicle
+            };
+
+            let first_edge = raw_leg.edges.first().expect("non-empty leg");
+            let last_edge = raw_leg.edges.last().expect("non-empty leg");
+
+            let leg_origin = first_edge.source.clone();
+            let leg_dest = last_edge.target.clone();
+
+            let mut waypoints = vec![first_edge.source.clone()];
+            for e in &raw_leg.edges {
+                waypoints.push(e.target.clone());
+            }
+
+            let segment_ids: Vec<String> = raw_leg.edges.iter().map(|e| e.segment_id.clone()).collect();
+            let distance_km: f64 = raw_leg.edges.iter().map(|e| e.length_m / 1_000.0).sum();
+            let travel_time_s: f64 = raw_leg.edges.iter().map(|e| e.travel_time_s).sum();
+
+            if (raw_leg.is_hazard || is_boat_mission) && staging_junction.is_none() {
+                staging_junction = Some(leg_origin.clone());
+            }
+
+            if idx > 0 && raw_legs[idx - 1].is_hazard && !raw_leg.is_hazard && landfall_junction.is_none() {
+                landfall_junction = Some(leg_origin.clone());
+            }
+
+            let hazard_type = if raw_leg.is_hazard {
+                Some("FLOODED".to_string())
+            } else {
+                None
+            };
+
+            legs.push(RouteLeg {
+                leg_index: idx,
+                mode,
+                origin_junction: leg_origin,
+                destination_junction: leg_dest,
+                waypoints,
+                segment_ids,
+                distance_km,
+                travel_time_s,
+                is_hazard_stretch: raw_leg.is_hazard,
+                hazard_type,
+            });
+        }
+
+        if staging_junction.is_none() {
+            staging_junction = Some(query.origin.clone());
+        }
+
+        let total_distance_km: f64 = legs.iter().map(|l| l.distance_km).sum();
+        let total_travel_time_s: f64 = legs.iter().map(|l| l.travel_time_s).sum();
+
+        let topology = if raw_legs.len() == 2 && !raw_legs[0].is_hazard && raw_legs[1].is_hazard {
+            MitigationTopology::TerminalHazard
+        } else if raw_legs.len() == 3 && !raw_legs[0].is_hazard && raw_legs[1].is_hazard && !raw_legs[2].is_hazard {
+            MitigationTopology::IslandHazard
+        } else if raw_legs.len() > 3 {
+            MitigationTopology::FragmentedCut
+        } else {
+            MitigationTopology::TerminalHazard
+        };
+
+        let mitigation_asset = Some(AssetType::RescueBoat);
+
+        let recommendation_summary = if is_boat_mission && raw_legs.len() <= 1 {
+            let boat_dist = legs.first().map(|l| l.distance_km).unwrap_or(0.0);
+            format!(
+                "Direct Watercraft Corridor: Deploy Rescue Boat directly from Depot '{}' to victim ({:.2} km across waterway/flood corridor).",
+                query.origin, boat_dist
+            )
+        } else if legs.len() == 1 && raw_legs[0].is_hazard {
+            let boat_dist = legs[0].distance_km;
+            format!(
+                "Road network immediately submerged from origin. Deploy Rescue Boat directly from staging hub '{}' to victim ({:.2} km across flood corridor).",
+                query.origin, boat_dist
+            )
+        } else {
+            match topology {
+                MitigationTopology::TerminalHazard => {
+                    let staging = staging_junction.clone().unwrap_or_else(|| query.origin.clone());
+                    let road_dist = legs.first().map(|l| l.distance_km).unwrap_or(0.0);
+                    let boat_dist = legs.last().map(|l| l.distance_km).unwrap_or(0.0);
+                    format!(
+                        "Direct road blocked by floodwaters. Actionable Mitigation: Drive {:.2} km via {} to Dry Staging Junction '{}'. Deploy Rescue Boat at staging hub for remaining {:.2} km across submerged corridor to reach victim.",
+                        road_dist, primary_asset, staging, boat_dist
+                    )
+                }
+                MitigationTopology::IslandHazard => {
+                    let staging = staging_junction.clone().unwrap_or_else(|| query.origin.clone());
+                    let landfall = landfall_junction.clone().unwrap_or_else(|| query.destination.clone());
+                    format!(
+                        "Victim located on isolated dry pocket cut off by flood corridor. Multi-Modal Mitigation: Drive to Staging '{}', launch Rescue Boat across water to Landfall Dock '{}', complete final stretch on foot/stretcher. (Caution: If water current is severe, escalate for Aerial Helicopter Winch).",
+                        staging, landfall
+                    )
+                }
+                MitigationTopology::FragmentedCut => {
+                    format!(
+                        "Complex disaster topology: multiple disjoint flood barriers detected ({} legs, {:.2} km). Ground/water transfers infeasible; direct Aerial Evacuation (HELICOPTER) recommended.",
+                        legs.len(), total_distance_km
+                    )
+                }
+                MitigationTopology::DirectPassable => {
+                    "Direct passable road corridor verified.".into()
+                }
+            }
+        };
+
+        Ok(MultiModalPlan {
+            origin: query.origin.clone(),
+            destination: query.destination.clone(),
+            requires_mitigation: true,
+            topology,
+            staging_junction,
+            landfall_junction,
+            legs,
+            total_distance_km,
+            total_travel_time_s,
+            primary_asset,
+            mitigation_asset,
+            recommendation_summary,
+        })
+    }
+
     /// Legacy compatibility method: computes shortest path over `PassableEdge` slice.
     ///
     /// Automatically expands undirected `PassableEdge` items into paired forward/reverse directed edges.
@@ -506,5 +965,157 @@ mod tests {
             err_isolated,
             Err(PathfinderError::NoPassableRouteFound { .. })
         ));
+    }
+
+    #[test]
+    fn test_multimodal_direct_passable_no_mitigation() {
+        let edges = vec![
+            create_edge("seg_1", "J1", "J2", 2.0, true, true),
+            create_edge("seg_2", "J2", "J3", 3.0, true, true),
+        ];
+
+        let query = RoutingQuery::new("J1", "J3").with_asset_type(AssetType::Ambulance);
+        let plan = DeterministicPathfinder::find_multimodal_route(&edges, &query).unwrap();
+
+        assert!(!plan.requires_mitigation);
+        assert_eq!(plan.topology, MitigationTopology::DirectPassable);
+        assert_eq!(plan.legs.len(), 1);
+        assert_eq!(plan.legs[0].mode, TransportMode::RoadVehicle);
+        assert_eq!(plan.legs[0].origin_junction, "J1");
+        assert_eq!(plan.legs[0].destination_junction, "J3");
+        assert_eq!(plan.staging_junction, None);
+        assert_eq!(plan.landfall_junction, None);
+        assert!((plan.total_distance_km - 5.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_multimodal_terminal_hazard_staging_detection() {
+        // Path: Depot A -> Hub B -> Staging C -> Victim D
+        // Segments:
+        //   A -> B: 2.0 km (Dry)
+        //   B -> C: 3.0 km (Dry)
+        //   C -> D: 1.0 km (Flooded!)
+        let edges = vec![
+            create_edge("seg_A_B", "A", "B", 2.0, true, true),
+            create_edge("seg_B_C", "B", "C", 3.0, true, true),
+            create_edge("seg_C_D_flooded", "C", "D", 1.0, true, true),
+        ];
+
+        let mut blocked = HashSet::new();
+        blocked.insert("seg_C_D_flooded".to_string());
+
+        let query = RoutingQuery::new("A", "D")
+            .with_asset_type(AssetType::Ambulance)
+            .with_blocked_segments(blocked);
+
+        // 1. Direct pathfinder MUST fail closed
+        let direct_err = DeterministicPathfinder::find_directed_route(&edges, &query);
+        assert!(matches!(direct_err, Err(PathfinderError::NoPassableRouteFound { .. })));
+
+        // 2. Multi-modal mitigation solver MUST succeed and identify cut
+        let plan = DeterministicPathfinder::find_multimodal_route(&edges, &query).unwrap();
+        assert!(plan.requires_mitigation);
+        assert_eq!(plan.topology, MitigationTopology::TerminalHazard);
+        assert_eq!(plan.staging_junction, Some("C".to_string()));
+        assert_eq!(plan.landfall_junction, None);
+        assert_eq!(plan.legs.len(), 2);
+
+        // Leg 0: Road vehicle (Ambulance) from A to C
+        assert_eq!(plan.legs[0].mode, TransportMode::RoadVehicle);
+        assert_eq!(plan.legs[0].origin_junction, "A");
+        assert_eq!(plan.legs[0].destination_junction, "C");
+        assert_eq!(plan.legs[0].waypoints, vec!["A", "B", "C"]);
+        assert_eq!(plan.legs[0].segment_ids, vec!["seg_A_B", "seg_B_C"]);
+        assert!((plan.legs[0].distance_km - 5.0).abs() < 1e-4);
+        assert!(!plan.legs[0].is_hazard_stretch);
+
+        // Leg 1: Rescue Boat from C to D
+        assert_eq!(plan.legs[1].mode, TransportMode::Watercraft);
+        assert_eq!(plan.legs[1].origin_junction, "C");
+        assert_eq!(plan.legs[1].destination_junction, "D");
+        assert_eq!(plan.legs[1].waypoints, vec!["C", "D"]);
+        assert_eq!(plan.legs[1].segment_ids, vec!["seg_C_D_flooded"]);
+        assert!((plan.legs[1].distance_km - 1.0).abs() < 1e-4);
+        assert!(plan.legs[1].is_hazard_stretch);
+        assert_eq!(plan.legs[1].hazard_type.as_deref(), Some("FLOODED"));
+
+        // Assets
+        assert_eq!(plan.primary_asset, AssetType::Ambulance);
+        assert_eq!(plan.mitigation_asset, Some(AssetType::RescueBoat));
+        assert!(plan.recommendation_summary.contains("Dry Staging Junction 'C'"));
+        assert!(plan.recommendation_summary.contains("Rescue Boat"));
+    }
+
+    #[test]
+    fn test_multimodal_island_hazard_scenario() {
+        // Path: A -> B -> C -> D -> E
+        //   A -> B: 2.0 km (Dry)
+        //   B -> C: 1.0 km (Flooded River Cut)
+        //   C -> D: 1.5 km (Dry Island)
+        //   D -> E: 0.5 km (Dry Island to Victim)
+        let edges = vec![
+            create_edge("seg_A_B", "A", "B", 2.0, true, true),
+            create_edge("seg_B_C_flooded", "B", "C", 1.0, true, true),
+            create_edge("seg_C_D", "C", "D", 1.5, true, true),
+            create_edge("seg_D_E", "D", "E", 0.5, true, true),
+        ];
+
+        let mut blocked = HashSet::new();
+        blocked.insert("seg_B_C_flooded".to_string());
+
+        let query = RoutingQuery::new("A", "E")
+            .with_asset_type(AssetType::Ambulance)
+            .with_blocked_segments(blocked);
+
+        let plan = DeterministicPathfinder::find_multimodal_route(&edges, &query).unwrap();
+        assert!(plan.requires_mitigation);
+        assert_eq!(plan.topology, MitigationTopology::IslandHazard);
+        assert_eq!(plan.staging_junction, Some("B".to_string()));
+        assert_eq!(plan.landfall_junction, Some("C".to_string()));
+        assert_eq!(plan.legs.len(), 3);
+
+        // Leg 0: Road (A -> B)
+        assert_eq!(plan.legs[0].mode, TransportMode::RoadVehicle);
+        assert_eq!(plan.legs[0].origin_junction, "A");
+        assert_eq!(plan.legs[0].destination_junction, "B");
+        assert!((plan.legs[0].distance_km - 2.0).abs() < 1e-4);
+
+        // Leg 1: Watercraft (B -> C)
+        assert_eq!(plan.legs[1].mode, TransportMode::Watercraft);
+        assert_eq!(plan.legs[1].origin_junction, "B");
+        assert_eq!(plan.legs[1].destination_junction, "C");
+        assert!((plan.legs[1].distance_km - 1.0).abs() < 1e-4);
+
+        // Leg 2: FootWading / Stretcher on dry pocket (C -> E)
+        assert_eq!(plan.legs[2].mode, TransportMode::FootWading);
+        assert_eq!(plan.legs[2].origin_junction, "C");
+        assert_eq!(plan.legs[2].destination_junction, "E");
+        assert_eq!(plan.legs[2].waypoints, vec!["C", "D", "E"]);
+        assert!((plan.legs[2].distance_km - 2.0).abs() < 1e-4);
+
+        assert!(plan.recommendation_summary.contains("Staging 'B'"));
+        assert!(plan.recommendation_summary.contains("Landfall Dock 'C'"));
+    }
+
+    #[test]
+    fn test_multimodal_direct_watercraft_launch_from_boat_depot() {
+        let edges = vec![
+            create_edge("seg_jetty_river", "DEPOT_JETTY", "PERIYAR_1", 0.5, true, true),
+            create_edge("seg_river_victim", "PERIYAR_1", "VICTIM_ISLAND", 0.5, true, true),
+        ];
+
+        let query = RoutingQuery::new("DEPOT_JETTY", "VICTIM_ISLAND")
+            .with_asset_type(AssetType::RescueBoat);
+
+        let plan = DeterministicPathfinder::find_multimodal_route(&edges, &query).unwrap();
+        assert!(plan.requires_mitigation);
+        assert_eq!(plan.staging_junction, Some("DEPOT_JETTY".to_string()));
+        assert_eq!(plan.legs.len(), 1);
+        assert_eq!(plan.legs[0].mode, TransportMode::Watercraft);
+        assert_eq!(plan.legs[0].origin_junction, "DEPOT_JETTY");
+        assert_eq!(plan.legs[0].destination_junction, "VICTIM_ISLAND");
+        assert!((plan.legs[0].distance_km - 1.0).abs() < 1e-4);
+        assert!(!plan.recommendation_summary.contains("UNKNOWN"));
+        assert!(plan.recommendation_summary.contains("Direct Watercraft Corridor"));
     }
 }

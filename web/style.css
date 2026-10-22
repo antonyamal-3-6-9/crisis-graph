@@ -238,3 +238,18 @@ textarea:focus, input:focus, select:focus { border-color: #629a81; box-shadow: 0
   background: var(--amber);
   color: #fff;
 }
+
+/* Fleet Dynamic Management Controls */
+.fleet { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.fleet-unit { display: flex; flex-direction: column; align-items: center; justify-content: center; background: #edf1ed; border-radius: 6px; padding: 6px 4px; gap: 4px; }
+.fleet-unit span { font-size: 11px; font-weight: 600; }
+.fleet-ctrls { display: flex; gap: 4px; align-items: center; }
+.fleet-ctrl-btn { border: 1px solid #c9d2c8; background: #ffffff; border-radius: 4px; width: 22px; height: 20px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; cursor: pointer; color: var(--ink); line-height: 1; transition: background 0.15s; }
+.fleet-ctrl-btn:hover { background: #dce3db; }
+.fleet-ctrl-btn:active { background: #c5cec4; }
+
+/* Mission Complete & Release Button */
+.mission-actions { margin: 12px 0 16px; padding: 12px; background: #f0f7f3; border: 1px solid #cbe5d8; border-radius: 7px; display: flex; justify-content: space-between; align-items: center; }
+.mission-actions p { font-size: 11px; color: var(--ink); margin: 0; }
+.button-release { background: #166534; color: #ffffff; border: none; padding: 7px 14px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+.button-release:hover { background: #14532d; }

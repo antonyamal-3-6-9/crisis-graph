@@ -14,6 +14,8 @@ pub struct CrisisState {
     pub total_distance_km: Option<f64>,
     pub total_travel_time_s: Option<f64>,
     pub detour_reason: Option<String>,
+    pub multimodal_plan: Option<crate::solver::MultiModalPlan>,
+    pub uncertainty_waterfall: Option<super::waterfall::UncertaintyWaterfall>,
     pub brief: Option<TacticalBrief>,
     pub errors: Vec<String>,
 }
@@ -30,6 +32,8 @@ impl CrisisState {
             total_distance_km: None,
             total_travel_time_s: None,
             detour_reason: None,
+            multimodal_plan: None,
+            uncertainty_waterfall: None,
             brief: None,
             errors: Vec::new(),
         }

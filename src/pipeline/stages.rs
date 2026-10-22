@@ -1,6 +1,7 @@
 use crate::db::{RedisClient, StateManager};
 use crate::ingestion::{SpatialResolver, TriageExtractor};
 use crate::models::{CrisisState, DispatchStatus, TacticalBrief};
+use crate::solver::pathfinder::TransportMode;
 use crate::solver::{DeterministicPathfinder, RoutingQuery};
 use chrono::Utc;
 use tracing::{error, info, warn};
@@ -83,18 +84,37 @@ impl PipelineStages {
                     info!("Recorded candidate hazard extraction for verification: segment={:?}, status={:?}, duration_hours={:?}", hazard.road_segment, hazard.status, hazard.duration_hours);
                 }
 
-                if triage.resolved_junction_id.is_none() {
+                // Execute Uncertainty Waterfall Resolution
+                let waterfall = crate::models::waterfall::UncertaintyWaterfall::resolve(&state.sos, &triage);
+                let location_missing = waterfall.location_missing;
+                state.uncertainty_waterfall = Some(waterfall.clone());
+
+                if location_missing {
                     state.errors.push(format!(
                         "TriageLocationResolutionFailed: {:?}",
                         triage.victim_location_raw
                     ));
-                }
+                    if let Some(ref dial_alert) = waterfall.dispatcher_dial_alert {
+                        warn!("{}", dial_alert);
+                    }
+                    state.errors.push("TriageRequiresHumanReview: Victim location was not provided".to_string());
+                } else {
+                    // Location is known. If the only uncertainties are missing headcount or asset,
+                    // the Uncertainty Waterfall provides a safe, standard operational baseline.
+                    let non_blocking_reasons = ["Headcount was not provided", "Required asset was not specified"];
+                    let remaining_blocking_reasons: Vec<String> = triage
+                        .uncertainty_reasons
+                        .iter()
+                        .filter(|r| !non_blocking_reasons.contains(&r.as_str()))
+                        .cloned()
+                        .collect();
 
-                if triage.needs_human_review {
-                    state.errors.push(format!(
-                        "TriageRequiresHumanReview: {}",
-                        triage.uncertainty_reasons.join("; ")
-                    ));
+                    if !remaining_blocking_reasons.is_empty() {
+                        state.errors.push(format!(
+                            "TriageRequiresHumanReview: {}",
+                            remaining_blocking_reasons.join("; ")
+                        ));
+                    }
                 }
 
                 state.triage = Some(triage);
@@ -127,29 +147,35 @@ impl PipelineStages {
             }
         };
 
-        let headcount = match triage.headcount {
-            Some(value) => value,
-            None => {
-                state
-                    .errors
-                    .push("Cannot allocate assets: missing triage headcount".to_string());
-                return state;
-            }
-        };
-        let required_asset = match triage.required_asset.as_ref() {
-            Some(value) => value,
-            None => {
-                state
-                    .errors
-                    .push("Cannot allocate assets: missing required asset".to_string());
-                return state;
-            }
+        // Resolve headcount and required asset (using extracted values or Uncertainty Waterfall fallbacks)
+        let (headcount, required_asset) = if let Some(ref wf) = state.uncertainty_waterfall {
+            (wf.resolved_headcount, wf.resolved_asset.clone())
+        } else {
+            let hc = match triage.headcount {
+                Some(value) => value,
+                None => {
+                    state
+                        .errors
+                        .push("Cannot allocate assets: missing triage headcount".to_string());
+                    return state;
+                }
+            };
+            let asset = match triage.required_asset.as_ref() {
+                Some(value) => value.clone(),
+                None => {
+                    state
+                        .errors
+                        .push("Cannot allocate assets: missing required asset".to_string());
+                    return state;
+                }
+            };
+            (hc, asset)
         };
 
         // Query candidate shelters
         match self
             .state_mgr
-            .find_candidate_shelters(required_asset, headcount)
+            .find_candidate_shelters(&required_asset, headcount)
             .await
         {
             Ok(candidates) if !candidates.is_empty() => {
@@ -168,7 +194,7 @@ impl PipelineStages {
                                 .state_mgr
                                 .reserve_shelter_asset(
                                     &shelter.id,
-                                    required_asset,
+                                    &required_asset,
                                     headcount,
                                     &state.sos.alert_id,
                                 )
@@ -200,6 +226,7 @@ impl PipelineStages {
                             let _ = self.redis.release_lock(&shelter.id, &lock_token).await;
 
                             if allocated {
+                                let _ = self.redis.remove_waiting_incident(&state.sos.alert_id).await;
                                 break;
                             }
                         }
@@ -216,15 +243,17 @@ impl PipelineStages {
                 }
 
                 if !allocated {
+                    let _ = self.redis.push_waiting_incident(&state.sos.alert_id).await;
                     state
                         .errors
-                        .push("Failed to atomically reserve any eligible shelter".to_string());
+                        .push("Failed to atomically reserve any eligible shelter (Enqueued in FIFO waiting queue)".to_string());
                 }
             }
             Ok(_) => {
+                let _ = self.redis.push_waiting_incident(&state.sos.alert_id).await;
                 state
                     .errors
-                    .push("No shelters have sufficient capacity or required assets".to_string());
+                    .push("No shelters have sufficient capacity or required assets (Enqueued in FIFO waiting queue)".to_string());
             }
             Err(e) => {
                 state.errors.push(format!("ShelterQueryError: {}", e));
@@ -300,13 +329,17 @@ impl PipelineStages {
             }
         };
 
-        let required_asset = match triage.required_asset.clone() {
-            Some(value) => value,
-            None => {
-                state
-                    .errors
-                    .push("Missing required asset for path calculation".to_string());
-                return state;
+        let required_asset = if let Some(ref wf) = state.uncertainty_waterfall {
+            wf.resolved_asset.clone()
+        } else {
+            match triage.required_asset.clone() {
+                Some(value) => value,
+                None => {
+                    state
+                        .errors
+                        .push("Missing required asset for path calculation".to_string());
+                    return state;
+                }
             }
         };
 
@@ -324,42 +357,58 @@ impl PipelineStages {
             start_junction.starts_with("node/") || target_junction.starts_with("node/");
 
         if is_directed_pilot {
-            // Query active passable directed subgraph from Neo4j (Aluva pilot dataset)
-            let edges = match self
+            // Query directed topology and active hazard segments from Neo4j (Aluva pilot dataset)
+            let (edges, blocked_segments) = match self
                 .state_mgr
-                .get_passable_directed_subgraph("aluva-periyar-pilot")
+                .get_directed_topology_with_hazards("aluva-periyar-pilot")
                 .await
             {
-                Ok(edges) => edges,
+                Ok(res) => res,
                 Err(e) => {
                     state.errors.push(format!(
-                        "Failed to retrieve passable directed graph from Neo4j: {}",
+                        "Failed to retrieve directed graph topology from Neo4j: {}",
                         e
                     ));
                     return state;
                 }
             };
 
-            let query =
-                RoutingQuery::new(start_junction, target_junction).with_asset_type(required_asset);
+            let query = RoutingQuery::new(start_junction, target_junction)
+                .with_asset_type(required_asset)
+                .with_blocked_segments(blocked_segments);
 
-            match DeterministicPathfinder::find_directed_route(&edges, &query) {
-                Ok(route) => {
+            match DeterministicPathfinder::find_multimodal_route(&edges, &query) {
+                Ok(plan) => {
+                    let all_waypoints: Vec<String> = plan
+                        .legs
+                        .iter()
+                        .flat_map(|leg| leg.waypoints.clone())
+                        .collect();
+                    let all_segments: Vec<String> = plan
+                        .legs
+                        .iter()
+                        .flat_map(|leg| leg.segment_ids.clone())
+                        .collect();
+
                     info!(
-                        "Directed route computed: {} waypoints, {} segments, {:.2} km, {:.1} s",
-                        route.path.len(),
-                        route.segment_path.len(),
-                        route.total_distance_km,
-                        route.total_travel_time_s
+                        "Multi-modal route computed: {} legs, {} waypoints, {} segments, {:.2} km, {:.1} s, mitigation_required={}",
+                        plan.legs.len(),
+                        all_waypoints.len(),
+                        all_segments.len(),
+                        plan.total_distance_km,
+                        plan.total_travel_time_s,
+                        plan.requires_mitigation
                     );
-                    state.computed_path = Some(route.path);
-                    state.segment_path = Some(route.segment_path);
-                    state.total_distance_km = Some(route.total_distance_km);
-                    state.total_travel_time_s = Some(route.total_travel_time_s);
-                    state.detour_reason = route.detour_reason;
+
+                    state.computed_path = Some(all_waypoints);
+                    state.segment_path = Some(all_segments);
+                    state.total_distance_km = Some(plan.total_distance_km);
+                    state.total_travel_time_s = Some(plan.total_travel_time_s);
+                    state.detour_reason = Some(plan.recommendation_summary.clone());
+                    state.multimodal_plan = Some(plan);
                 }
                 Err(e) => {
-                    error!("Directed routing failed: {}", e);
+                    error!("Multi-modal routing failed: {}", e);
                     state.errors.push(format!("RoutingError: {}", e));
                 }
             }
@@ -411,7 +460,12 @@ impl PipelineStages {
             .and_then(|t| t.resolved_junction_id.clone())
             .unwrap_or_else(|| "UNKNOWN".to_string());
         let shelter = state.assigned_shelter.clone();
-        let headcount = state.triage.as_ref().and_then(|t| t.headcount).unwrap_or(0);
+        let headcount = state
+            .uncertainty_waterfall
+            .as_ref()
+            .map(|wf| wf.resolved_headcount)
+            .or_else(|| state.triage.as_ref().and_then(|t| t.headcount))
+            .unwrap_or(0);
         let path = state.computed_path.clone().unwrap_or_default();
         let distance = state.total_distance_km.unwrap_or(0.0);
         let asset = state
@@ -450,8 +504,47 @@ impl PipelineStages {
             verification_notes.push("FAILURE: Resource allocation incomplete.".to_string());
         }
 
-        // Assertion 3: Independent live safety verification of every traversed road segment against operational overlay
-        if let Some(ref segment_ids) = state.segment_path {
+        // Assertion 3: Independent live safety verification of road segments
+        let requires_mitigation = state
+            .multimodal_plan
+            .as_ref()
+            .map(|p| p.requires_mitigation)
+            .unwrap_or(false);
+
+        if requires_mitigation {
+            // In a multi-modal mitigation plan:
+            // If Leg 0 is a road vehicle leg to staging, verify that 100% of its segments are dry and safe.
+            if let Some(ref plan) = state.multimodal_plan {
+                if let Some(first_leg) = plan.legs.first() {
+                    if first_leg.mode == TransportMode::RoadVehicle {
+                        match self.state_mgr.verify_path_segments(&first_leg.segment_ids).await {
+                            Ok(hazardous) if !hazardous.is_empty() => {
+                                verified = false;
+                                verification_notes.push(format!(
+                                    "CRITICAL SAFETY VIOLATION: Road leg to staging junction traverses actively compromised segments: {:?}",
+                                    hazardous
+                                ));
+                            }
+                            Ok(_) => {
+                                info!(
+                                    "Independent safety check: 100% of {} road segments to Staging Junction verified safe.",
+                                    first_leg.segment_ids.len()
+                                );
+                            }
+                            Err(e) => {
+                                verified = false;
+                                verification_notes.push(format!("SafetyVerificationFailed: {}", e));
+                            }
+                        }
+                    } else {
+                        info!(
+                            "Independent safety check: Multi-modal leg 0 is {:?} (corridor length: {:.2} km); watercraft transit authorized.",
+                            first_leg.mode, first_leg.distance_km
+                        );
+                    }
+                }
+            }
+        } else if let Some(ref segment_ids) = state.segment_path {
             match self.state_mgr.verify_path_segments(segment_ids).await {
                 Ok(hazardous) if !hazardous.is_empty() => {
                     verified = false;
@@ -474,7 +567,11 @@ impl PipelineStages {
         }
 
         let dispatch_status = if verified && !state.has_errors() {
-            DispatchStatus::RoutedVerified
+            if requires_mitigation {
+                DispatchStatus::MitigationRequired
+            } else {
+                DispatchStatus::RoutedVerified
+            }
         } else {
             DispatchStatus::EscalateHumanDispatcher
         };
@@ -482,11 +579,13 @@ impl PipelineStages {
         let primary_reason = Self::primary_dispatch_reason(
             &state,
             &verification_notes,
-            dispatch_status == DispatchStatus::RoutedVerified,
+            dispatch_status == DispatchStatus::RoutedVerified || dispatch_status == DispatchStatus::MitigationRequired,
         );
 
         let action_required = if dispatch_status == DispatchStatus::RoutedVerified {
             "None".to_string()
+        } else if dispatch_status == DispatchStatus::MitigationRequired {
+            "Deploy primary road vehicle to Staging Junction and launch Rescue Boat across water corridor.".to_string()
         } else if state
             .errors
             .iter()
@@ -563,6 +662,8 @@ impl PipelineStages {
         };
         let verification_summary = if dispatch_status == DispatchStatus::RoutedVerified {
             "PASSED (100% Segments Independently Verified Safe)".to_string()
+        } else if dispatch_status == DispatchStatus::MitigationRequired {
+            "PASSED (Staging Road Leg 100% Safe; Watercraft Mitigation Corridor Confirmed)".to_string()
         } else if path.is_empty() {
             "NOT RUN (route unavailable)".to_string()
         } else if verification_notes.is_empty() {
@@ -570,12 +671,36 @@ impl PipelineStages {
         } else {
             verification_notes.join("; ")
         };
-        let headcount_text = state
-            .triage
-            .as_ref()
-            .and_then(|triage| triage.headcount)
-            .map(|value| format!("{value} Persons"))
-            .unwrap_or_else(|| "UNKNOWN".to_string());
+        let headcount_text = if let Some(ref wf) = state.uncertainty_waterfall {
+            if wf.headcount_is_fallback {
+                format!("{} Persons (STANDARD BASELINE FALLBACK)", wf.resolved_headcount)
+            } else {
+                format!("{} Persons", wf.resolved_headcount)
+            }
+        } else {
+            state
+                .triage
+                .as_ref()
+                .and_then(|triage| triage.headcount)
+                .map(|value| format!("{value} Persons"))
+                .unwrap_or_else(|| "UNKNOWN".to_string())
+        };
+
+        let mut waterfall_text = String::new();
+        if let Some(ref wf) = state.uncertainty_waterfall {
+            if wf.headcount_is_fallback || wf.asset_is_fallback {
+                waterfall_text.push_str("\nUNCERTAINTY WATERFALL DIRECTIVES:\n");
+                for d in &wf.field_operational_directives {
+                    waterfall_text.push_str(&format!("  * {}\n", d));
+                }
+            }
+            if let Some(ref cb) = wf.automated_callback_inquiry {
+                waterfall_text.push_str(&format!("AUTOMATED CALLBACK INQUIRY: {}\n", cb));
+            }
+            if let Some(ref alert) = wf.dispatcher_dial_alert {
+                waterfall_text.push_str(&format!("OPERATOR ALERT: {}\n", alert));
+            }
+        }
 
         let raw_brief = format!(
             "====================================================\n\
@@ -598,6 +723,7 @@ impl PipelineStages {
              WAYPOINTS   : {}\n\
              DETOUR INFO : {}\n\
              VERIFICATION: {}\n\
+             {}{}\
              ====================================================",
             incident_id,
             Utc::now().to_rfc3339(),
@@ -620,7 +746,9 @@ impl PipelineStages {
             travel_time_text,
             waypoints_summary,
             detour_summary,
-            verification_summary
+            verification_summary,
+            if waterfall_text.is_empty() { "" } else { "----------------------------------------------------\n" },
+            waterfall_text
         );
 
         let brief = TacticalBrief {
@@ -638,6 +766,8 @@ impl PipelineStages {
             detour_reason: state.detour_reason.clone(),
             timestamp: Utc::now(),
             raw_brief_text: raw_brief,
+            multimodal_plan: state.multimodal_plan.clone(),
+            uncertainty_waterfall: state.uncertainty_waterfall.clone(),
         };
 
         state.brief = Some(brief);

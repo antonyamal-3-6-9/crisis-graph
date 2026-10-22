@@ -82,17 +82,26 @@ impl IncidentStatus {
                 | (Verifying, ReviewRequired)
                 | (RouteVerified, Assigned)
                 | (RouteVerified, RouteInvalidated)
+                | (RouteVerified, Completed)
+                | (RouteVerified, Closed)
                 | (Assigned, Acknowledged)
                 | (Assigned, RouteInvalidated)
                 | (Assigned, Cancelled)
+                | (Assigned, Completed)
+                | (Assigned, Closed)
                 | (Acknowledged, EnRoute)
                 | (Acknowledged, RouteInvalidated)
                 | (Acknowledged, Cancelled)
+                | (Acknowledged, Completed)
+                | (Acknowledged, Closed)
                 | (EnRoute, Arrived)
                 | (EnRoute, RouteInvalidated)
                 | (EnRoute, Cancelled)
+                | (EnRoute, Completed)
+                | (EnRoute, Closed)
                 | (Arrived, Completed)
                 | (Arrived, Cancelled)
+                | (Arrived, Closed)
                 | (RouteInvalidated, Routing)
                 | (RouteInvalidated, ReviewRequired)
         )
@@ -692,7 +701,9 @@ fn permission_for_transition(
         (Acknowledged, EnRoute) | (EnRoute, Arrived) | (Arrived, Completed) => {
             Permission::UpdateResponderStatus
         }
-        (Assigned | Acknowledged | EnRoute | Arrived, Cancelled) => Permission::CloseIncident,
+        (RouteVerified | Assigned | Acknowledged | EnRoute | Arrived, Completed | Closed | Cancelled) => {
+            Permission::CloseIncident
+        }
         _ => Permission::AdvancePipeline,
     };
     Ok(permission)

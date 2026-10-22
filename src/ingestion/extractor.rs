@@ -78,6 +78,8 @@ struct OpenAiMessage {
 struct RawLlmExtraction {
     schema_version: String,
     victim_location: Option<String>,
+    #[serde(default)]
+    victim_location_raw: Option<String>,
     headcount: Option<u32>,
     required_asset: Option<String>,
     hazards: Vec<RawHazardExtraction>,
@@ -173,13 +175,64 @@ impl TriageExtractor {
             }
         }
 
-        self.build_triage_report(
+        let mut report = self.build_triage_report(
             raw,
             latency_ms,
             tokens_per_second,
             prompt_eval_ms,
             completion_tokens,
-        )
+        )?;
+
+        // If location is present but not yet snapped, run the single refinement loop turn
+        if report.resolved_junction_id.is_none() {
+            if let Some(loc) = report.victim_location_raw.as_deref() {
+                if let Some(junction) = self.try_refine_landmark(&alert.raw_text, loc).await {
+                    info!("Refinement loop mapped location '{}' -> {}", loc, junction);
+                    report.resolved_junction_id = Some(junction);
+                    report.needs_human_review = false;
+                    report.uncertainty_reasons.retain(|r| !r.contains("Victim location"));
+                }
+            }
+        }
+
+        Ok(report)
+    }
+
+    async fn try_refine_landmark(&self, raw_report: &str, candidate_loc: &str) -> Option<String> {
+        let system_msg = "You are a geospatial landmark normalizer for Aluva emergency dispatch. \
+            Map the reported location to one of these exact landmark names: \
+            ['Aluva Manappuram', 'Aluva Railway Station', 'Aluva Town Hall', 'UC College', 'Aluva Taluk Hospital', 'Pump Junction', 'Bank Junction']. \
+            If the report refers to one of them, return ONLY that landmark name. If unknown or unrelated, return 'NONE'.";
+
+        let user_msg = format!("Report: \"{}\"\nExtracted location: \"{}\"\nMatching landmark:", raw_report, candidate_loc);
+
+        let payload = json!({
+            "model": self.inference_model,
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg}
+            ],
+            "temperature": 0.0,
+            "max_tokens": 25
+        });
+
+        let url = format!("{}/chat/completions", self.inference_base_url.trim_end_matches('/'));
+        let mut req = self.http_client.post(&url).json(&payload);
+        if let Some(api_key) = &self.inference_api_key {
+            req = req.bearer_auth(api_key);
+        }
+
+        if let Ok(resp) = req.send().await {
+            if let Ok(parsed) = resp.json::<OpenAiChatResponse>().await {
+                if let Some(choice) = parsed.choices.into_iter().next() {
+                    let text = choice.message.content.trim().trim_matches('"').trim();
+                    if text != "NONE" && !text.is_empty() {
+                        return self.spatial_resolver.resolve(text);
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn parse_model_content(content: &str) -> ExtractResult<RawLlmExtraction> {
@@ -354,16 +407,28 @@ impl TriageExtractor {
             });
         }
 
-        let resolved_junction_id = victim_location
+        let mut resolved_junction_id = victim_location
             .as_deref()
             .and_then(|location| self.spatial_resolver.resolve(location));
+
+        if resolved_junction_id.is_none() {
+            if let Some(raw_loc) = raw.victim_location_raw.as_deref() {
+                resolved_junction_id = self.spatial_resolver.resolve(raw_loc);
+            }
+        }
+
+        let display_location = raw
+            .victim_location_raw
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| victim_location.clone());
+
         let mut needs_human_review = raw.needs_human_review;
         let mut uncertainty_reasons = raw.uncertainty_reasons;
 
         Self::require_review_if_missing(
             &mut needs_human_review,
             &mut uncertainty_reasons,
-            victim_location.is_none(),
+            display_location.is_none(),
             "Victim location was not provided",
         );
         Self::require_review_if_missing(
@@ -406,7 +471,7 @@ impl TriageExtractor {
         }
 
         Ok(TriageReport {
-            victim_location_raw: victim_location,
+            victim_location_raw: display_location,
             resolved_junction_id,
             headcount: raw.headcount,
             required_asset,
@@ -457,6 +522,7 @@ mod tests {
         RawLlmExtraction {
             schema_version: TRIAGE_SCHEMA_VERSION.to_string(),
             victim_location: Some("Aluva Railway Station".to_string()),
+            victim_location_raw: None,
             headcount: Some(3),
             required_asset: Some("AMBULANCE".to_string()),
             hazards: Vec::new(),
@@ -474,7 +540,7 @@ mod tests {
 
     #[test]
     fn valid_structured_extraction_builds_typed_triage() {
-        let report = extractor().build_triage_report(valid_raw(), 17).unwrap();
+        let report = extractor().build_triage_report(valid_raw(), 17, None, None, None).unwrap();
         assert_eq!(report.required_asset, Some(AssetType::Ambulance));
         assert_eq!(report.headcount, Some(3));
         assert!(!report.needs_human_review);
@@ -485,7 +551,7 @@ mod tests {
     fn unknown_asset_is_rejected_instead_of_defaulting() {
         let mut raw = valid_raw();
         raw.required_asset = Some("MOTORBIKE".to_string());
-        let error = extractor().build_triage_report(raw, 0).unwrap_err();
+        let error = extractor().build_triage_report(raw, 0, None, None, None).unwrap_err();
         assert!(error.to_string().contains("Unsupported required_asset"));
     }
 
@@ -493,7 +559,7 @@ mod tests {
     fn missing_scalar_forces_human_review() {
         let mut raw = valid_raw();
         raw.required_asset = None;
-        let report = extractor().build_triage_report(raw, 0).unwrap();
+        let report = extractor().build_triage_report(raw, 0, None, None, None).unwrap();
         assert!(report.needs_human_review);
         assert!(report
             .uncertainty_reasons
@@ -508,7 +574,7 @@ mod tests {
             status: Some("FLOODED".to_string()),
             duration_hours: None,
         });
-        let report = extractor().build_triage_report(raw, 0).unwrap();
+        let report = extractor().build_triage_report(raw, 0, None, None, None).unwrap();
         assert!(report.needs_human_review);
         assert_eq!(report.hazards[0].duration_hours, None);
     }

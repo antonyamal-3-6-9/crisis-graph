@@ -149,4 +149,58 @@ impl RedisClient {
             .await?;
         Ok(())
     }
+
+    /// Push an incident into the FIFO waiting queue (RPUSH)
+    pub async fn push_waiting_incident(&self, incident_id: &str) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        // Avoid duplicate queuing
+        let _: () = redis::cmd("LREM")
+            .arg("sos:queue:waiting")
+            .arg(0)
+            .arg(incident_id)
+            .query_async(&mut conn)
+            .await
+            .unwrap_or(());
+
+        let len: i64 = redis::cmd("RPUSH")
+            .arg("sos:queue:waiting")
+            .arg(incident_id)
+            .query_async(&mut conn)
+            .await?;
+        Ok(len)
+    }
+
+    /// Pop the next waiting incident from the FIFO queue (LPOP)
+    pub async fn pop_waiting_incident(&self) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let val: Option<String> = redis::cmd("LPOP")
+            .arg("sos:queue:waiting")
+            .query_async(&mut conn)
+            .await?;
+        Ok(val)
+    }
+
+    /// Fetch all waiting incident IDs currently in the FIFO queue (LRANGE 0 -1)
+    pub async fn get_waiting_incidents(&self) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let list: Vec<String> = redis::cmd("LRANGE")
+            .arg("sos:queue:waiting")
+            .arg(0)
+            .arg(-1)
+            .query_async(&mut conn)
+            .await?;
+        Ok(list)
+    }
+
+    /// Remove a specific incident from the FIFO queue (LREM)
+    pub async fn remove_waiting_incident(&self, incident_id: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let count: i64 = redis::cmd("LREM")
+            .arg("sos:queue:waiting")
+            .arg(0)
+            .arg(incident_id)
+            .query_async(&mut conn)
+            .await?;
+        Ok(count > 0)
+    }
 }

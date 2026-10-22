@@ -2,7 +2,7 @@
 
 const API = "/api/v1";
 const ALUVA = [10.10816, 76.35651];
-const state = { incidents: [], shelters: [], hazards: null, reservations: [], graph: null, maps: {}, layers: {}, selectedIncident: null, incidentRouteMap: null };
+const state = { incidents: [], shelters: [], hazards: null, reservations: [], waitingQueue: [], graph: null, maps: {}, layers: {}, selectedIncident: null, incidentRouteMap: null };
 
 const pageMeta = {
   "/": ["Emergency operations", "Operational overview"],
@@ -25,7 +25,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   startClock();
   initializeMaps();
   initEventStream();
-  await Promise.allSettled([loadHealth(), loadGraphSummary(), loadShelters(), loadHazards(), loadIncidents(), loadReservations()]);
+  await Promise.allSettled([loadHealth(), loadGraphSummary(), loadShelters(), loadHazards(), loadIncidents(), loadReservations(), loadWaitingQueue()]);
   invalidateVisibleMaps();
 });
 
@@ -487,6 +487,14 @@ async function selectIncident(id) {
       </div>
       ${reasons.length ? `<div class="notice warning detail-notice"><b>Uncertainty</b><span>${reasons.map(escapeHtml).join(" · ")}</span></div>` : ""}
       ${needsReview ? renderReviewCardHtml("incident-review", incident.incident_id, incident.version, triage) : ""}
+      ${routeIsActive ? `
+        <div class="mission-actions">
+          <div>
+            <b>Active Dispatch Allocation</b>
+            <p>Vehicle and capacity currently locked for this incident. Release manually or allow 2.5m mission TTL sweeper to auto-recycle back to depot.</p>
+          </div>
+          <button class="button-release" onclick="releaseIncident('${escapeHtml(incident.incident_id)}')">Complete Mission & Release Fleet</button>
+        </div>` : ""}
       ${route ? `<section class="route-record"><div class="route-record-head"><div><p class="kicker">Immutable route evidence</p><h3>${routeIsInvalidated ? "Invalidated" : routeIsActive ? "Verified" : "Historical"} route v${route.route_version}</h3></div><span class="tag ${routeIsInvalidated ? "danger" : routeIsActive ? "success" : "muted"}">${routeIsInvalidated ? "Do not use" : routeIsActive ? `${route.verified_segment_count} segments certified` : "Audit evidence"}</span></div>
         <div class="incident-route-map" id="incident-route-map"></div>
         <div class="facts route-facts">${fact("Origin", route.origin_shelter_name)}${fact("Assigned unit", route.assigned_asset_id)}${fact("Triage revision", `v${route.triage_revision}`)}${fact("Distance", `${Number(route.total_distance_km).toFixed(2)} km`)}${fact("Travel time", `${(Number(route.total_travel_time_s) / 60).toFixed(1)} min`)}${fact("Objective", route.cost_objective)}${fact("Verified at", formatTime(route.verified_at))}</div>
@@ -637,8 +645,40 @@ function renderRoute(geojson, verified) {
     bundle.route.clearLayers();
     if (!geojson?.features?.length) return;
     const layer = L.geoJSON(geojson, {
-      style: { color: verified ? "#1f8a62" : "#b57418", weight: 6, opacity: .9 },
-      pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 8, color: "#fff", weight: 2, fillColor: feature.properties.type === "victim" ? "#b13e36" : "#245c7c", fillOpacity: 1 }),
+      style: (feature) => {
+        if (feature?.properties?.stroke) {
+          return {
+            color: feature.properties.stroke,
+            weight: 6,
+            opacity: 0.9,
+            dashArray: feature.properties.dash_style === "dashed" ? "8, 8" : (feature.properties.dash_style === "dotted" ? "3, 6" : null)
+          };
+        }
+        return { color: verified ? "#1f8a62" : "#b57418", weight: 6, opacity: .9 };
+      },
+      pointToLayer: (feature, latlng) => {
+        if (feature?.properties?.type === "staging_hub") {
+          return L.circleMarker(latlng, {
+            radius: 10,
+            color: "#ffffff",
+            weight: 3,
+            fillColor: "#06b6d4",
+            fillOpacity: 1
+          }).bindPopup(`<b>⚓ Staging Transfer Hub</b><br><small>${escapeHtml(feature.properties.name || "Boat Launch")}</small>`);
+        }
+        return L.circleMarker(latlng, {
+          radius: 8,
+          color: "#fff",
+          weight: 2,
+          fillColor: feature?.properties?.type === "victim" ? "#b13e36" : "#245c7c",
+          fillOpacity: 1
+        });
+      },
+      onEachFeature: (feature, featureLayer) => {
+        if (feature?.properties?.type === "route_leg") {
+          featureLayer.bindPopup(`<b>${escapeHtml(feature.properties.mode_label || "Transit Leg")}</b><br>Distance: ${feature.properties.distance_km?.toFixed(2)} km<br>Est. Time: ${Math.round(feature.properties.travel_time_s || 0)} s${feature.properties.is_hazard ? "<br><b style='color:#b13e36'>⚠ Navigating Submerged Corridor</b>" : ""}`);
+        }
+      }
     }).addTo(bundle.route);
     const bounds = layer.getBounds();
     if (bounds.isValid()) state.maps[id].fitBounds(bounds, { padding: [45, 45], maxZoom: 16 });
@@ -650,8 +690,108 @@ function renderResourceCards() {
   if (!target) return;
   target.innerHTML = state.shelters.map((hub) => {
     const ratio = hub.capacity ? Math.min(100, Math.round(hub.current_occupancy / hub.capacity * 100)) : 0;
-    return `<article class="resource-card"><h3>${escapeHtml(hub.name)}</h3><code>${escapeHtml(hub.id)}</code><div class="capacity"><div class="capacity-head"><span>Occupancy</span><b>${hub.current_occupancy} / ${hub.capacity}</b></div><div class="bar"><i style="width:${ratio}%"></i></div></div><div class="fleet"><span>🚑 ${hub.ambulances_available}</span><span>🚚 ${hub.trucks_available}</span><span>🚤 ${hub.boats_available}</span></div></article>`;
+    return `
+      <article class="resource-card">
+        <h3>${escapeHtml(hub.name)}</h3>
+        <code>${escapeHtml(hub.id)}</code>
+        <div class="capacity">
+          <div class="capacity-head"><span>Occupancy</span><b>${hub.current_occupancy} / ${hub.capacity}</b></div>
+          <div class="bar"><i style="width:${ratio}%"></i></div>
+        </div>
+        <div class="fleet">
+          <div class="fleet-unit">
+            <span>🚑 ${hub.ambulances_available}</span>
+            <div class="fleet-ctrls">
+              <button class="fleet-ctrl-btn" onclick="adjustShelterFleet('${escapeHtml(hub.id)}', 'ambulances', -1)" title="Remove Ambulance">-</button>
+              <button class="fleet-ctrl-btn" onclick="adjustShelterFleet('${escapeHtml(hub.id)}', 'ambulances', 1)" title="Add Ambulance">+</button>
+            </div>
+          </div>
+          <div class="fleet-unit">
+            <span>🚚 ${hub.trucks_available}</span>
+            <div class="fleet-ctrls">
+              <button class="fleet-ctrl-btn" onclick="adjustShelterFleet('${escapeHtml(hub.id)}', 'trucks', -1)" title="Remove Truck">-</button>
+              <button class="fleet-ctrl-btn" onclick="adjustShelterFleet('${escapeHtml(hub.id)}', 'trucks', 1)" title="Add Truck">+</button>
+            </div>
+          </div>
+          <div class="fleet-unit">
+            <span>🚤 ${hub.boats_available}</span>
+            <div class="fleet-ctrls">
+              <button class="fleet-ctrl-btn" onclick="adjustShelterFleet('${escapeHtml(hub.id)}', 'boats', -1)" title="Remove Boat">-</button>
+              <button class="fleet-ctrl-btn" onclick="adjustShelterFleet('${escapeHtml(hub.id)}', 'boats', 1)" title="Add Boat">+</button>
+            </div>
+          </div>
+        </div>
+      </article>`;
   }).join("");
+}
+
+async function adjustShelterFleet(shelterId, assetKind, delta) {
+  const payload = {};
+  if (assetKind === "ambulances") payload.delta_ambulances = delta;
+  if (assetKind === "trucks") payload.delta_trucks = delta;
+  if (assetKind === "boats") payload.delta_boats = delta;
+
+  try {
+    await fetchJson(`${API}/shelters/${encodeURIComponent(shelterId)}/fleet`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    showToast("Fleet Updated", `${delta > 0 ? "Added" : "Removed"} ${assetKind} for ${shelterId}`);
+    await Promise.allSettled([loadShelters(), loadWaitingQueue(), loadGraphSummary()]);
+  } catch (error) {
+    showToast("Fleet Update Failed", error.message, true);
+  }
+}
+
+async function loadWaitingQueue() {
+  try {
+    state.waitingQueue = await fetchJson(`${API}/queue/waiting`);
+    renderWaitingQueue();
+  } catch (e) {
+    console.error("Failed to load waiting queue", e);
+  }
+}
+
+function renderWaitingQueue() {
+  const table = document.getElementById("waiting-queue-table");
+  const badge = document.getElementById("queue-count-badge");
+  if (badge) {
+    badge.textContent = `${state.waitingQueue.length} in queue`;
+    badge.className = `tag ${state.waitingQueue.length > 0 ? "warning" : "muted"}`;
+  }
+  if (!table) return;
+
+  if (!state.waitingQueue.length) {
+    table.innerHTML = '<tr><td colspan="6" class="muted-cell">No incidents currently waiting in queue.</td></tr>';
+    return;
+  }
+
+  table.innerHTML = state.waitingQueue.map((item) => `
+    <tr>
+      <td><b>#${item.position}</b></td>
+      <td><code>${escapeHtml(item.incident_id)}</code></td>
+      <td>${statusBadge(item.status)}</td>
+      <td><b>${escapeHtml(item.requested_asset || "Any")}</b></td>
+      <td>${item.headcount || "Default (4)"}</td>
+      <td>${escapeHtml(item.location_raw || "Unknown")}</td>
+    </tr>
+  `).join("");
+}
+
+async function releaseIncident(incidentId) {
+  try {
+    await fetchJson(`${API}/incidents/${encodeURIComponent(incidentId)}/release`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "Dispatcher completed mission & released fleet" }),
+    });
+    showToast("Mission Completed", `Fleet released for incident ${incidentId}`);
+    await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations(), loadWaitingQueue(), loadGraphSummary()]);
+    selectIncident(incidentId);
+  } catch (error) {
+    showToast("Release Failed", error.message, true);
+  }
 }
 
 function renderReservations() {
@@ -672,7 +812,7 @@ async function clearHazards() {
 
 async function resetResources() {
   await mutateDemo(`${API}/shelters/reset`, { method: "POST" }, "Demo resources reset", "Shelter capacity and fleet values were restored.");
-  await Promise.allSettled([loadShelters(), loadReservations(), loadGraphSummary()]);
+  await Promise.allSettled([loadShelters(), loadReservations(), loadWaitingQueue(), loadGraphSummary()]);
 }
 
 async function mutateDemo(url, options, title, message) {
@@ -687,7 +827,7 @@ function initEventStream() {
     try {
       const data = JSON.parse(event.data);
       renderDispatchResult(data, true);
-      await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations()]);
+      await Promise.allSettled([loadIncidents(), loadShelters(), loadReservations(), loadWaitingQueue(), loadGraphSummary()]);
     } catch (error) { console.error("Invalid SSE dispatch event", error); }
   };
 }

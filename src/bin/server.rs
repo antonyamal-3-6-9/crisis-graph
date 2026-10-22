@@ -6,7 +6,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         Json, Response,
     },
-    routing::{get, post},
+    routing::{get, patch, post},
     Router,
 };
 use chrono::Utc;
@@ -28,10 +28,11 @@ use crisis_graph::db::{
 };
 use crisis_graph::ingestion::TriageExtractor;
 use crisis_graph::models::{
-    AssetType, CrisisState, DispatchStatus, Incident, IncidentStatus, ReviewDecisionKind,
-    RoadStatus, RouteDecision, SosAlert, TriageReport,
+    ActorContext, ActorRole, AssetType, CrisisState, DispatchStatus, Incident, IncidentStatus,
+    ReviewDecisionKind, RoadStatus, RouteDecision, SosAlert, TriageReport, UncertaintyWaterfall,
 };
 use crisis_graph::pipeline::{PersistedCrisisOrchestrator, PipelineStages};
+use crisis_graph::solver::{MultiModalPlan, TransportMode};
 
 const STREAM_KEY: &str = "sos:stream:aluva";
 const CONSUMER_GROUP: &str = "crisisgraph_workers";
@@ -73,6 +74,10 @@ pub struct DispatchResponse {
     pub tactical_brief: String,
     pub geojson: serde_json::Value,
     pub errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multimodal_plan: Option<MultiModalPlan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uncertainty_waterfall: Option<UncertaintyWaterfall>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -106,6 +111,29 @@ pub struct ApplyHazardRequest {
     pub segment_id: String,
     pub status: String,
     pub duration_hours: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReleaseIncidentRequest {
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ShelterFleetUpdateRequest {
+    pub delta_ambulances: Option<i32>,
+    pub delta_trucks: Option<i32>,
+    pub delta_boats: Option<i32>,
+    pub delta_capacity: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WaitingQueueItem {
+    pub position: usize,
+    pub incident_id: String,
+    pub status: IncidentStatus,
+    pub requested_asset: Option<AssetType>,
+    pub headcount: Option<u32>,
+    pub location_raw: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -223,11 +251,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         event_tx_arc.clone(),
     );
 
+    let ttl_seconds: u64 = std::env::var("MISSION_TTL_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(150); // 2.5 minutes default threshold
+
+    // Spawn background TTL Resource Sweeper & Queue Processor
+    spawn_ttl_sweeper(
+        redis.clone(),
+        orchestrator.clone(),
+        incident_repository.clone(),
+        state_manager.clone(),
+        event_tx_arc.clone(),
+        ttl_seconds,
+    );
+
     let router = Router::new()
         // API Routes
         .route("/api/v1/health", get(health_check))
         .route("/api/v1/shelters", get(get_shelters))
         .route("/api/v1/shelters/reset", post(reset_shelters))
+        .route(
+            "/api/v1/shelters/{shelter_id}/fleet",
+            patch(handle_modify_shelter_fleet),
+        )
         .route("/api/v1/hazards", get(get_hazards))
         .route("/api/v1/hazards", post(apply_hazard))
         .route("/api/v1/hazards/clear", post(clear_hazards))
@@ -246,6 +293,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "/api/v1/incidents/{incident_id}/review",
             post(handle_incident_review),
         )
+        .route(
+            "/api/v1/incidents/{incident_id}/release",
+            post(handle_incident_release),
+        )
+        .route("/api/v1/queue/waiting", get(get_waiting_queue))
         .route(
             "/api/v1/resources/reservations",
             get(get_resource_reservations),
@@ -449,6 +501,331 @@ fn spawn_stream_worker(
             }
         }
     });
+}
+
+async fn process_waiting_queue(
+    redis: &RedisClient,
+    orchestrator: &PersistedCrisisOrchestrator<IncidentRepository>,
+    incident_repo: &IncidentRepository,
+    state_mgr: &StateManager,
+    event_tx: &Arc<broadcast::Sender<String>>,
+) {
+    while let Ok(Some(incident_id)) = redis.pop_waiting_incident().await {
+        info!("[FIFO Queue] Evaluating waiting incident: {}", incident_id);
+
+        let incident_opt = match incident_repo.get(&incident_id).await {
+            Ok(inc) => inc,
+            Err(e) => {
+                warn!("[FIFO Queue] Error loading incident {}: {}", incident_id, e);
+                continue;
+            }
+        };
+
+        let incident = match incident_opt {
+            Some(inc) => inc,
+            None => {
+                warn!("[FIFO Queue] Incident {} not found in repository", incident_id);
+                continue;
+            }
+        };
+
+        if incident.status != IncidentStatus::ReviewRequired
+            && incident.status != IncidentStatus::Allocating
+            && incident.status != IncidentStatus::TriageApproved
+        {
+            info!(
+                "[FIFO Queue] Incident {} is in status {:?}; skipping queue processing",
+                incident_id, incident.status
+            );
+            continue;
+        }
+
+        let triage = incident
+            .triage_revisions
+            .last()
+            .map(|r| r.triage.clone())
+            .unwrap_or_else(|| TriageReport {
+                victim_location_raw: None,
+                resolved_junction_id: None,
+                headcount: None,
+                required_asset: None,
+                hazards: vec![],
+                confidence_score: 1.0,
+                needs_human_review: false,
+                uncertainty_reasons: vec![],
+                inference: crisis_graph::models::TriageInferenceMetadata {
+                    backend: "fifo_queue_auto_allocator".to_string(),
+                    model: "queue_resumption".to_string(),
+                    adapter_id: None,
+                    adapter_sha256: None,
+                    prompt_version: "auto".to_string(),
+                    schema_version: "auto".to_string(),
+                    latency_ms: 0,
+                    tokens_per_second: None,
+                    prompt_eval_ms: None,
+                    completion_tokens: None,
+                },
+            });
+
+        match orchestrator
+            .process_review_approval(
+                &incident_id,
+                incident.version,
+                "Auto-allocated from FIFO waiting queue following resource release",
+                triage,
+                "fifo_queue_worker",
+            )
+            .await
+        {
+            Ok(res) => {
+                let response = build_dispatch_response(
+                    &res.state,
+                    &res.incident,
+                    res.persistence_healthy,
+                    res.duplicate_suppressed,
+                    state_mgr,
+                )
+                .await;
+
+                if let Ok(json_str) = serde_json::to_string(&response) {
+                    let _ = event_tx.send(json_str);
+                }
+
+                if res.incident.status == IncidentStatus::RouteVerified {
+                    info!(
+                        "[FIFO Queue] Successfully allocated freed resource and certified route for incident {}",
+                        incident_id
+                    );
+                } else {
+                    info!(
+                        "[FIFO Queue] Incident {} could not allocate currently available fleet; keeping in queue for next release",
+                        incident_id
+                    );
+                    break;
+                }
+            }
+            Err(e) => {
+                warn!("[FIFO Queue] Error processing queued incident {}: {}", incident_id, e);
+                break;
+            }
+        }
+    }
+}
+
+fn spawn_ttl_sweeper(
+    redis: RedisClient,
+    orchestrator: PersistedCrisisOrchestrator<IncidentRepository>,
+    incident_repo: IncidentRepository,
+    state_mgr: StateManager,
+    event_tx: Arc<broadcast::Sender<String>>,
+    ttl_seconds: u64,
+) {
+    tokio::spawn(async move {
+        info!(
+            ">>> Resource TTL Sweeper active (Threshold: {}s / {:.1} min) <<<",
+            ttl_seconds,
+            ttl_seconds as f64 / 60.0
+        );
+
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+        let sweeper_actor = ActorContext::new("crisisgraph_ttl_sweeper", [ActorRole::Dispatcher]);
+
+        loop {
+            interval.tick().await;
+
+            match state_mgr.get_expired_reservations(ttl_seconds).await {
+                Ok(expired) if !expired.is_empty() => {
+                    info!(
+                        "[TTL Sweeper] Found {} expired reservation(s) exceeding {}s threshold",
+                        expired.len(),
+                        ttl_seconds
+                    );
+
+                    let mut any_freed = false;
+                    for exp in expired {
+                        info!(
+                            "[TTL Sweeper] Auto-releasing reservation for incident {} (Asset: {}, Shelter: {})",
+                            exp.incident_id, exp.asset_type, exp.shelter_id
+                        );
+
+                        match state_mgr
+                            .release_incident_reservation(
+                                &exp.incident_id,
+                                "Mission completed (TTL auto-release)",
+                            )
+                            .await
+                        {
+                            Ok(true) => {
+                                any_freed = true;
+                                if let Ok(Some(mut incident)) = incident_repo.get(&exp.incident_id).await {
+                                    if !incident.status.is_terminal() {
+                                        if let Ok(event) = incident.transition(
+                                            &sweeper_actor,
+                                            incident.version,
+                                            IncidentStatus::Completed,
+                                            "Mission completed: vehicle returned to depot after TTL expiration",
+                                            Utc::now(),
+                                        ) {
+                                            if let Err(e) = incident_repo.save_transition(&incident, &event).await {
+                                                warn!("Failed to persist TTL completion transition: {}", e);
+                                            } else {
+                                                info!(
+                                                    incident_id = %exp.incident_id,
+                                                    "Incident transitioned to COMPLETED by TTL sweeper"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(false) => {}
+                            Err(e) => {
+                                warn!("Failed to release expired reservation {}: {}", exp.incident_id, e);
+                            }
+                        }
+                    }
+
+                    if any_freed {
+                        process_waiting_queue(
+                            &redis,
+                            &orchestrator,
+                            &incident_repo,
+                            &state_mgr,
+                            &event_tx,
+                        )
+                        .await;
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("TTL Sweeper query error: {}", e);
+                }
+            }
+        }
+    });
+}
+
+async fn handle_incident_release(
+    State(state): State<AppState>,
+    Path(incident_id): Path<String>,
+    Json(payload): Json<Option<ReleaseIncidentRequest>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let reason = payload
+        .and_then(|p| p.reason)
+        .unwrap_or_else(|| "Operator manual vehicle release & mission completion".to_string());
+
+    info!(
+        incident_id = %incident_id,
+        reason = %reason,
+        "Processing operator manual resource release"
+    );
+
+    let released = state
+        .state_manager
+        .release_incident_reservation(&incident_id, &reason)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to release reservation: {}", e)))?;
+
+    let dispatcher_actor = ActorContext::new("dispatcher_console", [ActorRole::Dispatcher]);
+    if let Ok(Some(mut incident)) = state.incident_repository.get(&incident_id).await {
+        if !incident.status.is_terminal() {
+            if let Ok(event) = incident.transition(
+                &dispatcher_actor,
+                incident.version,
+                IncidentStatus::Completed,
+                &reason,
+                Utc::now(),
+            ) {
+                let _ = state.incident_repository.save_transition(&incident, &event).await;
+            }
+        }
+    }
+
+    let _ = state.redis.remove_waiting_incident(&incident_id).await;
+
+    // Wake up FIFO queue to re-assign freed resource to next waiting incident
+    process_waiting_queue(
+        &state.redis,
+        &state.orchestrator,
+        &state.incident_repository,
+        &state.state_manager,
+        &state.event_tx,
+    )
+    .await;
+
+    Ok(Json(json!({
+        "incident_id": incident_id,
+        "released": released,
+        "status": "COMPLETED",
+        "reason": reason
+    })))
+}
+
+async fn handle_modify_shelter_fleet(
+    State(state): State<AppState>,
+    Path(shelter_id): Path<String>,
+    Json(payload): Json<ShelterFleetUpdateRequest>,
+) -> Result<Json<ShelterWithLocation>, (StatusCode, String)> {
+    let delta_amb = payload.delta_ambulances.unwrap_or(0);
+    let delta_trk = payload.delta_trucks.unwrap_or(0);
+    let delta_boat = payload.delta_boats.unwrap_or(0);
+    let delta_cap = payload.delta_capacity.unwrap_or(0);
+
+    info!(
+        shelter_id = %shelter_id,
+        delta_amb = delta_amb,
+        delta_trk = delta_trk,
+        delta_boat = delta_boat,
+        delta_cap = delta_cap,
+        "Modifying shelter fleet resources"
+    );
+
+    let updated = state
+        .state_manager
+        .modify_shelter_fleet(&shelter_id, delta_amb, delta_trk, delta_boat, delta_cap)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to modify shelter fleet: {}", e)))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Shelter '{}' not found", shelter_id)))?;
+
+    if delta_amb > 0 || delta_trk > 0 || delta_boat > 0 || delta_cap > 0 {
+        process_waiting_queue(
+            &state.redis,
+            &state.orchestrator,
+            &state.incident_repository,
+            &state.state_manager,
+            &state.event_tx,
+        )
+        .await;
+    }
+
+    Ok(Json(updated))
+}
+
+async fn get_waiting_queue(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<WaitingQueueItem>>, StatusCode> {
+    let ids = state
+        .redis
+        .get_waiting_incidents()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let mut items = Vec::new();
+    for (idx, id) in ids.into_iter().enumerate() {
+        if let Ok(Some(inc)) = state.incident_repository.get(&id).await {
+            let triage = inc.current_triage();
+            items.push(WaitingQueueItem {
+                position: idx + 1,
+                incident_id: id,
+                status: inc.status,
+                requested_asset: triage.and_then(|t| t.required_asset.clone()),
+                headcount: triage.and_then(|t| t.headcount),
+                location_raw: triage.and_then(|t| t.victim_location_raw.clone()),
+            });
+        }
+    }
+
+    Ok(Json(items))
 }
 
 async fn get_shelters(
@@ -926,8 +1303,81 @@ async fn build_dispatch_response(
 
     let is_detour = final_state.detour_reason.is_some();
 
-    // 1. Route Polyline Feature
-    if route_coords.len() >= 2 {
+    // 1. Route Polyline Features (Multi-Modal Legs or Single Route)
+    if let Some(ref plan) = final_state.multimodal_plan {
+        if plan.requires_mitigation {
+            for leg in &plan.legs {
+                let leg_coords = state_mgr
+                    .get_junction_coordinates(&leg.waypoints)
+                    .await
+                    .unwrap_or_default();
+
+                if leg_coords.len() >= 2 {
+                    let (stroke, dash_style, mode_label) = match leg.mode {
+                        TransportMode::RoadVehicle => ("#10b981", "solid", "Road Vehicle Transit"),
+                        TransportMode::Watercraft => ("#06b6d4", "dashed", "Rescue Boat Water Corridor"),
+                        TransportMode::FootWading => ("#f59e0b", "dotted", "Foot / Stretcher Transfer"),
+                        TransportMode::Aerial => ("#a855f7", "dashed", "Direct Aerial Evacuation"),
+                    };
+
+                    features.push(json!({
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": leg_coords
+                        },
+                        "properties": {
+                            "type": "route_leg",
+                            "leg_index": leg.leg_index,
+                            "mode": format!("{:?}", leg.mode),
+                            "mode_label": mode_label,
+                            "distance_km": leg.distance_km,
+                            "travel_time_s": leg.travel_time_s,
+                            "is_hazard": leg.is_hazard_stretch,
+                            "stroke": stroke,
+                            "dash_style": dash_style
+                        }
+                    }));
+                }
+            }
+
+            // Staging Point Marker
+            if let Some(ref staging_id) = plan.staging_junction {
+                if let Ok(coords) = state_mgr.get_junction_coordinates(&[staging_id.clone()]).await {
+                    if let Some(coord) = coords.first() {
+                        features.push(json!({
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": coord
+                            },
+                            "properties": {
+                                "type": "staging_hub",
+                                "junction_id": staging_id,
+                                "name": "Dry Staging Hub (Boat Launch & Ambulance Transfer)"
+                            }
+                        }));
+                    }
+                }
+            }
+        } else if route_coords.len() >= 2 {
+            features.push(json!({
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": route_coords
+                },
+                "properties": {
+                    "type": "route",
+                    "distance_km": final_state.total_distance_km.unwrap_or(0.0),
+                    "travel_time_s": final_state.total_travel_time_s.unwrap_or(0.0),
+                    "status": format!("{:?}", dispatch_status),
+                    "stroke": "#10b981",
+                    "is_detour": is_detour
+                }
+            }));
+        }
+    } else if route_coords.len() >= 2 {
         features.push(json!({
             "type": "Feature",
             "geometry": {
@@ -1030,7 +1480,8 @@ async fn build_dispatch_response(
         } else {
             !control_plane_persisted
                 || incident.status == IncidentStatus::ReviewRequired
-                || dispatch_status != DispatchStatus::RoutedVerified
+                || (dispatch_status != DispatchStatus::RoutedVerified
+                    && dispatch_status != DispatchStatus::MitigationRequired)
         },
         status: format!("{:?}", dispatch_status),
         victim_junction,
@@ -1050,6 +1501,8 @@ async fn build_dispatch_response(
         tactical_brief: brief_text,
         geojson,
         errors: final_state.errors.clone(),
+        multimodal_plan: final_state.multimodal_plan.clone(),
+        uncertainty_waterfall: final_state.uncertainty_waterfall.clone(),
     }
 }
 

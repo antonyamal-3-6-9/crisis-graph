@@ -17,6 +17,8 @@ pub struct Shelter {
 pub enum DispatchStatus {
     #[serde(rename = "ROUTED_VERIFIED")]
     RoutedVerified,
+    #[serde(rename = "MITIGATION_REQUIRED")]
+    MitigationRequired,
     #[serde(rename = "ESCALATE_HUMAN_DISPATCHER")]
     EscalateHumanDispatcher,
     #[serde(rename = "RESOURCES_EXHAUSTED")]
@@ -41,4 +43,6 @@ pub struct TacticalBrief {
     pub detour_reason: Option<String>,
     pub timestamp: DateTime<Utc>,
     pub raw_brief_text: String,
+    pub multimodal_plan: Option<crate::solver::MultiModalPlan>,
+    pub uncertainty_waterfall: Option<super::waterfall::UncertaintyWaterfall>,
 }
