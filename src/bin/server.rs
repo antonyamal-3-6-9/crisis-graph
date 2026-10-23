@@ -50,6 +50,12 @@ struct AppState {
 pub struct DispatchRequest {
     pub raw_text: String,
     pub source_channel: Option<String>,
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    #[serde(default)]
+    pub longitude: Option<f64>,
+    #[serde(default)]
+    pub accuracy_m: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -368,14 +374,14 @@ async fn ingest_sos_stream(
     State(state): State<AppState>,
     Json(req): Json<DispatchRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let alert = SosAlert {
-        alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
-        raw_text: req.raw_text,
-        timestamp: Utc::now(),
-        source_channel: req
-            .source_channel
-            .or_else(|| Some("redis_streams_intake".to_string())),
-    };
+    let mut alert = SosAlert::new(
+        format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+        req.raw_text,
+    );
+    alert.source_channel = req.source_channel.or_else(|| Some("redis_streams_intake".to_string()));
+    alert.latitude = req.latitude;
+    alert.longitude = req.longitude;
+    alert.accuracy_m = req.accuracy_m;
 
     let payload = serde_json::to_string(&alert).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -407,15 +413,14 @@ async fn simulate_spike(
     let mut queued = Vec::new();
 
     for alert_text in sample_alerts {
-        let alert = SosAlert {
-            alert_id: format!(
+        let mut alert = SosAlert::new(
+            format!(
                 "SOS-SPIKE-{}",
                 Uuid::new_v4().to_string()[..6].to_uppercase()
             ),
-            raw_text: alert_text.to_string(),
-            timestamp: Utc::now(),
-            source_channel: Some("disaster_spike_simulator".to_string()),
-        };
+            alert_text.to_string(),
+        );
+        alert.source_channel = Some("disaster_spike_simulator".to_string());
 
         if let Ok(payload) = serde_json::to_string(&alert) {
             if let Ok(msg_id) = state.redis.xadd(STREAM_KEY, &payload).await {
@@ -459,14 +464,16 @@ fn spawn_stream_worker(
 
                         let alert: SosAlert = match serde_json::from_str(&payload_str) {
                             Ok(a) => a,
-                            Err(_) => SosAlert {
-                                alert_id: format!(
-                                    "SOS-{}",
-                                    Uuid::new_v4().to_string()[..8].to_uppercase()
-                                ),
-                                raw_text: payload_str,
-                                timestamp: Utc::now(),
-                                source_channel: Some("stream_fallback".to_string()),
+                            Err(_) => {
+                                let mut a = SosAlert::new(
+                                    format!(
+                                        "SOS-{}",
+                                        Uuid::new_v4().to_string()[..8].to_uppercase()
+                                    ),
+                                    payload_str,
+                                );
+                                a.source_channel = Some("stream_fallback".to_string());
+                                a
                             },
                         };
 
@@ -1066,7 +1073,74 @@ async fn get_incident_route(
 
 fn persisted_route_geojson(route: &RouteDecision, coordinates: &[[f64; 2]]) -> serde_json::Value {
     let mut features = Vec::new();
-    if coordinates.len() >= 2 {
+    let coord_map: std::collections::HashMap<&str, [f64; 2]> = route
+        .junction_path
+        .iter()
+        .map(|s| s.as_str())
+        .zip(coordinates.iter().copied())
+        .collect();
+
+    let mut rendered_legs = false;
+
+    // 1. Render Multi-Modal Discrete Legs if mitigation was required
+    if let Some(ref plan) = route.multimodal_plan {
+        if plan.requires_mitigation && !plan.legs.is_empty() {
+            rendered_legs = true;
+            for leg in &plan.legs {
+                let leg_coords: Vec<[f64; 2]> = leg
+                    .waypoints
+                    .iter()
+                    .filter_map(|w| coord_map.get(w.as_str()).copied())
+                    .collect();
+
+                if leg_coords.len() >= 2 {
+                    let (stroke, dash_style, mode_label) = match leg.mode {
+                        TransportMode::RoadVehicle => ("#10b981", "solid", "Road Vehicle Transit"),
+                        TransportMode::Watercraft => ("#06b6d4", "dashed", "Rescue Boat Water Corridor"),
+                        TransportMode::FootWading => ("#f59e0b", "dotted", "Foot / Stretcher Transfer"),
+                        TransportMode::Aerial => ("#a855f7", "dashed", "Direct Aerial Evacuation"),
+                    };
+
+                    features.push(json!({
+                        "type": "Feature",
+                        "geometry": { "type": "LineString", "coordinates": leg_coords },
+                        "properties": {
+                            "type": "route_leg",
+                            "leg_index": leg.leg_index,
+                            "mode": format!("{:?}", leg.mode),
+                            "mode_label": mode_label,
+                            "distance_km": leg.distance_km,
+                            "travel_time_s": leg.travel_time_s,
+                            "is_hazard": leg.is_hazard_stretch,
+                            "stroke": stroke,
+                            "dash_style": dash_style
+                        }
+                    }));
+                }
+            }
+
+            // Staging Point Marker
+            if let Some(ref staging_id) = plan.staging_junction {
+                if let Some(coord) = coord_map.get(staging_id.as_str()) {
+                    features.push(json!({
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": coord
+                        },
+                        "properties": {
+                            "type": "staging_hub",
+                            "junction_id": staging_id,
+                            "name": "Dry Staging Hub (Boat Launch & Ambulance Handover)"
+                        }
+                    }));
+                }
+            }
+        }
+    }
+
+    // 2. Single Continuous Path (Fallback or direct road route)
+    if !rendered_legs && coordinates.len() >= 2 {
         features.push(json!({
             "type": "Feature",
             "geometry": { "type": "LineString", "coordinates": coordinates },
@@ -1078,10 +1152,14 @@ fn persisted_route_geojson(route: &RouteDecision, coordinates: &[[f64; 2]]) -> s
                 "status": "ROUTE_VERIFIED",
                 "distance_km": route.total_distance_km,
                 "travel_time_s": route.total_travel_time_s,
-                "verified_segment_count": route.verified_segment_count
+                "verified_segment_count": route.verified_segment_count,
+                "stroke": "#10b981",
+                "dash_style": "solid"
             }
         }));
     }
+
+    // 3. Origin Base / Shelter Marker (Distinct Blue)
     if let Some(origin) = coordinates.first() {
         features.push(json!({
             "type": "Feature",
@@ -1090,20 +1168,27 @@ fn persisted_route_geojson(route: &RouteDecision, coordinates: &[[f64; 2]]) -> s
                 "type": "shelter",
                 "id": route.origin_shelter_id,
                 "name": route.origin_shelter_name,
-                "asset": route.assigned_asset_id
+                "asset": route.assigned_asset_id,
+                "role": "origin",
+                "label": format!("🚩 Base Depot: {}", route.origin_shelter_name)
             }
         }));
     }
+
+    // 4. Victim Distress Location Marker (Distinct Red)
     if let Some(victim) = coordinates.last() {
         features.push(json!({
             "type": "Feature",
             "geometry": { "type": "Point", "coordinates": victim },
             "properties": {
                 "type": "victim",
-                "junction_id": route.victim_junction_id
+                "junction_id": route.victim_junction_id,
+                "role": "destination",
+                "label": format!("📍 Victim Location: {}", route.victim_junction_id)
             }
         }));
     }
+
     json!({ "type": "FeatureCollection", "features": features })
 }
 
@@ -1248,14 +1333,14 @@ async fn handle_dispatch(
     State(state): State<AppState>,
     Json(req): Json<DispatchRequest>,
 ) -> Result<Json<DispatchResponse>, StatusCode> {
-    let alert = SosAlert {
-        alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
-        raw_text: req.raw_text,
-        timestamp: Utc::now(),
-        source_channel: req
-            .source_channel
-            .or_else(|| Some("web_dispatcher_api".to_string())),
-    };
+    let mut alert = SosAlert::new(
+        format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+        req.raw_text,
+    );
+    alert.source_channel = req.source_channel.or_else(|| Some("web_dispatcher_api".to_string()));
+    alert.latitude = req.latitude;
+    alert.longitude = req.longitude;
+    alert.accuracy_m = req.accuracy_m;
 
     let result = state.orchestrator.process_alert(alert.clone()).await;
 
@@ -1536,6 +1621,7 @@ mod tests {
             verified_segment_count: 2,
             verified_by: "crisisgraph-pipeline".to_string(),
             verified_at: Utc::now(),
+            multimodal_plan: None,
         };
         let coordinates = [[76.35, 10.10], [76.36, 10.11], [76.37, 10.12]];
 

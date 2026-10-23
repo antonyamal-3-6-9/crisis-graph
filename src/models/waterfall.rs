@@ -133,7 +133,6 @@ impl UncertaintyWaterfall {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use crate::models::triage::TriageInferenceMetadata;
 
     fn mock_metadata() -> TriageInferenceMetadata {
@@ -153,12 +152,7 @@ mod tests {
 
     #[test]
     fn test_missing_location_never_guessed_triggers_callback_and_dial_alert() {
-        let alert = SosAlert {
-            alert_id: "SOS-NO-LOC-1".into(),
-            raw_text: "Water is rising fast, we need urgent help!".into(),
-            timestamp: Utc::now(),
-            source_channel: Some("web".into()),
-        };
+        let alert = SosAlert::new("SOS-NO-LOC-1", "Water is rising fast, we need urgent help!");
         let triage = TriageReport {
             victim_location_raw: None,
             resolved_junction_id: None,
@@ -181,12 +175,7 @@ mod tests {
 
     #[test]
     fn test_unspecified_headcount_falls_back_to_baseline_unit() {
-        let alert = SosAlert {
-            alert_id: "SOS-NO-COUNT-2".into(),
-            raw_text: "Family trapped at Bank Junction!".into(),
-            timestamp: Utc::now(),
-            source_channel: Some("web".into()),
-        };
+        let alert = SosAlert::new("SOS-NO-COUNT-2", "Family trapped at Bank Junction!");
         let triage = TriageReport {
             victim_location_raw: Some("Bank Junction".into()),
             resolved_junction_id: Some("node/4742583964".into()),
@@ -209,12 +198,7 @@ mod tests {
 
     #[test]
     fn test_unspecified_asset_infers_boat_from_flood_context() {
-        let alert = SosAlert {
-            alert_id: "SOS-FLOOD-3".into(),
-            raw_text: "Periyar water entered our house, roads completely flooded and munki!".into(),
-            timestamp: Utc::now(),
-            source_channel: Some("web".into()),
-        };
+        let alert = SosAlert::new("SOS-FLOOD-3", "Periyar water entered our house, roads completely flooded and munki!");
         let triage = TriageReport {
             victim_location_raw: Some("Aluva Manappuram".into()),
             resolved_junction_id: Some("node/7048449098".into()),
@@ -237,12 +221,7 @@ mod tests {
 
     #[test]
     fn test_complete_triage_has_no_fallbacks() {
-        let alert = SosAlert {
-            alert_id: "SOS-CLEAN-4".into(),
-            raw_text: "3 injured passengers at Aluva Station need ambulance.".into(),
-            timestamp: Utc::now(),
-            source_channel: Some("web".into()),
-        };
+        let alert = SosAlert::new("SOS-CLEAN-4", "3 injured passengers at Aluva Station need ambulance.");
         let triage = TriageReport {
             victim_location_raw: Some("Aluva Railway Station".into()),
             resolved_junction_id: Some("node/4664235699".into()),

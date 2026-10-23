@@ -47,12 +47,10 @@ async fn test_aluva_pipeline_gps_snapping_and_directed_dispatch() {
     let orchestrator = CrisisOrchestrator::new(stages);
 
     // 3. Create realistic SOS with GPS coordinates near Pump Junction
-    let alert = SosAlert {
-        alert_id: format!("SOS-ALUVA-{}", Uuid::new_v4().to_string()[..6].to_uppercase()),
-        raw_text: "URGENT: Water entering ground floor at GPS coordinates lat: 10.1135, lon: 76.3540 near Pump Junction. 4 persons stranded including elderly cardiac patient. Need ambulance immediately!".to_string(),
-        timestamp: Utc::now(),
-        source_channel: Some("kerala_disaster_helpline".to_string()),
-    };
+    let alert = SosAlert::new(
+        format!("SOS-ALUVA-{}", Uuid::new_v4().to_string()[..6].to_uppercase()),
+        "URGENT: Water entering ground floor at GPS coordinates lat: 10.1135, lon: 76.3540 near Pump Junction. 4 persons stranded including elderly cardiac patient. Need ambulance immediately!"
+    );
 
     // 4. Run End-to-End Orchestrator Pipeline
     let final_state = orchestrator.process_alert(alert).await;
@@ -146,12 +144,10 @@ async fn test_aluva_pipeline_landmark_resolution_and_truck_dispatch() {
     let orchestrator = CrisisOrchestrator::new(stages);
 
     // Alert specifying Pump Junction and evacuation truck
-    let alert = SosAlert {
-        alert_id: format!("SOS-ALUVA-{}", Uuid::new_v4().to_string()[..6].to_uppercase()),
-        raw_text: "URGENT: Flash flood near Pump Junction, 8 passengers stranded. Send evacuation truck to transport them to relief camp!".to_string(),
-        timestamp: Utc::now(),
-        source_channel: Some("emergency_radio".to_string()),
-    };
+    let alert = SosAlert::new(
+        format!("SOS-ALUVA-{}", Uuid::new_v4().to_string()[..6].to_uppercase()),
+        "URGENT: Flash flood near Pump Junction, 8 passengers stranded. Send evacuation truck to transport them to relief camp!"
+    );
 
     let final_state = orchestrator.process_alert(alert).await;
     assert!(
@@ -196,17 +192,13 @@ async fn test_aluva_pipeline_service_alley_truck_restriction_fails_safely() {
     let orchestrator = CrisisOrchestrator::new(stages);
 
     // Alert requesting heavy truck to Aluva Railway Station narrow service alley (hgv: false in OSM)
-    let alert = SosAlert {
-        alert_id: format!(
+    let alert = SosAlert::new(
+        format!(
             "SOS-ALUVA-{}",
             Uuid::new_v4().to_string()[..6].to_uppercase()
         ),
-        raw_text:
-            "URGENT: Evacuate Aluva Railway Station, need heavy evacuation truck for 15 passengers!"
-                .to_string(),
-        timestamp: Utc::now(),
-        source_channel: Some("kerala_police_radio".to_string()),
-    };
+        "URGENT: Evacuate Aluva Railway Station, need heavy evacuation truck for 15 passengers!"
+    );
 
     let final_state = orchestrator.process_alert(alert).await;
 

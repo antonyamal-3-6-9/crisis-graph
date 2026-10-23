@@ -1,4 +1,3 @@
-use chrono::Utc;
 use std::env;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -61,24 +60,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // 6. Simulate an Emergency Disaster SOS Stream (Aluva–Periyar Pilot Area)
     let sample_alerts = vec![
-        SosAlert {
-            alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
-            raw_text: "URGENT: Periyar river rising rapidly at (lat: 10.1135, lon: 76.3540) near Pump Junction. 4 persons trapped on 1st floor, elderly patient needs ambulance immediately!".to_string(),
-            timestamp: Utc::now(),
-            source_channel: Some("kerala_disaster_helpline".to_string()),
-        },
-        SosAlert {
-            alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
-            raw_text: "Flash flood near Aluva Railway Station, 8 passengers stranded. Send evacuation truck to transport them to relief camp!".to_string(),
-            timestamp: Utc::now(),
-            source_channel: Some("railway_police_radio".to_string()),
-        },
-        SosAlert {
-            alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
-            raw_text: "Water entering Aluva Manappuram temple grounds, 12 pilgrims stranded on temple steps. Urgent boat rescue needed!".to_string(),
-            timestamp: Utc::now(),
-            source_channel: Some("fire_rescue_vhf".to_string()),
-        },
+        SosAlert::new(
+            format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+            "URGENT: Periyar river rising rapidly at (lat: 10.1135, lon: 76.3540) near Pump Junction. 4 persons trapped on 1st floor, elderly patient needs ambulance immediately!"
+        ),
+        SosAlert::new(
+            format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+            "Flash flood near Aluva Railway Station, 8 passengers stranded. Send evacuation truck to transport them to relief camp!"
+        ),
+        SosAlert::new(
+            format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+            "Water entering Aluva Manappuram temple grounds, 12 pilgrims stranded on temple steps. Urgent boat rescue needed!"
+        ),
     ];
 
     for alert in sample_alerts {

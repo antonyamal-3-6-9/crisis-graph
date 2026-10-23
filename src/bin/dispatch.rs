@@ -1,4 +1,3 @@
-use chrono::Utc;
 use std::io::{self, Write};
 use uuid::Uuid;
 
@@ -59,12 +58,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             trimmed
         };
 
-        let alert = SosAlert {
-            alert_id: format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
-            raw_text: alert_text.to_string(),
-            timestamp: Utc::now(),
-            source_channel: Some("interactive_operator_cli".to_string()),
-        };
+        let alert = SosAlert::new(
+            format!("SOS-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
+            alert_text
+        );
 
         println!("\n[Processing alert: {}]...", alert.alert_id);
         let final_state = orchestrator.process_alert(alert).await;

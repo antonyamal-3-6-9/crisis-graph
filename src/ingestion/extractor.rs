@@ -622,12 +622,7 @@ mod tests {
     async fn unavailable_endpoint_returns_error_without_guessing_facts() {
         let mut extractor = extractor();
         extractor.inference_base_url = "http://127.0.0.1:1/v1".to_string();
-        let alert = SosAlert {
-            alert_id: "test-unavailable".to_string(),
-            raw_text: "Three people at Aluva Railway Station need an ambulance.".to_string(),
-            timestamp: chrono::Utc::now(),
-            source_channel: Some("test".to_string()),
-        };
+        let alert = SosAlert::new("test-unavailable", "Three people at Aluva Railway Station need an ambulance.");
 
         let error = extractor.extract(&alert).await.unwrap_err();
         assert!(error.to_string().contains("endpoint unavailable"));

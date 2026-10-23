@@ -74,6 +74,33 @@ pub struct SosAlert {
     pub raw_text: String,
     pub timestamp: DateTime<Utc>,
     pub source_channel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latitude: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub longitude: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accuracy_m: Option<f64>,
+}
+
+impl SosAlert {
+    pub fn new(alert_id: impl Into<String>, raw_text: impl Into<String>) -> Self {
+        Self {
+            alert_id: alert_id.into(),
+            raw_text: raw_text.into(),
+            timestamp: Utc::now(),
+            source_channel: None,
+            latitude: None,
+            longitude: None,
+            accuracy_m: None,
+        }
+    }
+
+    pub fn with_coordinates(mut self, lat: f64, lon: f64, accuracy_m: Option<f64>) -> Self {
+        self.latitude = Some(lat);
+        self.longitude = Some(lon);
+        self.accuracy_m = accuracy_m;
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

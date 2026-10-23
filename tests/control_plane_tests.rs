@@ -12,12 +12,10 @@ fn at(second: u32) -> chrono::DateTime<Utc> {
 }
 
 fn alert() -> SosAlert {
-    SosAlert {
-        alert_id: "SOS-CONTROL-1".to_string(),
-        raw_text: "Five people at Aluva Railway Station need an ambulance.".to_string(),
-        timestamp: at(0),
-        source_channel: Some("test".to_string()),
-    }
+    let mut a = SosAlert::new("SOS-CONTROL-1", "Five people at Aluva Railway Station need an ambulance.");
+    a.timestamp = at(0);
+    a.source_channel = Some("test".to_string());
+    a
 }
 
 fn triage(review: bool) -> TriageReport {
@@ -97,6 +95,7 @@ fn verified_route() -> VerifiedRouteInput {
         total_distance_km: 1.25,
         total_travel_time_s: 210.0,
         detour_reason: None,
+        multimodal_plan: None,
     }
 }
 

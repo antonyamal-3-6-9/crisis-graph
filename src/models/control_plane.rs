@@ -246,6 +246,7 @@ pub struct VerifiedRouteInput {
     pub total_distance_km: f64,
     pub total_travel_time_s: f64,
     pub detour_reason: Option<String>,
+    pub multimodal_plan: Option<crate::solver::MultiModalPlan>,
 }
 
 /// Immutable evidence for a route that passed independent safety
@@ -271,6 +272,8 @@ pub struct RouteDecision {
     pub verified_segment_count: usize,
     pub verified_by: String,
     pub verified_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multimodal_plan: Option<crate::solver::MultiModalPlan>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -448,6 +451,7 @@ impl Incident {
             detour_reason: route.detour_reason,
             verified_by: actor.actor_id.clone(),
             verified_at: now,
+            multimodal_plan: route.multimodal_plan,
         };
 
         let event = self.apply_transition(

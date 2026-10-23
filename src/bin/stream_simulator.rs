@@ -1,4 +1,3 @@
-use chrono::Utc;
 use uuid::Uuid;
 use crisis_graph::config::Config;
 use crisis_graph::db::RedisClient;
@@ -27,12 +26,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     ];
 
     for (i, alert_text) in alerts.iter().enumerate() {
-        let alert = SosAlert {
-            alert_id: format!("SIM-BURST-{}", Uuid::new_v4().to_string()[..6].to_uppercase()),
-            raw_text: alert_text.to_string(),
-            timestamp: Utc::now(),
-            source_channel: Some("disaster_stream_simulator_cli".to_string()),
-        };
+        let alert = SosAlert::new(
+            format!("SIM-BURST-{}", Uuid::new_v4().to_string()[..6].to_uppercase()),
+            alert_text.to_string()
+        );
 
         let payload = serde_json::to_string(&alert)?;
         let msg_id = redis.xadd(stream_key, &payload).await?;

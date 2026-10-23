@@ -519,11 +519,58 @@ function renderIncidentRoute(geojson, isActive, isInvalidated) {
   if (!container || !window.L || !geojson?.features?.length) return;
   const map = L.map(container, { minZoom: 12, maxZoom: 18, maxBounds: [[10.0, 76.24], [10.22, 76.47]], maxBoundsViscosity: 1 }).setView(ALUVA, 13);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+
   const layer = L.geoJSON(geojson, {
-    style: { color: isInvalidated ? "#b13e36" : isActive ? "#1f8a62" : "#647873", weight: 6, opacity: .9, dashArray: isActive ? null : "7 6" },
-    pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 8, color: "#fff", weight: 2, fillColor: feature.properties.type === "victim" ? "#b13e36" : "#245c7c", fillOpacity: 1 }),
-    onEachFeature: (feature, featureLayer) => featureLayer.bindPopup(feature.properties.type === "victim" ? `Victim junction<br><small>${escapeHtml(feature.properties.junction_id)}</small>` : feature.properties.type === "shelter" ? `<b>${escapeHtml(feature.properties.name)}</b><br>${escapeHtml(feature.properties.asset)}` : `Verified route v${escapeHtml(feature.properties.route_version)}`),
+    style: (feature) => {
+      if (feature?.properties?.stroke) {
+        return {
+          color: isInvalidated ? "#b13e36" : feature.properties.stroke,
+          weight: 6,
+          opacity: 0.9,
+          dashArray: feature.properties.dash_style === "dashed" ? "8, 8" : (feature.properties.dash_style === "dotted" ? "3, 6" : null)
+        };
+      }
+      return {
+        color: isInvalidated ? "#b13e36" : isActive ? "#1f8a62" : "#647873",
+        weight: 6,
+        opacity: .9,
+        dashArray: isActive ? null : "7 6"
+      };
+    },
+    pointToLayer: (feature, latlng) => {
+      if (feature?.properties?.type === "staging_hub") {
+        return L.circleMarker(latlng, {
+          radius: 11,
+          color: "#ffffff",
+          weight: 3,
+          fillColor: "#06b6d4",
+          fillOpacity: 1
+        }).bindPopup(`<b>⚓ Staging Transfer Hub</b><br><small>${escapeHtml(feature.properties.name || "Boat Launch & Ambulance Handover")}</small><br>Junction: <code>${escapeHtml(feature.properties.junction_id)}</code>`);
+      }
+      if (feature?.properties?.type === "shelter" || feature?.properties?.role === "origin") {
+        return L.circleMarker(latlng, {
+          radius: 9,
+          color: "#ffffff",
+          weight: 3,
+          fillColor: "#2563eb",
+          fillOpacity: 1
+        }).bindPopup(`<b>🚩 Base Depot (Origin)</b><br><b>${escapeHtml(feature.properties.name || "Relief Hub")}</b><br>Assigned Fleet: <code>${escapeHtml(feature.properties.asset || "Vehicle Unit")}</code>`);
+      }
+      return L.circleMarker(latlng, {
+        radius: 9,
+        color: "#ffffff",
+        weight: 3,
+        fillColor: "#dc2626",
+        fillOpacity: 1
+      }).bindPopup(`<b>📍 Distress Location (Destination)</b><br>Victim Junction: <code>${escapeHtml(feature.properties.junction_id || "")}</code>${feature.properties.headcount ? `<br>Headcount: <b>${feature.properties.headcount} Persons</b>` : ""}`);
+    },
+    onEachFeature: (feature, featureLayer) => {
+      if (feature?.properties?.type === "route_leg") {
+        featureLayer.bindPopup(`<b>${escapeHtml(feature.properties.mode_label || "Transit Leg")}</b><br>Distance: <b>${feature.properties.distance_km?.toFixed(2)} km</b><br>Est. Time: <b>${(feature.properties.travel_time_s / 60).toFixed(1)} min</b>${feature.properties.is_hazard ? "<br><span style='color:#dc2626;font-weight:600;'>⚠ Submerged Hazard Corridor</span>" : "<br><span style='color:#10b981;font-weight:600;'>✔ Certified Dry Road</span>"}`);
+      }
+    }
   }).addTo(map);
+
   const bounds = layer.getBounds();
   if (bounds.isValid()) map.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
   state.incidentRouteMap = map;
@@ -579,12 +626,16 @@ async function submitDispatch(event) {
   }, 100);
 
   try {
+    const latVal = parseFloat(document.getElementById("gps-lat")?.value);
+    const lonVal = parseFloat(document.getElementById("gps-lon")?.value);
     const result = await fetchJson(`${API}/dispatch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         raw_text: rawText,
-        source_channel: document.getElementById("channel-select").value
+        source_channel: document.getElementById("channel-select").value,
+        latitude: isNaN(latVal) ? null : latVal,
+        longitude: isNaN(lonVal) ? null : lonVal,
       })
     });
     if (dispatchTimer) clearInterval(dispatchTimer);
@@ -659,20 +710,29 @@ function renderRoute(geojson, verified) {
       pointToLayer: (feature, latlng) => {
         if (feature?.properties?.type === "staging_hub") {
           return L.circleMarker(latlng, {
-            radius: 10,
+            radius: 11,
             color: "#ffffff",
             weight: 3,
             fillColor: "#06b6d4",
             fillOpacity: 1
-          }).bindPopup(`<b>⚓ Staging Transfer Hub</b><br><small>${escapeHtml(feature.properties.name || "Boat Launch")}</small>`);
+          }).bindPopup(`<b>⚓ Staging Transfer Hub</b><br><small>${escapeHtml(feature.properties.name || "Boat Launch & Ambulance Handover")}</small><br>Junction: <code>${escapeHtml(feature.properties.junction_id)}</code>`);
+        }
+        if (feature?.properties?.type === "shelter" || feature?.properties?.role === "origin") {
+          return L.circleMarker(latlng, {
+            radius: 9,
+            color: "#ffffff",
+            weight: 3,
+            fillColor: "#2563eb",
+            fillOpacity: 1
+          }).bindPopup(`<b>🚩 Base Depot (Origin)</b><br><b>${escapeHtml(feature.properties.name || "Relief Hub")}</b><br>Assigned Fleet: <code>${escapeHtml(feature.properties.asset || "Vehicle Unit")}</code>`);
         }
         return L.circleMarker(latlng, {
-          radius: 8,
-          color: "#fff",
-          weight: 2,
-          fillColor: feature?.properties?.type === "victim" ? "#b13e36" : "#245c7c",
+          radius: 9,
+          color: "#ffffff",
+          weight: 3,
+          fillColor: "#dc2626",
           fillOpacity: 1
-        });
+        }).bindPopup(`<b>📍 Distress Location (Destination)</b><br>Victim Junction: <code>${escapeHtml(feature.properties.junction_id || "")}</code>${feature.properties.headcount ? `<br>Headcount: <b>${feature.properties.headcount} Persons</b>` : ""}${feature.properties.needed_asset ? `<br>Required Asset: <b>${escapeHtml(feature.properties.needed_asset)}</b>` : ""}`);
       },
       onEachFeature: (feature, featureLayer) => {
         if (feature?.properties?.type === "route_leg") {

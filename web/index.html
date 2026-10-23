@@ -63,7 +63,11 @@
               <form id="dispatch-form">
                 <label for="sos-text">Original report</label><textarea id="sos-text" rows="6" maxlength="4000" required placeholder="Describe the location, number of people, and explicitly requested vehicle…"></textarea>
                 <div class="form-row"><div><label for="channel-select">Source channel</label><select id="channel-select"><option value="web_demo_console">Web demonstration console</option><option value="field_radio_transcript">Field radio transcript</option><option value="call_centre_transcript">Call-centre transcript</option><option value="field_team_report">Field team report</option></select></div><div><label>Processing mode</label><div class="locked-field">Synchronous · persisted</div></div></div>
-                <button class="button primary full" id="dispatch-btn" type="submit"><span>Run triage, allocation and routing</span></button>
+                <div class="form-row" style="margin-top: 8px;">
+                  <div><label for="gps-lat">Latitude (optional telemetry)</label><input type="number" id="gps-lat" step="any" placeholder="e.g. 10.10816" /></div>
+                  <div><label for="gps-lon">Longitude (optional telemetry)</label><input type="number" id="gps-lon" step="any" placeholder="e.g. 76.35651" /></div>
+                </div>
+                <button class="button primary full" id="dispatch-btn" type="submit" style="margin-top: 12px;"><span>Run triage, allocation and routing</span></button>
               </form>
             </article>
             <article class="panel"><div class="panel-head"><div><p class="kicker">Demonstration scripts</p><h2>Real-world scenarios</h2></div></div><div class="scenario-grid">
@@ -128,6 +132,6 @@
   </div>
   <div id="toast-region" class="toast-region" aria-live="polite"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script src="/app.js?v=4"></script>
+  <script src="/app.js?v=5"></script>
 </body>
 </html>

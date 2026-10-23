@@ -33,22 +33,29 @@ impl PipelineStages {
 
                 // Attempt GPS coordinate snapping or lexical landmark resolution if junction is not yet resolved
                 if triage.resolved_junction_id.is_none() {
-                    // 1. Check for explicit or embedded GPS coordinates
-                    if let Some((lat, lon)) =
-                        SpatialResolver::parse_coordinates(&state.sos.raw_text)
-                    {
-                        info!("Found GPS coordinates ({lat}, {lon}) in SOS text. Snapping to nearest junction...");
+                    // 1. Check for structured device telemetry or embedded GPS coordinates
+                    let coords = match (state.sos.latitude, state.sos.longitude) {
+                        (Some(lat), Some(lon)) => {
+                            info!("Device telemetry coordinates ({lat}, {lon}, accuracy: {:?}m) provided with SOS.", state.sos.accuracy_m);
+                            Some((lat, lon, state.sos.accuracy_m.unwrap_or(1000.0).max(50.0)))
+                        }
+                        _ => SpatialResolver::parse_coordinates(&state.sos.raw_text)
+                            .map(|(lat, lon)| (lat, lon, 1000.0)),
+                    };
+
+                    if let Some((lat, lon, search_radius)) = coords {
+                        info!("Snapping coordinates ({lat}, {lon}, radius: {search_radius:.0}m) to nearest junction...");
                         match self
                             .state_mgr
-                            .find_nearest_junction("aluva-periyar-pilot", lat, lon, 1000.0)
+                            .find_nearest_junction("aluva-periyar-pilot", lat, lon, search_radius)
                             .await
                         {
                             Ok(Some((junction_id, dist))) => {
-                                info!("Snapped GPS ({lat}, {lon}) -> {junction_id} ({dist:.1} m away)");
+                                info!("Snapped coordinates ({lat}, {lon}) -> {junction_id} ({dist:.1} m away)");
                                 triage.resolved_junction_id = Some(junction_id);
                             }
                             Ok(None) => {
-                                warn!("No road junction found within 1000m of ({lat}, {lon})")
+                                warn!("No road junction found within {search_radius:.0}m of ({lat}, {lon})")
                             }
                             Err(e) => warn!("Spatial snapper query error: {e}"),
                         }
@@ -860,12 +867,7 @@ mod tests {
 
     #[test]
     fn verified_dispatch_does_not_use_human_review_fallback_reason() {
-        let state = crate::models::CrisisState::new(crate::models::SosAlert {
-            alert_id: "SOS-TEST".to_string(),
-            raw_text: "Test dispatch".to_string(),
-            timestamp: chrono::Utc::now(),
-            source_channel: None,
-        });
+        let state = crate::models::CrisisState::new(crate::models::SosAlert::new("SOS-TEST", "Test dispatch"));
 
         assert_eq!(
             PipelineStages::primary_dispatch_reason(&state, &[], true),

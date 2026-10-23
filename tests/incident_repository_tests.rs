@@ -84,12 +84,9 @@ async fn neo4j_repository_persists_audit_history_and_rejects_stale_writes() {
 
     let result = async {
         let now = Utc::now();
-        let alert = SosAlert {
-            alert_id: incident_id.clone(),
-            raw_text: "Five people at Aluva Railway Station need an ambulance.".to_string(),
-            timestamp: now,
-            source_channel: Some("repository_test".to_string()),
-        };
+        let mut alert = SosAlert::new(incident_id.clone(), "Five people at Aluva Railway Station need an ambulance.");
+        alert.timestamp = now;
+        alert.source_channel = Some("repository_test".to_string());
         let (mut incident, receipt) = Incident::receive(alert, &system(), now).unwrap();
         repository.create(&incident, &receipt).await.unwrap();
         let duplicate = repository.create(&incident, &receipt).await.unwrap_err();
@@ -195,6 +192,7 @@ async fn neo4j_repository_persists_audit_history_and_rejects_stale_writes() {
                     total_distance_km: 0.0,
                     total_travel_time_s: 0.0,
                     detour_reason: None,
+                    multimodal_plan: None,
                 },
                 Utc::now(),
             )

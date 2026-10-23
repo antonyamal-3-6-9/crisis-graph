@@ -501,6 +501,7 @@ fn verified_route_from_state(state: &CrisisState) -> Result<VerifiedRouteInput, 
         total_distance_km,
         total_travel_time_s,
         detour_reason: state.detour_reason.clone(),
+        multimodal_plan: state.multimodal_plan.clone(),
     })
 }
 
