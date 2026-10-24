@@ -80,6 +80,12 @@ pub struct PipelineParams {
 
     // Runtime
     pub role_drain_timeout_secs: u64,
+
+    // Streams
+    /// Stream the outbox relay feeds with new reports (extraction queue).
+    pub extract_stream: String,
+    /// Stream for every other operational event (console, matcher).
+    pub events_stream: String,
 }
 
 impl Default for PipelineParams {
@@ -112,6 +118,8 @@ impl Default for PipelineParams {
             breaker_half_open_secs: 30,
             overlay_refresh_secs: 30,
             role_drain_timeout_secs: 10,
+            extract_stream: "sos:extract".to_string(),
+            events_stream: "ops:events".to_string(),
         }
     }
 }
@@ -143,6 +151,12 @@ impl PipelineParams {
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|v| *v > 0)
                 .unwrap_or(default)
+        };
+        let stream_or = |key: &str, default: &str| {
+            lookup(key)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty() && v.len() <= 200 && !v.contains(char::is_whitespace))
+                .unwrap_or_else(|| default.to_string())
         };
         let f64_or = |key: &str, default: f64, max: f64| {
             lookup(key)
@@ -179,6 +193,8 @@ impl PipelineParams {
             breaker_half_open_secs: u64_or("BREAKER_HALF_OPEN_SECS", d.breaker_half_open_secs),
             overlay_refresh_secs: u64_or("OVERLAY_REFRESH_SECS", d.overlay_refresh_secs),
             role_drain_timeout_secs: u64_or("ROLE_DRAIN_TIMEOUT_SECS", d.role_drain_timeout_secs),
+            extract_stream: stream_or("EXTRACT_STREAM", &d.extract_stream),
+            events_stream: stream_or("EVENTS_STREAM", &d.events_stream),
         };
 
         // A lease must be renewed well before it expires; otherwise fall back
@@ -310,7 +326,9 @@ mod tests {
             ("DEDUP_NEARBY_RADIUS_M", "250.5"),
             ("BREAKER_ERROR_RATE", "0.25"),
             ("OUTBOX_BATCH_SIZE", "50"),
+            ("EXTRACT_STREAM", "test:extract"),
         ]));
+        assert_eq!(params.extract_stream, "test:extract");
         assert_eq!(params.matcher_cycle_ms, 1500);
         assert_eq!(params.dedup_nearby_radius_m, 250.5);
         assert_eq!(params.breaker_error_rate, 0.25);
@@ -325,7 +343,9 @@ mod tests {
             ("HOLD_EXPIRY_SECS", "0"),
             ("BREAKER_ERROR_RATE", "1.5"),
             ("DEDUP_NEARBY_RADIUS_M", "-3"),
+            ("EVENTS_STREAM", "has spaces"),
         ]));
+        assert_eq!(params.events_stream, d.events_stream);
         assert_eq!(params.matcher_cycle_ms, d.matcher_cycle_ms);
         assert_eq!(params.hold_expiry_secs, d.hold_expiry_secs);
         assert_eq!(params.breaker_error_rate, d.breaker_error_rate);

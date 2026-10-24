@@ -22,6 +22,7 @@ pub const OPS_CONSTRAINTS: &[&str] = &[
     "ops_outbox_event_id_unique",
     "ops_processed_event_unique",
     "ops_overlay_state_dataset_unique",
+    "ops_lease_fence_name_unique",
 ];
 
 const STATEMENTS: &[&str] = &[
@@ -51,6 +52,9 @@ const STATEMENTS: &[&str] = &[
      FOR (p:ProcessedEvent) REQUIRE (p.consumer, p.event_id) IS UNIQUE",
     "CREATE CONSTRAINT ops_overlay_state_dataset_unique IF NOT EXISTS \
      FOR (o:OverlayState) REQUIRE o.dataset IS UNIQUE",
+    // Fencing tokens for leader-only writes (outbox relay, matcher)
+    "CREATE CONSTRAINT ops_lease_fence_name_unique IF NOT EXISTS \
+     FOR (f:LeaseFence) REQUIRE f.name IS UNIQUE",
     // Spatial
     "CREATE POINT INDEX ops_vehicle_position IF NOT EXISTS \
      FOR (v:Vehicle) ON (v.position)",

@@ -26,14 +26,24 @@ pub struct OpsState {
 }
 
 /// `/healthz` (liveness), `/readyz` (dependencies reachable) and `/metrics`
-/// (Prometheus text). Requests get an `x-request-id` that is recorded on the
-/// tracing span and echoed in the response.
+/// (Prometheus text), with request tracing applied.
 pub fn ops_router(state: OpsState) -> Router {
+    instrument(ops_routes(state))
+}
+
+/// The operational routes without middleware, for merging with role routes.
+pub fn ops_routes(state: OpsState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/metrics", get(metrics))
         .with_state(state)
+}
+
+/// Give every request an `x-request-id`, record it on the tracing span and
+/// echo it in the response.
+pub fn instrument(router: Router) -> Router {
+    router
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
             let request_id = request

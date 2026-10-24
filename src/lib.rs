@@ -6,6 +6,8 @@ pub mod solver;
 pub mod pipeline;
 pub mod geospatial;
 pub mod runtime;
+pub mod relay;
+pub mod api;
 
 pub use config::{Config, PipelineParams};
 pub use models::*;

@@ -79,6 +79,22 @@ impl RedisClient {
         Ok(id)
     }
 
+    /// Append a message with several named fields to a stream (XADD key * f v ...).
+    pub async fn xadd_fields(
+        &self,
+        stream_key: &str,
+        fields: &[(&str, &str)],
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let mut cmd = redis::cmd("XADD");
+        cmd.arg(stream_key).arg("*");
+        for (field, value) in fields {
+            cmd.arg(*field).arg(*value);
+        }
+        let id: String = cmd.query_async(&mut conn).await?;
+        Ok(id)
+    }
+
     /// Ensure that a consumer group exists for a stream (XGROUP CREATE ... MKSTREAM)
     pub async fn ensure_consumer_group(&self, stream_key: &str, group_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut conn = self.manager.clone();

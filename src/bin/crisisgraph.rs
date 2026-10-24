@@ -5,10 +5,14 @@
 //! cargo run --bin crisisgraph -- --role api
 //! cargo run --bin crisisgraph -- --role triage --port 9111
 //!
-//! In M0 every role starts its runtime (config, Neo4j/Redis, operational
+//! Every role starts the shared runtime (config, Neo4j/Redis, operational
 //! schema, `/healthz`, `/readyz`, `/metrics`, heartbeat, graceful shutdown).
-//! Role-specific work is added in later milestones. The legacy `server`
-//! binary is unaffected.
+//! Role work so far:
+//! - `api`: intake API (`POST /api/v1/reports`, `GET /api/v1/reports/{id}`)
+//! - `relay`: outbox relay (leader-elected) publishing to Redis Streams
+//!
+//! Other roles are added in later milestones. The legacy `server` binary is
+//! unaffected.
 
 use std::env;
 use std::error::Error;
@@ -17,9 +21,11 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
+use crisis_graph::api::{intake_routes, ApiState};
 use crisis_graph::config::Config;
-use crisis_graph::db::{ensure_ops_schema, Neo4jClient, RedisClient};
-use crisis_graph::runtime::{self, ops_router, OpsState, Role, Shutdown};
+use crisis_graph::db::{ensure_ops_schema, Neo4jClient, OpsRepository, RedisClient};
+use crisis_graph::relay::OutboxRelay;
+use crisis_graph::runtime::{self, instrument, ops_routes, OpsState, Role, Shutdown};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -98,13 +104,26 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     ensure_ops_schema(&neo4j).await?;
 
     let shutdown = Shutdown::from_os_signals();
+    let repo = OpsRepository::new(neo4j.clone());
 
-    let app = ops_router(OpsState {
+    let mut routes = ops_routes(OpsState {
         role,
         neo4j,
-        redis,
+        redis: redis.clone(),
         metrics,
     });
+    if role == Role::Api {
+        routes = routes.merge(intake_routes(ApiState { repo: repo.clone() }));
+    }
+    let app = instrument(routes);
+
+    let role_task = match role {
+        Role::Relay => {
+            let relay = OutboxRelay::new(repo.clone(), redis.clone(), config.params.clone());
+            Some(tokio::spawn(relay.run(shutdown.clone())))
+        }
+        _ => None,
+    };
     let listener = tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], args.port))).await?;
     info!(role = role.as_str(), addr = %listener.local_addr()?, "Ops endpoints listening");
 
@@ -137,6 +156,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let drained = tokio::time::timeout(drain, async {
         let _ = heartbeat.await;
         let _ = server.await;
+        if let Some(task) = role_task {
+            let _ = task.await;
+        }
     })
     .await;
 

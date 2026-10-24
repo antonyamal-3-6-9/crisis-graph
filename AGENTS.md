@@ -83,7 +83,9 @@ crisis-graph/
 │   ├── ingestion/
 │   ├── models/
 │   ├── pipeline/
-│   ├── runtime/                       # roles, shutdown, /healthz /readyz /metrics
+│   ├── api/                           # intake API (POST/GET /api/v1/reports)
+│   ├── relay.rs                       # outbox relay (leader lease + fencing)
+│   ├── runtime/                       # roles, lease, shutdown, /healthz /readyz /metrics
 │   ├── solver/
 │   ├── config.rs
 │   ├── lib.rs
@@ -91,6 +93,7 @@ crisis-graph/
 └── tests/
     ├── geospatial_tests.rs            # validates normalized pilot staging artifacts
     ├── ops_model_tests.rs             # operational model: overbooking stress, idempotency
+    ├── intake_relay_tests.rs          # intake API, relay crash recovery, fencing, failover
     └── integration_tests.rs
 ```
 
@@ -176,9 +179,18 @@ cargo run --bin crisisgraph -- --role matcher    # :9102
 cargo run --bin crisisgraph -- --role graph      # :9103
 cargo run --bin crisisgraph -- --role relay      # :9104
 
-# Operational model acceptance tests (live Neo4j)
+# Submit a report (request_id is required; a retry with the same request_id
+# returns the original 202 with `idempotent-replayed: true`)
+curl -X POST localhost:3100/api/v1/reports -H 'content-type: application/json' \
+  -d '{"request_id":"<uuid>","device_id":"<device>","raw_text":"...","latitude":10.11,"longitude":76.35,"accuracy_m":20}'
+curl localhost:3100/api/v1/reports/<report_id>
+
+# Acceptance tests (live Neo4j + Redis)
 cargo test --test ops_model_tests
+cargo test --test intake_relay_tests
 ```
+
+The relay is leader-elected (Redis lease `lease:outbox-relay` with a fencing token checked in Neo4j via `:LeaseFence`), publishes `REPORT_RECEIVED` to `sos:extract` and other events to `ops:events`, and delivers at least once: consumers must discard duplicates by `event_id`.
 
 The legacy `server` binary (:3000) keeps working until the new pipeline replaces it. Both share shelter bed counters (`capacity` / `current_occupancy`); vehicles in the new model are individual `:Vehicle` records, and reservations are protected by uniqueness constraints on `active_vehicle_key` / `active_task_key`.
 

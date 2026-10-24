@@ -40,6 +40,10 @@ pub enum OpsRepoError {
     /// lock timeout). Writes are retried internally before this surfaces.
     #[error("transient database error: {0}")]
     Transient(String),
+    /// A leader-only write was rejected because a newer lease holder exists
+    /// (its fencing token is higher than ours).
+    #[error("fenced: {0}")]
+    Fenced(String),
     #[error("not found: {0}")]
     NotFound(String),
     #[error("invalid data: {0}")]
