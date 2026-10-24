@@ -82,9 +82,27 @@ async fn cleanup(neo4j: &Neo4jClient, prefix: &str) {
          DETACH DELETE n",
     ];
     for statement in statements {
-        let _ = neo4j.graph.run(query(statement).param("p", prefix)).await;
+        run_cleanup(neo4j, statement, prefix).await;
     }
 }
+
+/// Run a cleanup statement, retrying transient failures (e.g. a deadlock with
+/// a concurrently running test). Panics if it still fails, so leaked test
+/// data is reported instead of silently left behind.
+async fn run_cleanup(neo4j: &Neo4jClient, statement: &str, prefix: &str) {
+    let mut last_error = None;
+    for attempt in 1..=5u64 {
+        match neo4j.graph.run(query(statement).param("p", prefix)).await {
+            Ok(()) => return,
+            Err(error) => {
+                last_error = Some(error);
+                tokio::time::sleep(std::time::Duration::from_millis(50 * attempt)).await;
+            }
+        }
+    }
+    panic!("test cleanup failed for prefix {prefix}: {last_error:?}");
+}
+
 
 fn held_until() -> chrono::DateTime<Utc> {
     Utc::now() + Duration::minutes(5)

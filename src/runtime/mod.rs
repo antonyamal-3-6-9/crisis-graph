@@ -1,11 +1,13 @@
 //! Process runtime shared by every pipeline role: role selection, graceful
 //! shutdown, operational HTTP endpoints and metrics.
 
+pub mod breaker;
 pub mod lease;
 pub mod metrics;
 pub mod ops_http;
 pub mod shutdown;
 
+pub use breaker::{BreakerState, CircuitBreaker};
 pub use lease::Lease;
 pub use ops_http::{instrument, ops_router, ops_routes, OpsState};
 pub use shutdown::Shutdown;

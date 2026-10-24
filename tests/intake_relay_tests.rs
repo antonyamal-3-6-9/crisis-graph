@@ -101,21 +101,15 @@ async fn report_event(neo4j: &Neo4jClient, report_id: &str) -> (String, bool) {
 }
 
 async fn cleanup(neo4j: &Neo4jClient, redis: &RedisClient, prefix: &str) {
-    let _ = neo4j
-        .graph
-        .run(
-            query(
-                "MATCH (r:Report) WHERE r.request_id STARTS WITH $p \
-                 OPTIONAL MATCH (e:OutboxEvent {aggregate_id: r.report_id}) \
-                 DETACH DELETE e, r",
-            )
-            .param("p", prefix),
-        )
-        .await;
-    let _ = neo4j
-        .graph
-        .run(query("MATCH (f:LeaseFence) WHERE f.name STARTS WITH $p DELETE f").param("p", prefix))
-        .await;
+    run_cleanup(
+        neo4j,
+        "MATCH (r:Report) WHERE r.request_id STARTS WITH $p \
+         OPTIONAL MATCH (e:OutboxEvent {aggregate_id: r.report_id}) \
+         DETACH DELETE e, r",
+        prefix,
+    )
+    .await;
+    run_cleanup(neo4j, "MATCH (f:LeaseFence) WHERE f.name STARTS WITH $p DELETE f", prefix).await;
     let mut conn = redis.manager.clone();
     let keys: Vec<String> = redis::cmd("KEYS")
         .arg(format!("*{prefix}*"))
@@ -125,6 +119,23 @@ async fn cleanup(neo4j: &Neo4jClient, redis: &RedisClient, prefix: &str) {
     for key in keys {
         let _: Result<(), _> = redis::cmd("DEL").arg(key).query_async(&mut conn).await;
     }
+}
+
+/// Run a cleanup statement, retrying transient failures (e.g. a deadlock with
+/// a concurrently running test). Panics if it still fails, so leaked test
+/// data is reported instead of silently left behind.
+async fn run_cleanup(neo4j: &Neo4jClient, statement: &str, prefix: &str) {
+    let mut last_error = None;
+    for attempt in 1..=5u64 {
+        match neo4j.graph.run(query(statement).param("p", prefix)).await {
+            Ok(()) => return,
+            Err(error) => {
+                last_error = Some(error);
+                tokio::time::sleep(std::time::Duration::from_millis(50 * attempt)).await;
+            }
+        }
+    }
+    panic!("test cleanup failed for prefix {prefix}: {last_error:?}");
 }
 
 async fn spawn_api(repo: OpsRepository) -> String {

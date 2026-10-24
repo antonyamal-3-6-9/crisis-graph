@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 4b. Reset the operational model (new pipeline): drop transient records,
     // return every vehicle to AVAILABLE. Vehicle records themselves are kept.
     info!("Resetting operational records (reports, tasks, reservations, outbox) and vehicles...");
-    for label in ["Reservation", "Task", "Report", "OutboxEvent", "ProcessedEvent", "AuditEvent"] {
+    for label in ["Reservation", "Task", "Report", "OpsIncident", "OutboxEvent", "ProcessedEvent", "AuditEvent"] {
         neo4j
             .graph
             .run(query(&format!("MATCH (n:{label}) DETACH DELETE n")))

@@ -1,7 +1,30 @@
 use redis::aio::ConnectionManager;
-use redis::streams::StreamReadReply;
+use redis::streams::{StreamAutoClaimReply, StreamId, StreamReadReply};
+use std::collections::HashMap;
 use redis::FromRedisValue;
 use crate::config::Config;
+
+/// A stream entry with its fields decoded as strings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StreamMessage {
+    pub id: String,
+    pub fields: HashMap<String, String>,
+}
+
+impl StreamMessage {
+    fn from_stream_id(entry: &StreamId) -> Self {
+        let fields = entry
+            .map
+            .iter()
+            .filter_map(|(k, v)| String::from_redis_value(v).ok().map(|v| (k.clone(), v)))
+            .collect();
+        Self { id: entry.id.clone(), fields }
+    }
+
+    pub fn field(&self, name: &str) -> Option<&str> {
+        self.fields.get(name).map(String::as_str)
+    }
+}
 
 #[derive(Clone)]
 pub struct RedisClient {
@@ -93,6 +116,82 @@ impl RedisClient {
         }
         let id: String = cmd.query_async(&mut conn).await?;
         Ok(id)
+    }
+
+    /// Ensure a consumer group exists, reading from the *start* of the stream
+    /// so messages published before the group existed are not skipped.
+    pub async fn ensure_group_from_start(&self, stream_key: &str, group_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let res: Result<(), redis::RedisError> = redis::cmd("XGROUP")
+            .arg("CREATE")
+            .arg(stream_key)
+            .arg(group_name)
+            .arg("0")
+            .arg("MKSTREAM")
+            .query_async(&mut conn)
+            .await;
+        match res {
+            Ok(_) => Ok(()),
+            Err(e) if e.to_string().contains("BUSYGROUP") => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Read new messages for a consumer (XREADGROUP ... >), with all fields.
+    pub async fn read_group(
+        &self,
+        stream_key: &str,
+        group_name: &str,
+        consumer_name: &str,
+        count: usize,
+        block_ms: usize,
+    ) -> Result<Vec<StreamMessage>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let reply: Option<StreamReadReply> = redis::cmd("XREADGROUP")
+            .arg("GROUP")
+            .arg(group_name)
+            .arg(consumer_name)
+            .arg("COUNT")
+            .arg(count)
+            .arg("BLOCK")
+            .arg(block_ms)
+            .arg("STREAMS")
+            .arg(stream_key)
+            .arg(">")
+            .query_async(&mut conn)
+            .await?;
+        Ok(reply
+            .map(|r| {
+                r.keys
+                    .iter()
+                    .flat_map(|k| k.ids.iter().map(StreamMessage::from_stream_id))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// Take over messages another consumer claimed but has not acknowledged
+    /// for at least `min_idle_ms` (e.g. it crashed). XAUTOCLAIM.
+    pub async fn autoclaim(
+        &self,
+        stream_key: &str,
+        group_name: &str,
+        consumer_name: &str,
+        min_idle_ms: u64,
+        count: usize,
+    ) -> Result<Vec<StreamMessage>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let reply: StreamAutoClaimReply = redis::cmd("XAUTOCLAIM")
+            .arg(stream_key)
+            .arg(group_name)
+            .arg(consumer_name)
+            .arg(min_idle_ms)
+            .arg("0-0")
+            .arg("COUNT")
+            .arg(count)
+            .query_async(&mut conn)
+            .await?;
+        Ok(reply.claimed.iter().map(StreamMessage::from_stream_id).collect())
     }
 
     /// Ensure that a consumer group exists for a stream (XGROUP CREATE ... MKSTREAM)

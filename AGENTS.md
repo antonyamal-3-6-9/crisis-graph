@@ -85,7 +85,8 @@ crisis-graph/
 │   ├── pipeline/
 │   ├── api/                           # intake API (POST/GET /api/v1/reports)
 │   ├── relay.rs                       # outbox relay (leader lease + fencing)
-│   ├── runtime/                       # roles, lease, shutdown, /healthz /readyz /metrics
+│   ├── runtime/                       # roles, lease, breaker, shutdown, /healthz /readyz /metrics
+│   ├── triage/                        # triage workers: extraction, minimal dedup, incidents
 │   ├── solver/
 │   ├── config.rs
 │   ├── lib.rs
@@ -94,6 +95,7 @@ crisis-graph/
     ├── geospatial_tests.rs            # validates normalized pilot staging artifacts
     ├── ops_model_tests.rs             # operational model: overbooking stress, idempotency
     ├── intake_relay_tests.rs          # intake API, relay crash recovery, fencing, failover
+    ├── triage_worker_tests.rs         # checkpoint reuse, duplicates, D-2/D-3, breaker, dead letters
     └── integration_tests.rs
 ```
 
@@ -185,10 +187,14 @@ curl -X POST localhost:3100/api/v1/reports -H 'content-type: application/json' \
   -d '{"request_id":"<uuid>","device_id":"<device>","raw_text":"...","latitude":10.11,"longitude":76.35,"accuracy_m":20}'
 curl localhost:3100/api/v1/reports/<report_id>
 
-# Acceptance tests (live Neo4j + Redis)
+# Acceptance tests (live Neo4j + Redis; triage tests use a scripted engine,
+# plus one real-engine test that runs only when llama.cpp answers on :8000)
 cargo test --test ops_model_tests
 cargo test --test intake_relay_tests
+cargo test --test triage_worker_tests
 ```
+
+Triage workers (`--role triage`) consume `sos:extract` (consumer group `triage-workers`), save the extraction on the report before deduplicating (so a redelivery never calls the model twice), then in one transaction either attach a same-device follow-up (D-2) or create an `:OpsIncident` (`TRIAGE_APPROVED` + queued `ROAD_PICKUP` task, or `REVIEW_REQUIRED`). Nearby open incidents are flagged `POSSIBLE_DUPLICATE` (D-3), never merged. When extraction fails or the inference circuit breaker is open, the report still becomes a `REVIEW_REQUIRED` incident for manual triage. Unprocessable messages go to `sos:extract:dead`. New-pipeline incidents use the `:OpsIncident` label until the legacy console is removed.
 
 The relay is leader-elected (Redis lease `lease:outbox-relay` with a fencing token checked in Neo4j via `:LeaseFence`), publishes `REPORT_RECEIVED` to `sos:extract` and other events to `ops:events`, and delivers at least once: consumers must discard duplicates by `event_id`.
 

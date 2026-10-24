@@ -8,6 +8,7 @@ pub mod geospatial;
 pub mod runtime;
 pub mod relay;
 pub mod api;
+pub mod triage;
 
 pub use config::{Config, PipelineParams};
 pub use models::*;

@@ -4,7 +4,7 @@ use serde_json::json;
 use super::{new_id, parse_enum, parse_time, OpsRepoError, OpsRepository};
 use crate::models::{NewReport, Report, ReportExtractionStatus};
 
-const REPORT_FIELDS: &str = "r.report_id AS report_id, r.request_id AS request_id, \
+pub(super) const REPORT_FIELDS: &str = "r.report_id AS report_id, r.request_id AS request_id, \
      r.device_id AS device_id, r.channel AS channel, r.raw_text AS raw_text, \
      r.latitude AS latitude, r.longitude AS longitude, r.accuracy_m AS accuracy_m, \
      toString(r.received_at) AS received_at, r.extraction_status AS extraction_status";
@@ -62,7 +62,7 @@ impl OpsRepository {
     }
 }
 
-fn report_from_row(row: &Row) -> Result<Report, OpsRepoError> {
+pub(super) fn report_from_row(row: &Row) -> Result<Report, OpsRepoError> {
     Ok(Report {
         report_id: row.get("report_id")?,
         request_id: row.get("request_id")?,

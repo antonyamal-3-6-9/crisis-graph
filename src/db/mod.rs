@@ -9,7 +9,7 @@ pub mod ops_schema;
 
 pub use neo4j::Neo4jClient;
 pub use incident_repository::{IncidentRepository, IncidentRepositoryError, IncidentStore};
-pub use redis_client::RedisClient;
+pub use redis_client::{RedisClient, StreamMessage};
 pub use state_manager::{
     ActiveHazardInfo, ExpiredReservation, GraphSummary, PassableEdge, ResourceReservationInfo,
     ShelterWithLocation, StateManager, TraversalProfile,

@@ -10,6 +10,8 @@
 //! Role work so far:
 //! - `api`: intake API (`POST /api/v1/reports`, `GET /api/v1/reports/{id}`)
 //! - `relay`: outbox relay (leader-elected) publishing to Redis Streams
+//! - `triage`: consumes `sos:extract`, extracts (llama.cpp/vLLM), applies the
+//!   minimal deduplication rules and creates or attaches incidents
 //!
 //! Other roles are added in later milestones. The legacy `server` binary is
 //! unaffected.
@@ -23,7 +25,10 @@ use tracing::{info, warn};
 
 use crisis_graph::api::{intake_routes, ApiState};
 use crisis_graph::config::Config;
-use crisis_graph::db::{ensure_ops_schema, Neo4jClient, OpsRepository, RedisClient};
+use crisis_graph::db::{ensure_ops_schema, Neo4jClient, OpsRepository, RedisClient, StateManager};
+use crisis_graph::ingestion::TriageExtractor;
+use crisis_graph::pipeline::PipelineStages;
+use crisis_graph::triage::{StageOneEngine, TriageWorker};
 use crisis_graph::relay::OutboxRelay;
 use crisis_graph::runtime::{self, instrument, ops_routes, OpsState, Role, Shutdown};
 
@@ -105,6 +110,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let shutdown = Shutdown::from_os_signals();
     let repo = OpsRepository::new(neo4j.clone());
+    let repo_neo4j = neo4j.clone();
 
     let mut routes = ops_routes(OpsState {
         role,
@@ -121,6 +127,23 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Role::Relay => {
             let relay = OutboxRelay::new(repo.clone(), redis.clone(), config.params.clone());
             Some(tokio::spawn(relay.run(shutdown.clone())))
+        }
+        Role::Triage => {
+            let stages = PipelineStages::new(
+                TriageExtractor::new(&config),
+                StateManager::new(repo_neo4j.clone()),
+                redis.clone(),
+            );
+            let consumer = format!("triage-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+            let worker = TriageWorker::new(
+                repo.clone(),
+                redis.clone(),
+                std::sync::Arc::new(StageOneEngine::new(stages)),
+                config.params.clone(),
+                config.inference_max_concurrency,
+                consumer,
+            );
+            Some(tokio::spawn(worker.run(shutdown.clone())))
         }
         _ => None,
     };

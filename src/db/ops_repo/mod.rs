@@ -3,6 +3,7 @@
 //! Cypher statement as the change itself, so they commit atomically.
 
 mod beds;
+mod incidents;
 mod outbox;
 mod reports;
 mod reservations;
@@ -22,7 +23,7 @@ const CONSTRAINT_VIOLATION: &str = "Neo.ClientError.Schema.ConstraintValidationF
 const TRANSIENT: &str = "Neo.TransientError";
 
 /// Attempts for a write that fails transiently (e.g. deadlock detected).
-const MAX_WRITE_ATTEMPTS: u32 = 5;
+pub(super) const MAX_WRITE_ATTEMPTS: u32 = 5;
 
 /// Actor recorded on audit events written by the pipeline itself.
 pub const SYSTEM_ACTOR: &str = "crisisgraph-pipeline";
@@ -122,7 +123,7 @@ impl OpsRepository {
 }
 
 /// 10–40 ms × attempt, randomised so competing writers spread out.
-fn jittered_backoff(attempt: u32) -> std::time::Duration {
+pub(super) fn jittered_backoff(attempt: u32) -> std::time::Duration {
     let jitter = (uuid::Uuid::new_v4().as_u128() % 30) as u64;
     std::time::Duration::from_millis((10 + jitter) * attempt as u64)
 }

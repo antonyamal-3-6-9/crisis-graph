@@ -153,6 +153,55 @@ pub struct Task {
     pub version: u64,
 }
 
+/// Incident statuses (new pipeline) that count as "open" for deduplication.
+pub const OPEN_INCIDENT_STATUSES: &[&str] = &["REVIEW_REQUIRED", "TRIAGE_APPROVED", "ALLOCATING", "ASSIGNED"];
+
+/// What the triage worker saves on a report after extraction (checkpoint).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtractionRecord {
+    /// False when the model call failed or was skipped (circuit open).
+    pub succeeded: bool,
+    /// Full extraction output (triage report, stage errors) for audit/display.
+    pub extraction_json: String,
+    pub headcount: Option<u32>,
+    pub required_asset: Option<AssetType>,
+    pub resolved_junction_id: Option<String>,
+    /// All dispatch-critical facts present and no blocking errors.
+    pub dispatch_ready: bool,
+    pub review_reasons: Vec<String>,
+}
+
+/// A report as seen by the triage worker when it starts processing it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriageState {
+    pub report: Report,
+    /// How many times processing has started (including this one).
+    pub attempts: u32,
+    /// Incident the report is already linked to, if any.
+    pub linked_incident_id: Option<String>,
+}
+
+/// Result of committing a triaged report (transaction T1).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TriageCommit {
+    /// The report was already linked (duplicate or redelivered message).
+    AlreadyLinked { incident_id: String },
+    /// A new incident was created; `task_id` is set when it is dispatch-ready.
+    Created { incident_id: String, task_id: Option<String> },
+    /// Attached as a follow-up to an open incident from the same device (D-2).
+    Attached { incident_id: String, headcount_increased: bool },
+}
+
+impl TriageCommit {
+    pub fn incident_id(&self) -> &str {
+        match self {
+            Self::AlreadyLinked { incident_id }
+            | Self::Created { incident_id, .. }
+            | Self::Attached { incident_id, .. } => incident_id,
+        }
+    }
+}
+
 /// An event waiting in (or published from) the transactional outbox.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OutboxRecord {

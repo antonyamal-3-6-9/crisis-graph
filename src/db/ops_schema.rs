@@ -23,6 +23,7 @@ pub const OPS_CONSTRAINTS: &[&str] = &[
     "ops_processed_event_unique",
     "ops_overlay_state_dataset_unique",
     "ops_lease_fence_name_unique",
+    "ops_incident_id_unique",
 ];
 
 const STATEMENTS: &[&str] = &[
@@ -52,6 +53,16 @@ const STATEMENTS: &[&str] = &[
      FOR (p:ProcessedEvent) REQUIRE (p.consumer, p.event_id) IS UNIQUE",
     "CREATE CONSTRAINT ops_overlay_state_dataset_unique IF NOT EXISTS \
      FOR (o:OverlayState) REQUIRE o.dataset IS UNIQUE",
+    // New-pipeline incidents use :OpsIncident while the legacy console still
+    // reads every :Incident (renamed to :Incident at legacy removal, M9).
+    "CREATE CONSTRAINT ops_incident_id_unique IF NOT EXISTS \
+     FOR (i:OpsIncident) REQUIRE i.incident_id IS UNIQUE",
+    "CREATE POINT INDEX ops_ops_incident_location IF NOT EXISTS \
+     FOR (i:OpsIncident) ON (i.location)",
+    "CREATE INDEX ops_ops_incident_status_created IF NOT EXISTS \
+     FOR (i:OpsIncident) ON (i.status, i.created_at)",
+    "CREATE INDEX ops_ops_incident_junction IF NOT EXISTS \
+     FOR (i:OpsIncident) ON (i.junction_id)",
     // Fencing tokens for leader-only writes (outbox relay, matcher)
     "CREATE CONSTRAINT ops_lease_fence_name_unique IF NOT EXISTS \
      FOR (f:LeaseFence) REQUIRE f.name IS UNIQUE",
@@ -74,11 +85,31 @@ const STATEMENTS: &[&str] = &[
 ];
 
 /// Create every operational constraint and index if missing.
+///
+/// Several processes may run this at the same moment (roles starting
+/// together). `IF NOT EXISTS` does not stop two concurrent creations of the
+/// same new rule from colliding: the loser fails with an "already exists"
+/// error, which here means the rule is in place, so it is treated as success.
 pub async fn ensure_ops_schema(
     neo4j: &Neo4jClient,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for statement in STATEMENTS {
-        neo4j.graph.run(query(statement)).await?;
+        match neo4j.graph.run(query(statement)).await {
+            Ok(()) => {}
+            Err(neo4rs::Error::Neo4j(e)) if is_already_exists(e.code()) => {}
+            Err(neo4rs::Error::UnexpectedMessage(m)) if ALREADY_EXISTS.iter().any(|c| m.contains(c)) => {}
+            Err(e) => return Err(e.into()),
+        }
     }
     Ok(())
+}
+
+const ALREADY_EXISTS: &[&str] = &[
+    "Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists",
+    "Neo.ClientError.Schema.IndexAlreadyExists",
+    "Neo.ClientError.Schema.ConstraintAlreadyExists",
+];
+
+fn is_already_exists(code: &str) -> bool {
+    ALREADY_EXISTS.contains(&code)
 }
