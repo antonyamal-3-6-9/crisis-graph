@@ -5,8 +5,9 @@ pub mod ingestion;
 pub mod solver;
 pub mod pipeline;
 pub mod geospatial;
+pub mod runtime;
 
-pub use config::Config;
+pub use config::{Config, PipelineParams};
 pub use models::*;
 pub use db::*;
 pub use ingestion::*;

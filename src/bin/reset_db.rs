@@ -40,6 +40,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Resetting Aluva shelters to baseline capacities and fleet levels...");
     state_mgr.seed_aluva_shelters().await?;
 
+    // 4b. Reset the operational model (new pipeline): drop transient records,
+    // return every vehicle to AVAILABLE. Vehicle records themselves are kept.
+    info!("Resetting operational records (reports, tasks, reservations, outbox) and vehicles...");
+    for label in ["Reservation", "Task", "Report", "OutboxEvent", "ProcessedEvent", "AuditEvent"] {
+        neo4j
+            .graph
+            .run(query(&format!("MATCH (n:{label}) DETACH DELETE n")))
+            .await?;
+    }
+    neo4j
+        .graph
+        .run(query(
+            "MATCH (v:Vehicle) SET v.status = 'AVAILABLE', v.version = v.version + 1, \
+             v.updated_at = datetime()",
+        ))
+        .await?;
+
     // 5. Clean Redis stream and any lingering locks
     info!("Cleaning Redis emergency streams and locks...");
     let mut conn = redis.manager.clone();

@@ -72,18 +72,25 @@ crisis-graph/
 │   ├── bin/
 │   │   ├── generate_boundary.rs       # generates pilot GeoJSON boundary
 │   │   ├── download_osm.rs            # downloads raw OSM road data
-│   │   └── normalize_osm.rs           # normalizes raw OSM into directed graph GeoJSON
+│   │   ├── normalize_osm.rs           # normalizes raw OSM into directed graph GeoJSON
+│   │   ├── server.rs                  # legacy all-in-one dispatch server (:3000)
+│   │   ├── crisisgraph.rs             # new pipeline: one role per process (--role)
+│   │   └── migrate_ops.rs             # creates the operational data model (idempotent)
 │   ├── db/
+│   │   ├── ops_schema.rs              # operational constraints/indexes
+│   │   └── ops_repo/                  # vehicles, reservations, beds, reports, tasks, outbox
 │   ├── geospatial/                    # OSM normalization, topology splitting, and validation
 │   ├── ingestion/
 │   ├── models/
 │   ├── pipeline/
+│   ├── runtime/                       # roles, shutdown, /healthz /readyz /metrics
 │   ├── solver/
 │   ├── config.rs
 │   ├── lib.rs
 │   └── main.rs
 └── tests/
     ├── geospatial_tests.rs            # validates normalized pilot staging artifacts
+    ├── ops_model_tests.rs             # operational model: overbooking stress, idempotency
     └── integration_tests.rs
 ```
 
@@ -140,6 +147,40 @@ cargo run --bin download_osm -- \
 ```
 
 For a small bounded pilot, Overpass is acceptable. For larger areas or recurring regional imports, use archived Geofabrik OSM PBF extracts and version the source dataset.
+
+### Local setup (native, no containers)
+
+The development machine has no GPU and no Docker. Services run natively:
+
+```bash
+# Neo4j 5 (bolt :7687, browser :7474) and Redis (:6379) as system services
+sudo systemctl start neo4j redis      # service names may differ by distro
+redis-cli ping                         # -> PONG
+
+# Triage inference: llama.cpp on CPU (OpenAI-compatible, :8000)
+llama-server -m <qwen3-4b-gguf> --port 8000 -np 1   # -np = INFERENCE_MAX_CONCURRENCY
+```
+
+Configure `.env` from `.env.example` (`INFERENCE_BACKEND=llama-cpp`). CPU inference is slow; size `STREAM_CLAIM_IDLE_MS` to about 3x the measured p99 extraction latency.
+
+### New pipeline (core rebuild, in progress)
+
+```bash
+# Create the operational data model next to the legacy one (idempotent)
+cargo run --bin migrate_ops
+
+# Run one role per process (endpoints: /healthz, /readyz, /metrics)
+cargo run --bin crisisgraph -- --role api        # :3100
+cargo run --bin crisisgraph -- --role triage     # :9101
+cargo run --bin crisisgraph -- --role matcher    # :9102
+cargo run --bin crisisgraph -- --role graph      # :9103
+cargo run --bin crisisgraph -- --role relay      # :9104
+
+# Operational model acceptance tests (live Neo4j)
+cargo test --test ops_model_tests
+```
+
+The legacy `server` binary (:3000) keeps working until the new pipeline replaces it. Both share shelter bed counters (`capacity` / `current_occupancy`); vehicles in the new model are individual `:Vehicle` records, and reservations are protected by uniqueness constraints on `active_vehicle_key` / `active_task_key`.
 
 ## Geospatial data model
 
