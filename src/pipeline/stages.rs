@@ -1,6 +1,6 @@
-use crate::db::{RedisClient, StateManager};
+use crate::db::{RedisClient, StateManager, TraversalProfile};
 use crate::ingestion::{SpatialResolver, TriageExtractor};
-use crate::models::{CrisisState, DispatchStatus, TacticalBrief};
+use crate::models::{CrisisState, DispatchStatus, ReservationRole, TacticalBrief};
 use crate::solver::pathfinder::TransportMode;
 use crate::solver::{DeterministicPathfinder, RoutingQuery};
 use chrono::Utc;
@@ -204,6 +204,7 @@ impl PipelineStages {
                                     &required_asset,
                                     headcount,
                                     &state.sos.alert_id,
+                                    ReservationRole::RoadPrimary,
                                 )
                                 .await
                             {
@@ -511,59 +512,68 @@ impl PipelineStages {
             verification_notes.push("FAILURE: Resource allocation incomplete.".to_string());
         }
 
-        // Assertion 3: Independent live safety verification of road segments
+        // Assertion 3: Independent live safety verification of every land leg, using the
+        // access profile of whoever traverses it. Water legs cannot be verified from
+        // graph state and are reported as such, never as confirmed.
         let requires_mitigation = state
             .multimodal_plan
             .as_ref()
             .map(|p| p.requires_mitigation)
             .unwrap_or(false);
 
-        if requires_mitigation {
-            // In a multi-modal mitigation plan:
-            // If Leg 0 is a road vehicle leg to staging, verify that 100% of its segments are dry and safe.
-            if let Some(ref plan) = state.multimodal_plan {
-                if let Some(first_leg) = plan.legs.first() {
-                    if first_leg.mode == TransportMode::RoadVehicle {
-                        match self.state_mgr.verify_path_segments(&first_leg.segment_ids).await {
-                            Ok(hazardous) if !hazardous.is_empty() => {
-                                verified = false;
-                                verification_notes.push(format!(
-                                    "CRITICAL SAFETY VIOLATION: Road leg to staging junction traverses actively compromised segments: {:?}",
-                                    hazardous
-                                ));
-                            }
-                            Ok(_) => {
-                                info!(
-                                    "Independent safety check: 100% of {} road segments to Staging Junction verified safe.",
-                                    first_leg.segment_ids.len()
-                                );
-                            }
-                            Err(e) => {
-                                verified = false;
-                                verification_notes.push(format!("SafetyVerificationFailed: {}", e));
-                            }
-                        }
-                    } else {
-                        info!(
-                            "Independent safety check: Multi-modal leg 0 is {:?} (corridor length: {:.2} km); watercraft transit authorized.",
-                            first_leg.mode, first_leg.distance_km
-                        );
-                    }
+        let mut land_checks: Vec<(String, Vec<String>, TraversalProfile)> = Vec::new();
+        let mut unverified_water_km = 0.0;
+        if let Some(ref plan) = state.multimodal_plan {
+            for leg in &plan.legs {
+                match leg.mode {
+                    TransportMode::RoadVehicle => land_checks.push((
+                        format!("Road leg {}", leg.leg_index),
+                        leg.segment_ids.clone(),
+                        TraversalProfile::Vehicle(plan.primary_asset.clone()),
+                    )),
+                    TransportMode::FootWading => land_checks.push((
+                        format!("Foot leg {}", leg.leg_index),
+                        leg.segment_ids.clone(),
+                        TraversalProfile::OnFoot,
+                    )),
+                    TransportMode::Watercraft => unverified_water_km += leg.distance_km,
+                    TransportMode::Aerial => {}
                 }
             }
         } else if let Some(ref segment_ids) = state.segment_path {
-            match self.state_mgr.verify_path_segments(segment_ids).await {
+            let route_asset = state
+                .uncertainty_waterfall
+                .as_ref()
+                .map(|wf| wf.resolved_asset.clone())
+                .or_else(|| state.triage.as_ref().and_then(|t| t.required_asset.clone()));
+            match route_asset {
+                Some(asset) => land_checks.push((
+                    "Route".to_string(),
+                    segment_ids.clone(),
+                    TraversalProfile::Vehicle(asset),
+                )),
+                None => {
+                    verified = false;
+                    verification_notes.push(
+                        "FAILURE: Asset type unknown; vehicle access cannot be verified.".to_string(),
+                    );
+                }
+            }
+        }
+
+        for (label, segment_ids, profile) in &land_checks {
+            match self.state_mgr.verify_path_segments(segment_ids, profile).await {
                 Ok(hazardous) if !hazardous.is_empty() => {
                     verified = false;
                     verification_notes.push(format!(
-                        "CRITICAL SAFETY VIOLATION: Route traverses {} actively compromised/flooded segments: {:?}",
-                        hazardous.len(), hazardous
+                        "CRITICAL SAFETY VIOLATION: {} traverses {} compromised or access-restricted segments: {:?}",
+                        label, hazardous.len(), hazardous
                     ));
                 }
                 Ok(_) => {
                     info!(
-                        "Independent safety check: 100% of {} traversed segments verified safe.",
-                        segment_ids.len()
+                        "Independent safety check: {} — 100% of {} segments verified safe for {:?}.",
+                        label, segment_ids.len(), profile
                     );
                 }
                 Err(e) => {
@@ -571,6 +581,13 @@ impl PipelineStages {
                     verification_notes.push(format!("SafetyVerificationFailed: {}", e));
                 }
             }
+        }
+
+        if unverified_water_km > 0.0 {
+            warn!(
+                "Water corridor of {:.2} km cannot be verified from graph state; requires field confirmation.",
+                unverified_water_km
+            );
         }
 
         let dispatch_status = if verified && !state.has_errors() {
@@ -592,7 +609,7 @@ impl PipelineStages {
         let action_required = if dispatch_status == DispatchStatus::RoutedVerified {
             "None".to_string()
         } else if dispatch_status == DispatchStatus::MitigationRequired {
-            "Deploy primary road vehicle to Staging Junction and launch Rescue Boat across water corridor.".to_string()
+            "Deploy primary road vehicle to Staging Junction and arrange Rescue Boat for the water corridor; confirm corridor depth, current and obstructions with field teams before launch.".to_string()
         } else if state
             .errors
             .iter()
@@ -670,7 +687,10 @@ impl PipelineStages {
         let verification_summary = if dispatch_status == DispatchStatus::RoutedVerified {
             "PASSED (100% Segments Independently Verified Safe)".to_string()
         } else if dispatch_status == DispatchStatus::MitigationRequired {
-            "PASSED (Staging Road Leg 100% Safe; Watercraft Mitigation Corridor Confirmed)".to_string()
+            format!(
+                "PASSED FOR LAND LEGS (100% of road/foot segments verified); {:.2} km WATER CORRIDOR UNVERIFIED — requires field confirmation",
+                unverified_water_km
+            )
         } else if path.is_empty() {
             "NOT RUN (route unavailable)".to_string()
         } else if verification_notes.is_empty() {

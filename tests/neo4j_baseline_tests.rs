@@ -1,9 +1,9 @@
 use neo4rs::query;
 
 use crisis_graph::config::Config;
-use crisis_graph::db::{Neo4jClient, StateManager};
+use crisis_graph::db::{Neo4jClient, StateManager, TraversalProfile};
 use crisis_graph::models::{AssetType, RoadStatus};
-use crisis_graph::solver::{DeterministicPathfinder, RoutingQuery};
+use crisis_graph::solver::{DeterministicPathfinder, PathfinderError, RoutingQuery};
 
 #[tokio::test]
 async fn test_neo4j_pilot_graph_and_operational_overlay() {
@@ -117,4 +117,76 @@ async fn test_neo4j_pilot_graph_and_operational_overlay() {
     let restored_edges = state_mgr.get_passable_directed_subgraph(dataset).await
         .expect("Fetch restored edges");
     assert_eq!(restored_edges.len(), 48040, "All 48,040 passable edges restored");
+
+    // 8. Independent verifier must fail closed on edge cases
+    let ambulance = TraversalProfile::Vehicle(AssetType::Ambulance);
+    let clean_path = vec![
+        "way/1009141757/seg/0/fwd".to_string(),
+        "way/1009141757/seg/1/fwd".to_string(),
+    ];
+    let flagged = state_mgr.verify_path_segments(&clean_path, &ambulance).await
+        .expect("Verify clean path");
+    assert!(flagged.is_empty(), "Clean path must verify safe, got {:?}", flagged);
+
+    // 8a. Segment ID absent from Neo4j is treated as compromised
+    let mut unknown_path = clean_path.clone();
+    unknown_path.push("way/0/seg/0/fwd".to_string());
+    let flagged = state_mgr.verify_path_segments(&unknown_path, &ambulance).await
+        .expect("Verify path with unknown segment");
+    assert_eq!(flagged, vec!["way/0/seg/0/fwd".to_string()]);
+
+    // 8b. Open-ended hazard (no valid_until) is treated as active
+    let open_ended_q = query(
+        "MATCH ()-[r:CONNECTS_TO {segment_id: $segment_id, dataset: $dataset}]->() \
+         SET r.operational_status = 'FLOODED', r.valid_until = NULL",
+    )
+    .param("segment_id", flood_segment)
+    .param("dataset", dataset);
+    neo4j.graph.run(open_ended_q).await.expect("Apply open-ended hazard");
+
+    let flagged = state_mgr.verify_path_segments(&clean_path, &ambulance).await
+        .expect("Verify path with open-ended hazard");
+    let _ = state_mgr.clear_operational_hazards(dataset).await;
+    assert_eq!(flagged, vec![flood_segment.to_string()]);
+
+    // 9. Access restrictions are never turned into a "flood mitigation" plan.
+    // The only approach to Aluva Railway Station ends in a no-HGV service alley.
+    let town_hall = "node/4664235729";
+    let railway_station = "node/4664235699";
+    let (live_edges, live_hazards) = state_mgr
+        .get_directed_topology_with_hazards(dataset)
+        .await
+        .expect("Fetch topology for access checks");
+    assert!(live_hazards.is_empty(), "No hazards should be active for access checks");
+
+    let truck_query = RoutingQuery::new(town_hall, railway_station)
+        .with_asset_type(AssetType::EvacTruck)
+        .with_blocked_segments(live_hazards.clone());
+    assert!(
+        matches!(
+            DeterministicPathfinder::find_multimodal_route(&live_edges, &truck_query),
+            Err(PathfinderError::NoPassableRouteFound { .. })
+        ),
+        "Truck blocked only by an access restriction must fail closed, not produce a boat plan"
+    );
+
+    // 9a. Verifier independently catches the same restriction on the ambulance's route.
+    let ambulance_query = RoutingQuery::new(town_hall, railway_station)
+        .with_asset_type(AssetType::Ambulance)
+        .with_blocked_segments(live_hazards);
+    let ambulance_route = DeterministicPathfinder::find_directed_route(&live_edges, &ambulance_query)
+        .expect("Ambulance may use the service alley");
+    let flagged = state_mgr
+        .verify_path_segments(&ambulance_route.segment_path, &ambulance)
+        .await
+        .expect("Verify ambulance route");
+    assert!(flagged.is_empty(), "Ambulance route must verify, got {:?}", flagged);
+    let flagged = state_mgr
+        .verify_path_segments(
+            &ambulance_route.segment_path,
+            &TraversalProfile::Vehicle(AssetType::EvacTruck),
+        )
+        .await
+        .expect("Verify same route for a truck");
+    assert!(!flagged.is_empty(), "Truck profile must flag the no-HGV alley");
 }

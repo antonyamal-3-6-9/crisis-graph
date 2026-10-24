@@ -1,6 +1,6 @@
 use super::neo4j::Neo4jClient;
 use crate::geospatial::{AccessFlags, BaselineStatus};
-use crate::models::{AssetType, HazardReport, RoadStatus, Shelter};
+use crate::models::{AssetType, HazardReport, ReservationRole, RoadStatus, Shelter};
 use crate::solver::RoutingEdge;
 use chrono::{Duration, Utc};
 use neo4rs::query;
@@ -46,9 +46,18 @@ pub struct ActiveHazardInfo {
     pub to_lon: f64,
 }
 
+/// Who traverses the segments checked by `verify_path_segments`.
+#[derive(Debug, Clone)]
+pub enum TraversalProfile {
+    Vehicle(AssetType),
+    /// Stretcher/foot transfer: vehicle access flags and UNSUITABLE baseline do not apply.
+    OnFoot,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceReservationInfo {
     pub incident_id: String,
+    pub role: String,
     pub shelter_id: String,
     pub shelter_name: String,
     pub asset_type: String,
@@ -84,11 +93,26 @@ impl StateManager {
     pub async fn ensure_operational_schema(
         &self,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // An incident may hold one reservation per role (e.g. road vehicle + boat), so
+        // uniqueness is on (incident_id, role). Reservations created before roles existed
+        // are the incident's primary road reservation.
         self.neo4j
             .graph
             .run(query(
-                "CREATE CONSTRAINT resource_reservation_incident_unique IF NOT EXISTS \
-                 FOR (r:ResourceReservation) REQUIRE r.incident_id IS UNIQUE",
+                "DROP CONSTRAINT resource_reservation_incident_unique IF EXISTS",
+            ))
+            .await?;
+        self.neo4j
+            .graph
+            .run(query(
+                "MATCH (r:ResourceReservation) WHERE r.role IS NULL SET r.role = $role",
+            ).param("role", ReservationRole::RoadPrimary.as_str()))
+            .await?;
+        self.neo4j
+            .graph
+            .run(query(
+                "CREATE CONSTRAINT resource_reservation_incident_role_unique IF NOT EXISTS \
+                 FOR (r:ResourceReservation) REQUIRE (r.incident_id, r.role) IS UNIQUE",
             ))
             .await?;
         Ok(())
@@ -533,22 +557,46 @@ impl StateManager {
     /// Independent post-routing safety verifier:
     /// Checks every traversed segment ID against current operational hazard timestamps in Neo4j.
     /// Returns a list of any hazardous or compromised segment IDs.
+    ///
+    /// Fails closed: a segment ID that does not exist in Neo4j, or a hazard with no
+    /// `valid_until` (open-ended closure), is reported as compromised. Vehicle profiles
+    /// also flag segments the vehicle may not legally or physically drive.
     pub async fn verify_path_segments(
         &self,
         segment_ids: &[String],
+        profile: &TraversalProfile,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         if segment_ids.is_empty() {
             return Ok(Vec::new());
         }
 
+        // Mirrors `solver::road_access_allowed`; rescue boats are trailered by an
+        // emergency-cleared vehicle on dry road.
+        let (on_foot, require_hgv, require_emergency) = match profile {
+            TraversalProfile::OnFoot => (true, false, false),
+            TraversalProfile::Vehicle(AssetType::EvacTruck) => (false, true, false),
+            TraversalProfile::Vehicle(AssetType::Ambulance | AssetType::RescueBoat) => {
+                (false, false, true)
+            }
+            TraversalProfile::Vehicle(AssetType::Helicopter) => (false, false, false),
+        };
+
         let q = query(
             "UNWIND $ids AS seg_id \
-             MATCH ()-[r:CONNECTS_TO {segment_id: seg_id}]->() \
-             WHERE r.baseline_status = 'UNSUITABLE' \
-                OR (r.operational_status IS NOT NULL AND r.operational_status <> 'OPEN' AND r.valid_until > datetime()) \
-             RETURN seg_id"
+             OPTIONAL MATCH ()-[r:CONNECTS_TO {segment_id: seg_id}]->() \
+             WITH seg_id, r \
+             WHERE r IS NULL \
+                OR (NOT $on_foot AND r.baseline_status = 'UNSUITABLE') \
+                OR ($require_hgv AND coalesce(r.hgv, false) = false) \
+                OR ($require_emergency AND coalesce(r.emergency, false) = false) \
+                OR (r.operational_status IS NOT NULL AND r.operational_status <> 'OPEN' \
+                    AND (r.valid_until IS NULL OR r.valid_until > datetime())) \
+             RETURN DISTINCT seg_id"
         )
-        .param("ids", segment_ids.to_vec());
+        .param("ids", segment_ids.to_vec())
+        .param("on_foot", on_foot)
+        .param("require_hgv", require_hgv)
+        .param("require_emergency", require_emergency);
 
         let mut result = self.neo4j.graph.execute(q).await?;
         let mut hazardous = Vec::new();
@@ -613,13 +661,18 @@ impl StateManager {
         Ok(shelters)
     }
 
-    /// Atomically reserve capacity and asset in Neo4j
+    /// Atomically reserve capacity and asset in Neo4j.
+    ///
+    /// Each incident holds at most one active reservation per `role`. `headcount` is the
+    /// number of beds claimed at this shelter; a secondary role such as a mitigation boat
+    /// should pass 0 so evacuees are not counted twice.
     pub async fn reserve_shelter_asset(
         &self,
         shelter_id: &str,
         asset_type: &AssetType,
         headcount: u32,
         incident_id: &str,
+        role: ReservationRole,
     ) -> Result<Option<Shelter>, Box<dyn std::error::Error + Send + Sync>> {
         let (asset_filter, asset_decrement, asset_name) = match asset_type {
             AssetType::RescueBoat => (
@@ -643,10 +696,10 @@ impl StateManager {
         let cypher = format!(
             "MATCH (s:Shelter {{id: $shelter_id}}) \
              WHERE (s.capacity - s.current_occupancy) >= $headcount AND {} \
-             OPTIONAL MATCH (active:ResourceReservation {{incident_id: $incident_id, status: 'RESERVED'}}) \
+             OPTIONAL MATCH (active:ResourceReservation {{incident_id: $incident_id, role: $role, status: 'RESERVED'}}) \
              WITH s, active \
              WHERE active IS NULL \
-             MERGE (reservation:ResourceReservation {{incident_id: $incident_id}}) \
+             MERGE (reservation:ResourceReservation {{incident_id: $incident_id, role: $role}}) \
              WITH s, reservation \
              OPTIONAL MATCH (reservation)-[old_rel:RESERVES_AT]->() \
              DELETE old_rel \
@@ -673,6 +726,7 @@ impl StateManager {
             .param("shelter_id", shelter_id)
             .param("headcount", headcount as i64)
             .param("incident_id", incident_id)
+            .param("role", role.as_str())
             .param("asset_type", asset_name);
 
         let mut result = self.neo4j.graph.execute(q).await?;
@@ -701,7 +755,7 @@ impl StateManager {
         }
     }
 
-    /// Idempotently releases an active reservation owned by an incident.
+    /// Idempotently releases every active reservation (all roles) owned by an incident.
     pub async fn release_incident_reservation(
         &self,
         incident_id: &str,
@@ -890,6 +944,7 @@ impl StateManager {
         let q = query(
             "MATCH (r:ResourceReservation)-[:RESERVES_AT]->(s:Shelter) \
              RETURN r.incident_id AS incident_id, r.shelter_id AS shelter_id, \
+                    coalesce(r.role, 'ROAD_PRIMARY') AS role, \
                     s.name AS shelter_name, r.asset_type AS asset_type, \
                     r.headcount AS headcount, r.status AS status, \
                     toString(r.reserved_at) AS reserved_at, \
@@ -904,6 +959,7 @@ impl StateManager {
         while let Some(row) = result.next().await? {
             reservations.push(ResourceReservationInfo {
                 incident_id: row.get("incident_id")?,
+                role: row.get("role")?,
                 shelter_id: row.get("shelter_id")?,
                 shelter_name: row.get("shelter_name")?,
                 asset_type: row.get("asset_type")?,

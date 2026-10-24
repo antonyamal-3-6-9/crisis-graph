@@ -10,7 +10,7 @@ pub use incident_repository::{IncidentRepository, IncidentRepositoryError, Incid
 pub use redis_client::RedisClient;
 pub use state_manager::{
     ActiveHazardInfo, ExpiredReservation, GraphSummary, PassableEdge, ResourceReservationInfo,
-    ShelterWithLocation, StateManager,
+    ShelterWithLocation, StateManager, TraversalProfile,
 };
 pub use seed::seed_database;
 pub use baseline_loader::{BaselineLoader, BaselineLoadReport};

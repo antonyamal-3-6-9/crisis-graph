@@ -13,6 +13,27 @@ pub struct Shelter {
     pub trucks_available: u32,
 }
 
+/// Purpose of a resource reservation within an incident. An incident holds at most one
+/// active reservation per role.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ReservationRole {
+    /// The primary road vehicle (or boat) dispatched to the victim.
+    #[serde(rename = "ROAD_PRIMARY")]
+    RoadPrimary,
+    /// A rescue boat bridging a flooded corridor in a multi-modal plan.
+    #[serde(rename = "WATER_MITIGATION")]
+    WaterMitigation,
+}
+
+impl ReservationRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RoadPrimary => "ROAD_PRIMARY",
+            Self::WaterMitigation => "WATER_MITIGATION",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DispatchStatus {
     #[serde(rename = "ROUTED_VERIFIED")]
