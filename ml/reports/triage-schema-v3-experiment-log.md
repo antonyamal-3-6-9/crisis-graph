@@ -80,6 +80,7 @@ about twice as long), temperature 0, up to 768 output tokens.
 | 2 | base | v3.1 | 16 | 16 | 3 (011, 017, 035) | 23.6 s |
 | 3 | base | v3.1, profile last | 23 | 7 | 3 | 25.8 s |
 | 4 | SFT-V3 adapter | v3.1, profile last | **31** | **3** | **1 (011)** | 22.5 s |
+| 5 | SFT-V3 adapter | **v3.2** (frozen) | **33** | **2** | 2 (011, 017) | 21.6 s |
 
 **Run 1 findings.** The model asked for human review because profile facts
 were unknown ("no water level stated") in 15 cases; obeyed a prompt injection
@@ -116,7 +117,14 @@ unchanged). Prompt v3.2 = v3.1 with the examples in the new order and at most
 three uncertainty reasons. Prompt iteration stops after one dev check of v3.2,
 because further rounds would start fitting these 42 cases.
 
-## 5. Final runs (planned)
+**Run 5 (v3.2 check) and prompt freeze.** Roughly level with v3.1: better on
+V2 exact match, reviews and latency; 017 (bedridden written into
+`other_conditions`) is under-triaged again because this time the model's
+suggestion said URGENT instead of CRITICAL. Same known weakness, different
+luck on 42 cases, so not treated as a regression. **Prompt frozen at v3.2**,
+as agreed before the run.
+
+## 5. Final runs (started 2026-10-25)
 
 Prompt v3.2 and the profile-last schema, everything else fixed. No changes
 after the runs start.
