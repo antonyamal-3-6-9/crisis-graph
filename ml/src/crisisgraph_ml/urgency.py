@@ -9,7 +9,8 @@ Rules are evaluated top-down; the first tier with any matching rule wins:
 
 - CRITICAL: UNCONSCIOUS, BREATHING_DIFFICULTY, CARDIAC or BLEEDING; water
   ABOVE_HEAD or ROOF; water >= CHEST and RISING; INFANT or BEDRIDDEN with
-  water >= WAIST.
+  water >= WAIST; any low-mobility group (INFANT, BEDRIDDEN, DISABLED,
+  ELDERLY) with water >= WAIST and RISING.
 - URGENT: INJURY or CHRONIC_CARE; any other_conditions; PREGNANT; any
   vulnerable group with water >= KNEE; water WAIST or CHEST.
 - STABLE: no conditions, no vulnerable groups, water stated as ANKLE or KNEE,
@@ -86,6 +87,7 @@ def rule_urgency(profile: dict[str, Any]) -> str:
         or _water_at_least(water, "ABOVE_HEAD")
         or (_water_at_least(water, "CHEST") and rising)
         or (groups & {"INFANT", "BEDRIDDEN"} and _water_at_least(water, "WAIST"))
+        or (groups & LOW_MOBILITY_GROUPS and _water_at_least(water, "WAIST") and rising)
     ):
         return "CRITICAL"
     if (

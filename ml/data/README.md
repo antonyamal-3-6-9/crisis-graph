@@ -66,3 +66,19 @@ The V4 counterexample files are a deferred development diagnostic informed by
 errors on the exposed regression suite. They are neither training-ready nor a
 blind holdout and should not be mixed into a training export without a new,
 documented experiment decision.
+
+## Triage extraction V3 (`schemas/triage-extraction-v3.json`)
+
+- `triage-eval-v3-dev-candidates.jsonl` — 42 owner-reviewed cases for **prompt
+  development only**; never reported as results. Generator:
+  `crisisgraph_ml.triage_eval_v3_dev`; review sheet
+  `triage-eval-v3-dev-review-guide.md`.
+- `triage-eval-v3.0.0.jsonl` — the **frozen** 120-case V3 benchmark (frozen
+  2026-10-25). Checksum, owner decisions, contract hashes, permitted and
+  prohibited uses are in `triage-eval-v3.0.0.manifest.json`. Same rules as V2:
+  never edit in place, never use for training, fine-tuning, prompt tuning or
+  generating training examples. Tests fail if the file, its generator
+  (`crisisgraph_ml.triage_eval_v3_candidates`) or the contract files change.
+- `urgency-rules-v1.jsonl` — hand-specified cases for the deterministic urgency
+  rules, shared by the Python reference (`crisisgraph_ml.urgency`) and the Rust
+  implementation.

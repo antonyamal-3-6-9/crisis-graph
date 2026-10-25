@@ -160,6 +160,9 @@ reporter's phone position also locates the victims.
 | `CHRONIC_CARE` | a known long-term condition with **no acute episode now**: either ongoing treatment the flood interrupts (dialysis, insulin, oxygen supply, essential medicine running out) or a stated condition that needs monitoring (heart disease, asthma, epilepsy) | an acute episode of that condition (use the acute category: `CARDIAC`, `BREATHING_DIFFICULTY`, …) |
 
 Several categories may apply ("bleeding head wound" → `BLEEDING`, `INJURY`).
+An acute episode caused by interrupted treatment takes only the acute category
+("gasping, his oxygen cylinder is empty" → `BREATHING_DIFFICULTY`, not also
+`CHRONIC_CARE`).
 
 ### `other_conditions`
 
@@ -225,6 +228,12 @@ Set by the annotator **from clinical common sense, independently of the rule
 table** (`data/urgency-rules-v1.jsonl`). Disagreements between this label and
 the rule table on correctly extracted profiles are rule-table findings, not
 annotation errors.
+
+**Resolved conditions.** A critical symptom that resolved within the last 24
+hours (fainted earlier, chest pain yesterday, now fine) is not labelled as a
+condition, but its gold urgency is `URGENT`, because recurrence is likely. A
+minor injury that has already resolved gives no urgency by itself (`UNKNOWN`
+unless other facts decide).
 
 Do not label `review_priority`: it is derived by the rule table for UNKNOWN
 results (`schemas/urgency-result-v1.json`), not annotated or extracted.

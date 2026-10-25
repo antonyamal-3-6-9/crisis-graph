@@ -48,6 +48,9 @@ def case(
     groups: list[str] | None = None,
     water: str | None = None,
     trend: str | None = None,
+    prefix: str = "v3-dev",
+    reviewer_status: str = "reviewed",
+    provenance: str = PROVENANCE,
 ) -> dict[str, Any]:
     hazards = hazards or []
     if review is None:
@@ -59,12 +62,12 @@ def case(
             or any(value is None for hazard in hazards for value in hazard.values())
         )
     return {
-        "id": f"v3-dev-{number:03d}",
+        "id": f"{prefix}-{number:03d}",
         "category": category,
         "language": language,
         "scenario_family": family,
-        "provenance": PROVENANCE,
-        "reviewer_status": "pending_manual_review",
+        "provenance": provenance,
+        "reviewer_status": reviewer_status,
         "input": text,
         "expected": {
             "victim_location": location,
