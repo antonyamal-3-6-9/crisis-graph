@@ -17,6 +17,7 @@ dev = [
 
 [project.scripts]
 crisisgraph-triage-eval = "crisisgraph_ml.triage_eval:main"
+crisisgraph-triage-eval-v3 = "crisisgraph_ml.triage_eval_v3:main"
 crisisgraph-generate-triage-eval = "crisisgraph_ml.generate_triage_eval:main"
 crisisgraph-validate-triage-data = "crisisgraph_ml.validate_triage_data:main"
 crisisgraph-triage-sft-data = "crisisgraph_ml.triage_sft_data:main"

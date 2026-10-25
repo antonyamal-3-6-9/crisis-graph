@@ -149,7 +149,12 @@ def error_result(
 
 
 def request_payload(
-    backend: str, model: str, prompt: str, schema: dict[str, Any], message: str
+    backend: str,
+    model: str,
+    prompt: str,
+    schema: dict[str, Any],
+    message: str,
+    max_tokens: int = 512,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -158,7 +163,7 @@ def request_payload(
             {"role": "user", "content": message},
         ],
         "temperature": 0.0,
-        "max_tokens": 512,
+        "max_tokens": max_tokens,
     }
     if backend == "llama-cpp":
         payload["response_format"] = {
@@ -186,8 +191,9 @@ async def evaluate_case(
     prompt: str,
     schema: dict[str, Any],
     validator: Draft202012Validator,
+    max_tokens: int = 512,
 ) -> CaseResult:
-    payload = request_payload(backend, model, prompt, schema, case["input"])
+    payload = request_payload(backend, model, prompt, schema, case["input"], max_tokens)
     raw_response: str | None = None
     try:
         async with semaphore:
