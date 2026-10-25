@@ -1,0 +1,138 @@
+"""Deterministic urgency rule table V1 for triage extraction V3.
+
+The model extracts categories into ``victim_profile``; this module derives the
+urgency tier from them. The Rust triage worker implements the same table (M3b),
+and both are checked against ``data/urgency-rules-v1.jsonl`` so they cannot
+drift apart.
+
+Rules are evaluated top-down; the first tier with any matching rule wins:
+
+- CRITICAL: UNCONSCIOUS, BREATHING_DIFFICULTY, CARDIAC or BLEEDING; water
+  ABOVE_HEAD or ROOF; water >= CHEST and RISING; INFANT or BEDRIDDEN with
+  water >= WAIST.
+- URGENT: INJURY or CHRONIC_CARE; any other_conditions; PREGNANT; any
+  vulnerable group with water >= KNEE; water WAIST or CHEST.
+- STABLE: no conditions, no vulnerable groups, water stated as ANKLE or KNEE,
+  and not RISING.
+- UNKNOWN: everything else, i.e. not enough facts to prove STABLE. Sorted
+  with URGENT for priority, never below it.
+
+``suggested_urgency`` from the model can only raise the result.
+
+When the result is still UNKNOWN (rule and final urgency both UNKNOWN), the
+case gets ``UNKNOWN_REVIEW_REQUIRED`` and a ``review_priority`` that orders the
+dispatcher review/callback queue. UNKNOWN never has medical or other
+conditions (those already make it URGENT or CRITICAL), so the priority comes
+from the remaining facts:
+
+- HIGH: a group that cannot easily move itself (INFANT, BEDRIDDEN, DISABLED,
+  ELDERLY), or water RISING.
+- MEDIUM: any other vulnerable group (in practice CHILD).
+- LOW: nothing else stated. (A stated water level alone cannot reach here:
+  UNKNOWN with a level and no group means the water is RISING, i.e. HIGH.)
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+RULES_VERSION = "urgency-rules-v1"
+
+WATER_ORDER = ("ANKLE", "KNEE", "WAIST", "CHEST", "ABOVE_HEAD", "ROOF")
+CRITICAL_CONDITIONS = frozenset({"UNCONSCIOUS", "BREATHING_DIFFICULTY", "CARDIAC", "BLEEDING"})
+URGENT_CONDITIONS = frozenset({"INJURY", "CHRONIC_CARE"})
+
+# Priority rank: UNKNOWN shares URGENT's rank (sorted with it, never below it).
+RANK = {"STABLE": 0, "UNKNOWN": 1, "URGENT": 1, "CRITICAL": 2}
+
+FLAG_OTHER_CONDITION = "OTHER_CONDITION_REVIEW"
+FLAG_SUGGESTION_RAISED = "SUGGESTED_URGENCY_RAISED"
+FLAG_SUGGESTION_LOWER = "SUGGESTED_URGENCY_LOWER_IGNORED"
+FLAG_UNKNOWN_REVIEW = "UNKNOWN_REVIEW_REQUIRED"
+
+LOW_MOBILITY_GROUPS = frozenset({"INFANT", "BEDRIDDEN", "DISABLED", "ELDERLY"})
+
+
+@dataclass(frozen=True)
+class UrgencyResult:
+    urgency: str
+    rule_urgency: str
+    review_priority: str | None = None
+    flags: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "urgency": self.urgency,
+            "rule_urgency": self.rule_urgency,
+            "review_priority": self.review_priority,
+            "flags": self.flags,
+        }
+
+
+def _water_at_least(level: str | None, minimum: str) -> bool:
+    return level is not None and WATER_ORDER.index(level) >= WATER_ORDER.index(minimum)
+
+
+def rule_urgency(profile: dict[str, Any]) -> str:
+    medical = set(profile.get("medical_conditions") or [])
+    other = profile.get("other_conditions") or []
+    groups = set(profile.get("vulnerable_groups") or [])
+    water = profile.get("water_level")
+    rising = profile.get("water_trend") == "RISING"
+
+    if (
+        medical & CRITICAL_CONDITIONS
+        or _water_at_least(water, "ABOVE_HEAD")
+        or (_water_at_least(water, "CHEST") and rising)
+        or (groups & {"INFANT", "BEDRIDDEN"} and _water_at_least(water, "WAIST"))
+    ):
+        return "CRITICAL"
+    if (
+        medical & URGENT_CONDITIONS
+        or other
+        or "PREGNANT" in groups
+        or (groups and _water_at_least(water, "KNEE"))
+        or _water_at_least(water, "WAIST")
+    ):
+        return "URGENT"
+    if not medical and not groups and water in ("ANKLE", "KNEE") and not rising:
+        return "STABLE"
+    return "UNKNOWN"
+
+
+def derive_urgency(profile: dict[str, Any]) -> UrgencyResult:
+    """Rule urgency raised (never lowered) by the model's ``suggested_urgency``."""
+    base = rule_urgency(profile)
+    flags: list[str] = []
+    if profile.get("other_conditions"):
+        flags.append(FLAG_OTHER_CONDITION)
+
+    final = base
+    suggested = profile.get("suggested_urgency")
+    if suggested is not None:
+        if RANK[suggested] > RANK[base] or (base == "UNKNOWN" and suggested == "URGENT"):
+            # UNKNOWN -> URGENT keeps the same priority but replaces "unknown".
+            final = suggested
+            if RANK[suggested] > RANK[base]:
+                flags.append(FLAG_SUGGESTION_RAISED)
+        elif RANK[suggested] < RANK[base]:
+            flags.append(FLAG_SUGGESTION_LOWER)
+
+    review_priority = None
+    if final == "UNKNOWN":
+        review_priority = unknown_review_priority(profile)
+        flags.append(FLAG_UNKNOWN_REVIEW)
+    return UrgencyResult(
+        urgency=final, rule_urgency=base, review_priority=review_priority, flags=flags
+    )
+
+
+def unknown_review_priority(profile: dict[str, Any]) -> str:
+    """Order of an UNKNOWN case in the dispatcher review queue."""
+    groups = set(profile.get("vulnerable_groups") or [])
+    if groups & LOW_MOBILITY_GROUPS or profile.get("water_trend") == "RISING":
+        return "HIGH"
+    if groups:
+        return "MEDIUM"
+    return "LOW"
