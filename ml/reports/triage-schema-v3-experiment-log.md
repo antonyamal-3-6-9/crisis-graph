@@ -1,0 +1,145 @@
+# Triage schema V3: experiment log
+
+Running record of the ML track (MLx) for triage extraction schema V3. The final
+results and decision go in `triage-schema-v3-evaluation.md`; this log keeps the
+story of how we got there, including what failed. Newest entries at the end.
+
+## Goal
+
+Extend triage extraction with `victim_profile` (who is reporting, whether they
+are on scene, medical conditions, vulnerable groups, water level and trend, a
+raise-only suggested urgency) so that urgency can be **derived deterministically
+in Rust** and remote callers are not routed to their own phone position
+(finding F-1). The model extracts facts; code derives judgements.
+
+Pass criteria were fixed before any results were seen (core implementation
+plan, ML track): critical under-triage <= 1 case; recall >= 90% for each
+critical condition (UNCONSCIOUS, BREATHING_DIFFICULTY, CARDIAC, BLEEDING);
+remote-caller miss rate <= 10%; V2 exact match no more than 2 cases below the
+98/120 baseline and V2 review recall not below 60/68; p95 latency increase
+<= 30%.
+
+## 1. Contract (2026-10-25)
+
+- `schemas/triage-extraction-v3.json`: V2 unchanged plus `victim_profile`.
+- `ml/src/crisisgraph_ml/urgency.py` + `ml/data/urgency-rules-v1.jsonl`:
+  deterministic urgency rules with hand-written expected results (written
+  before the code, so the tests check the code rather than echo it). The Rust
+  implementation (M3b) must pass the same file.
+- `schemas/urgency-result-v1.json`: the derived result.
+- Owner decisions during review:
+  - UNKNOWN results get `UNKNOWN_REVIEW_REQUIRED` and a review priority (HIGH
+    for low-mobility groups or rising water, MEDIUM for other groups, LOW
+    otherwise).
+  - New relation value `UNDER_REVIEW` (text points to the reporter's family or
+    home but leaves open whether the reporter is a victim); resolved after
+    extraction by comparing caller position with the described location.
+  - Half-open water-level bands in metres and feet; elapsed time is not a
+    hazard duration; CHRONIC_CARE vs acute episodes reconciled.
+  - A low-mobility group with water >= WAIST and RISING is CRITICAL.
+  - Gold urgency: a critical symptom resolved within 24 h is URGENT.
+  - People on a roof with no stated flooding get `water_level: null`.
+
+## 2. Data
+
+| Set | Cases | Use |
+|---|---|---|
+| `triage-eval-v3-dev-candidates.jsonl` | 42 | prompt development only |
+| `triage-eval-v3.0.1.jsonl` (frozen) | 120 | final reporting only |
+| `triage-eval-v3-v2-carryover.jsonl` | 120 | V2 inputs with V3 labels: V2 non-regression, invented facts |
+
+All three owner-reviewed. The test set was re-frozen once (v3.0.0 -> v3.0.1)
+the same day, before any model run, for the roof rule. Tests fail if the frozen
+file, its generator or the contract files change.
+
+Separation safeguards: no input text or location shared between dev and test;
+no 5-word sequence shared between the prompt and the test set (this test
+caught two leaks in my own prompt text, both fixed). Some scenario types
+(snakebite, labour, insulin) appear in both sets with different wording.
+
+## 3. Evaluator
+
+`crisisgraph-triage-eval-v3`: serial, checkpointed and resumable; reuses the V2
+scoring and adds per-condition recall with Wilson intervals, urgency from the
+**model's** profile through the rule table compared with gold, critical
+under-triage, a rule-only and an oracle (gold labels through the rules)
+ceiling, remote-caller miss rate and invented facts. Unusable outputs count as
+empty profiles, so failures never hide from recall. It refuses to run unless
+`--adapter` matches what the llama.cpp server actually applies (added after a
+run nearly started against the wrong server).
+
+## 4. Dev iterations (42 dev cases; small counts, read as patterns)
+
+Serving: Qwen3-4B-Instruct-2507 Q4_K_M, llama.cpp build 11429 (the V2 baseline
+used build 10809), CPU, one slot, context 4096 (V2 used 2048; the V3 prompt is
+about twice as long), temperature 0, up to 768 output tokens.
+
+| Run | Model | Prompt / order | V2 exact | Spurious reviews | Critical under-triage | p95 |
+|---|---|---|---|---|---|---|
+| 1 | base | v3.0 | 17 | 15 | 1 (035) | 22.8 s |
+| 2 | base | v3.1 | 16 | 16 | 3 (011, 017, 035) | 23.6 s |
+| 3 | base | v3.1, profile last | 23 | 7 | 3 | 25.8 s |
+| 4 | SFT-V3 adapter | v3.1, profile last | **31** | **3** | **1 (011)** | 22.5 s |
+
+**Run 1 findings.** The model asked for human review because profile facts
+were unknown ("no water level stated") in 15 cases; obeyed a prompt injection
+that told it to empty the medical fields (035, the one critical
+under-triage); confused relatives with third parties; inferred ELDERLY from
+"father"; put "kids are scared" and "food is over" in `other_conditions`;
+turned water depth into road hazards; left Malayalam case endings on
+locations. One cause was my own prompt bug ("cannot walk" listed under
+DISABLED).
+
+**Run 2 (prompt v3.1, a rule per cause).** No improvement on the base model:
+stronger wording did not change the review behaviour or the injection.
+
+**Run 3 (generation order).** The schema generated `victim_profile` before
+`needs_human_review`, so the model wrote the review decision right after
+listing profile unknowns. Moving the profile last (same meaning, different
+grammar order) halved spurious reviews and raised V2 exact match by 7. This
+was the most effective single change, and it was structural, not wording.
+
+**Run 4 (adapter).** The SFT-V3 adapter, trained only on V2 outputs, handled
+the new fields well and kept its V2 strength: all critical conditions found,
+the injection resisted, 3 spurious reviews. Remaining: 011 (snakebite) stays
+URGENT because `other_conditions` only reaches URGENT by rule and the model
+gave no suggestion; "kidappilaanu" (bedridden) and "food is over" still land
+in `other_conditions`; Malayalam case endings partly kept; relations about 83%.
+
+**Owner decision: latency.** The latency gate is waived for local CPU
+serving. CPU numbers measure this machine; the real latency budget belongs to
+the GPU/vLLM deployment and is measured there.
+
+**Decisions taken from the dev runs.** Adopt profile-last as the schema order
+(recorded as a contract revision in the v3.0.1 manifest; labels and data
+unchanged). Prompt v3.2 = v3.1 with the examples in the new order and at most
+three uncertainty reasons. Prompt iteration stops after one dev check of v3.2,
+because further rounds would start fitting these 42 cases.
+
+## 5. Final runs (planned)
+
+Prompt v3.2 and the profile-last schema, everything else fixed. No changes
+after the runs start.
+
+1. Adapter on the frozen test set
+2. Adapter on the V2 carry-over
+3. Base model on the frozen test set
+4. Base model on the V2 carry-over
+
+Then `check_gates()` (latency waived), the evaluation report, and the owner's
+decision: adapter into M3b, base model, or SFT-V4 from the measured failures.
+
+## Lessons so far
+
+- **Output order is part of the prompt.** With grammar-constrained decoding, a
+  small model is steered more by the order it writes fields in than by
+  instructions about them.
+- **Prompt wording has a ceiling on a 4B base model.** Three rounds fixed
+  little; the adapter fixed most of it. Fine-tuning taught behaviour that
+  instructions could not.
+- **A rule table needs a measured ceiling.** The oracle run (gold labels
+  through the rules) shows which under-triage is a rules gap rather than a
+  model error; snakebite is one.
+- **Test your own test hygiene.** The leak test found overlaps I had written
+  myself, and a stale bytecode cache (coarse timestamps on NTFS) briefly made
+  a passing test look failing.
