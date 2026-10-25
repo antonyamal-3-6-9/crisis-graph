@@ -73,9 +73,9 @@ documented experiment decision.
   development only**; never reported as results. Generator:
   `crisisgraph_ml.triage_eval_v3_dev`; review sheet
   `triage-eval-v3-dev-review-guide.md`.
-- `triage-eval-v3.0.0.jsonl` — the **frozen** 120-case V3 benchmark (frozen
-  2026-10-25). Checksum, owner decisions, contract hashes, permitted and
-  prohibited uses are in `triage-eval-v3.0.0.manifest.json`. Same rules as V2:
+- `triage-eval-v3.0.1.jsonl` — the **frozen** 120-case V3 benchmark (frozen
+  2026-10-25; supersedes v3.0.0, re-frozen before any use, reason in the manifest). Checksum, owner decisions, contract hashes, permitted and
+  prohibited uses are in `triage-eval-v3.0.1.manifest.json`. Same rules as V2:
   never edit in place, never use for training, fine-tuning, prompt tuning or
   generating training examples. Tests fail if the file, its generator
   (`crisisgraph_ml.triage_eval_v3_candidates`) or the contract files change.

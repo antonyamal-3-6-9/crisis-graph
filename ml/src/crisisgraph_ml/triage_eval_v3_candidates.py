@@ -1,4 +1,4 @@
-"""Candidates for the frozen triage extraction V3 test set (``triage-eval-v3.0.0``).
+"""Candidates for the frozen triage extraction V3 test set (``triage-eval-v3.0.1``).
 
 Written from scenarios and place names that do not appear in the dev set, so
 prompt tuning on the dev set does not leak into reported results. After owner
@@ -24,9 +24,9 @@ from crisisgraph_ml.triage_eval import ML_ROOT
 from crisisgraph_ml.triage_eval_v3_dev import case as dev_case
 from crisisgraph_ml.triage_eval_v3_dev import validate_cases, write_cases
 
-DEFAULT_OUTPUT = ML_ROOT / "data" / "triage-eval-v3.0.0-candidates.jsonl"
-FROZEN = ML_ROOT / "data" / "triage-eval-v3.0.0.jsonl"
-MANIFEST = ML_ROOT / "data" / "triage-eval-v3.0.0.manifest.json"
+DEFAULT_OUTPUT = ML_ROOT / "data" / "triage-eval-v3.0.1-candidates.jsonl"
+FROZEN = ML_ROOT / "data" / "triage-eval-v3.0.1.jsonl"
+MANIFEST = ML_ROOT / "data" / "triage-eval-v3.0.1.manifest.json"
 CONTRACT_FILES = {
     "schema": ML_ROOT.parent / "schemas" / "triage-extraction-v3.json",
     "urgency_result_schema": ML_ROOT.parent / "schemas" / "urgency-result-v1.json",
@@ -53,6 +53,7 @@ OWNER_DECISIONS = [
     ),
     "Hypothetical conditions are not labelled",
     "Urgency rule: a low-mobility group with water at or above WAIST and RISING is CRITICAL",
+    "People on a roof with no stated flooding: water_level null (no inferred flood)",
     (
         "Gold urgency: a critical symptom resolved within 24 hours is URGENT; a resolved "
         "minor injury alone gives no urgency"
@@ -490,7 +491,7 @@ def build_cases() -> list[dict[str, Any]]:
           "I'm on my terrace and I can see a family of four on the roof of the house next door "
           "at Alangad. Please send a boat.",
           location="Alangad", headcount=4, asset="RESCUE_BOAT", urgency="CRITICAL",
-          water="ROOF", **BYSTANDER),
+          **BYSTANDER),
         c(86, "reporter_location", "manglish", "bystander_no_injury_knee",
           "Njan avarude veedinte munnil nilkkunnu, Uliyannoor il, avide 3 per und, onnum "
           "pattiyittilla, muttolam vellam.",
@@ -648,12 +649,21 @@ def freeze(cases: list[dict[str, Any]]) -> dict[str, Any]:
     write_cases(cases, FROZEN)
     manifest = {
         "dataset": "CrisisGraph Triage Eval V3",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "artifact": FROZEN.name,
         "sha256": sha256(FROZEN),
         "record_count": len(cases),
         "frozen_on": "2026-10-25",
         "frozen_benchmark": True,
+        "supersedes": {
+            "version": "3.0.0",
+            "sha256": "56efbbfa8c8322b5bbd382c3bfd777b6c93626f42353eeb69a4de764c2e2c936",
+            "reason": (
+                "Re-frozen the same day, before any model run or prompt work: case "
+                "v3-test-085 no longer infers water_level ROOF from people being on a "
+                "roof (owner decision during the V2 carry-over review)"
+            ),
+        },
         "reviewer_status": "reviewed",
         "review": (
             "Drafted synthetically, then reviewed by the project owner in two comment rounds; "

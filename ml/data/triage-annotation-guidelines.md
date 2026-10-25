@@ -208,6 +208,10 @@ end ("1 to 2 feet" → `WAIST`). A body reference wins over a number when
 they conflict, because it describes the victims directly.
 
 "Water entered the house" or "the area is flooded" with no depth → `null`.
+People on a roof with no flooding or water stated ("five people on the roof of
+the market need a boat") → `null`: being on a roof does not state a water
+level, and inferring a flood from a location is an invented fact. Gold
+urgency may still be `CRITICAL`.
 
 ### `water_trend`
 

@@ -1,4 +1,4 @@
-# Triage eval V3 test set (v3.0.0 candidates): review sheet
+# Triage eval V3 test set (v3.0.1): review sheet
 
 Review each case against the V3 addendum in `triage-annotation-guidelines.md`.
 Mark **OK**, or write the correction in the last column (e.g. `water: CHEST`,
@@ -12,7 +12,7 @@ Mark **OK**, or write the correction in the last column (e.g. `water: CHEST`,
 - V2 fields follow the existing rules: review = any of location / headcount / asset
   is null, or a hazard is incomplete.
 
-**Test set.** After review this set is frozen with a checksum and used only for final reporting: never for training, prompt tuning or writing training examples. Please do not share or discuss individual cases while the prompt is being developed.
+**Test set.** Frozen as v3.0.1 (supersedes v3.0.0; see the manifest). Used only for final reporting: never for training, prompt tuning or writing training examples.
 
 
 ## medical_critical
@@ -123,7 +123,7 @@ Mark **OK**, or write the correction in the last column (e.g. `water: CHEST`,
 | 082 | ml | ഞാൻ ബാംഗ്ലൂരിൽ ആണ്. എന്റെ അമ്മയും അനിയത്തിയും ശ്രീമൂലനഗരത്ത് വീട്ടിൽ കുടുങ്ങി. വെള്ളം അരയോളം. | loc: ശ്രീമൂലനഗരം<br>count: 2<br>asset: None<br>review: True | rel: HOUSEHOLD<br>on_scene: False<br>water: WAIST | URGENT / URGENT |  |
 | 083 | en | I left our house at Thadikkakadavu this morning, my grandparents refused to come and are still there. Water is rising. | loc: Thadikkakadavu<br>count: 2<br>asset: None<br>review: True | rel: HOUSEHOLD<br>on_scene: False<br>groups: ELDERLY<br>trend: RISING | URGENT / UNKNOWN (HIGH) ⚠ |  |
 | 084 | en | I can't get to my uncle's house in Kottappuram because the road is flooded. He lives alone and is diabetic. | loc: Kottappuram<br>count: 1<br>asset: None<br>hazards: None FLOODED None<br>review: True | rel: HOUSEHOLD<br>on_scene: False<br>med: CHRONIC_CARE | URGENT / URGENT |  |
-| 085 | en | I'm on my terrace and I can see a family of four on the roof of the house next door at Alangad. Please send a boat. | loc: Alangad<br>count: 4<br>asset: RESCUE_BOAT<br>review: False | rel: THIRD_PARTY<br>on_scene: True<br>water: ROOF | CRITICAL / CRITICAL |  |
+| 085 | en | I'm on my terrace and I can see a family of four on the roof of the house next door at Alangad. Please send a boat. | loc: Alangad<br>count: 4<br>asset: RESCUE_BOAT<br>review: False | rel: THIRD_PARTY<br>on_scene: True | CRITICAL / UNKNOWN (LOW) ⚠ |  |
 | 086 | manglish | Njan avarude veedinte munnil nilkkunnu, Uliyannoor il, avide 3 per und, onnum pattiyittilla, muttolam vellam. | loc: Uliyannoor<br>count: 3<br>asset: None<br>review: True | rel: THIRD_PARTY<br>on_scene: True<br>water: KNEE | STABLE / STABLE |  |
 | 087 | ml | ഞാൻ അവരുടെ വീടിന്റെ അടുത്ത് ഉണ്ട്. കൂനമ്മാവിൽ ആറുപേർ കുടുങ്ങി, രണ്ട് പ്രായമായവർ ഉണ്ട്. | loc: കൂനമ്മാവ്<br>count: 6<br>asset: None<br>review: True | rel: THIRD_PARTY<br>on_scene: True<br>groups: ELDERLY | UNKNOWN / UNKNOWN (HIGH) |  |
 | 088 | en | Ammoomma and 2 others at home near Kalady temple, water at knee level. | loc: Kalady temple<br>count: 3<br>asset: None<br>review: True | rel: UNDER_REVIEW<br>groups: ELDERLY<br>water: KNEE | URGENT / URGENT |  |
