@@ -129,6 +129,14 @@ as agreed before the run.
 Prompt v3.2 and the profile-last schema, everything else fixed. No changes
 after the runs start.
 
+**Interruption.** Run 1 stopped at case 73/120 (19:00) when the Claude Code
+session and the llama.cpp server stopped. After restarting the server with the
+same adapter, it resumed from the checkpoint at case 74. The run identity
+(model, adapter file and the adapters the server reports, prompt, schema,
+dataset, max tokens) matched, and decoding is at temperature 0, so the resumed
+run is equivalent to an uninterrupted one; only latency differs for the first
+resumed case (prompt cache cold).
+
 1. Adapter on the frozen test set
 2. Adapter on the V2 carry-over
 3. Base model on the frozen test set
@@ -151,3 +159,34 @@ decision: adapter into M3b, base model, or SFT-V4 from the measured failures.
 - **Test your own test hygiene.** The leak test found overlaps I had written
   myself, and a stale bytecode cache (coarse timestamps on NTFS) briefly made
   a passing test look failing.
+
+### Run 1 result: SFT-V3 adapter, frozen test set v3.0.1 (120 cases)
+
+| Criterion | Result | Gate |
+|---|---|---|
+| Critical under-triage | **9 / 56** gold-CRITICAL | <= 1 — **fail** |
+| Recall UNCONSCIOUS / CARDIAC / BLEEDING | 13/13 · 10/10 · 9/10 | >= 90% — pass |
+| Recall BREATHING_DIFFICULTY | **8/10** | >= 90% — **fail** |
+| Remote-caller miss | 1/12 (8%) | <= 10% — pass |
+| p95 latency | 21.8 s | waived (CPU) |
+
+V2 fields on these new messages: 83/120 exact, review recall 78/79, 9 spurious
+reviews. Invented profile facts in 33 cases (e.g. CHILD from "son").
+INJURY recall 3/15 (mostly dropped next to a more serious condition);
+ELDERLY 14/21.
+
+**The 9 critical under-triage cases split in two:**
+- **Rule-table gaps (4: 053 snakebite, 055 swept away, 057 hypothermia,
+  085 family on a roof):** the oracle (gold labels through the rules) also
+  misses them. They depended on `suggested_urgency`, which **never raised a
+  result** (0 raises in 120; the model only says CRITICAL where the rules
+  already do). Finding: rules plus a raise-only suggestion do not cover
+  life-threatening situations outside the categories.
+- **Extraction misses (5):** 028 "chora nilkunnilla" (Manglish bleeding,
+  remote caller), 065 "koodikondirikkunnu" (rising, would trigger the
+  low-mobility rule), 067 "ground floor completely under water" (ABOVE_HEAD,
+  named in the prompt), 068 "veedu muzhuvan vellathil" + terrace (ROOF), 070
+  bedridden written into `other_conditions`.
+
+The two BREATHING misses did not change urgency (both still CRITICAL through
+another critical condition).
