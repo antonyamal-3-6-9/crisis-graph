@@ -148,3 +148,8 @@ def test_result_schema_ties_review_priority_to_unknown(result_validator):
 def test_rule_vectors_cover_every_review_priority():
     priorities = {v["expected"]["review_priority"] for v in load_cases(RULE_VECTORS)}
     assert priorities == {"HIGH", "MEDIUM", "LOW", None}
+
+
+def test_under_review_relation_is_valid(validator):
+    output = extraction(reporter_relation="UNDER_REVIEW", reporter_on_scene=None)
+    assert not list(validator.iter_errors(output))

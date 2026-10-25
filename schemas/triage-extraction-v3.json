@@ -113,7 +113,8 @@
               "enum": [
                 "SELF",
                 "HOUSEHOLD",
-                "THIRD_PARTY"
+                "THIRD_PARTY",
+                "UNDER_REVIEW"
               ]
             },
             {
