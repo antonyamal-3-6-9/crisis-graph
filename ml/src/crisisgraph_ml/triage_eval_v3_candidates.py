@@ -671,6 +671,13 @@ def freeze(cases: list[dict[str, Any]]) -> dict[str, Any]:
             "below). Not certified by a medical or emergency-services domain expert."
         ),
         "owner_decisions": OWNER_DECISIONS,
+        "contract_revisions": [
+            (
+                "2026-10-25: triage-extraction-v3 property order changed so that "
+                "victim_profile is generated last (dev experiment: fewer spurious review "
+                "requests). Meaning and labels unchanged; data checksum unchanged."
+            ),
+        ],
         "contract_sha256": {name: sha256(path) for name, path in CONTRACT_FILES.items()},
         "dev_set_separation": (
             "No input text or victim_location is shared with triage-eval-v3-dev-candidates. "

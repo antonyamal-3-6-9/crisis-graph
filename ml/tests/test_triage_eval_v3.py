@@ -17,11 +17,16 @@ from crisisgraph_ml.triage_eval_v3_dev import DEFAULT_OUTPUT as DEV_SET
 from crisisgraph_ml.triage_eval_v3_dev import as_model_output
 
 
-def model_server(transform=lambda case, output: output):
+def model_server(transform=lambda case, output: output, adapters=()):
     """Fake OpenAI-compatible server answering with the gold labels, optionally altered."""
     cases = {case["input"]: case for case in load_cases(DEV_SET)}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/lora-adapters":
+            return httpx.Response(
+                200, json=[{"id": i, "path": f"artifacts/{a}", "scale": 1.0}
+                           for i, a in enumerate(adapters)]
+            )
         message = json.loads(request.content)["messages"][-1]["content"]
         case = cases[message]
         output = transform(case, as_model_output(case["expected"]))
@@ -104,6 +109,8 @@ def test_resume_reuses_checkpoint_and_rejects_changed_identity(args, tmp_path):
     inner = model_server()
 
     def counting(request):
+        if request.url.path == "/lora-adapters":
+            return inner.handle_request(request)
         calls["n"] += 1
         if calls["n"] > 5:
             raise httpx.ConnectError("server stopped")
@@ -147,3 +154,15 @@ def test_empty_profile_covers_schema_fields():
 
     schema = load_json(DEFAULT_SCHEMA)
     assert set(EMPTY_PROFILE) == set(schema["properties"]["victim_profile"]["required"])
+
+
+def test_declared_adapter_must_match_the_server(args):
+    with pytest.raises(ValueError, match="server applies"):
+        asyncio.run(run(args, model_server(adapters=["adapter-f16.gguf"])))
+
+    args.adapter = "artifacts/qwen3-4b-triage-sft-v3/adapter-f16.gguf"
+    with pytest.raises(ValueError, match="server applies none"):
+        asyncio.run(run(args, model_server()))
+
+    report = asyncio.run(run(args, model_server(adapters=["adapter-f16.gguf"])))
+    assert report["identity"]["server_adapters"] == ["adapter-f16.gguf"]

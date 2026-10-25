@@ -5,7 +5,7 @@ from jsonschema import Draft202012Validator
 
 from crisisgraph_ml.triage_eval import ML_ROOT, load_cases, load_json
 
-PROMPT = ML_ROOT / "prompts" / "triage-extraction-v3.0.txt"
+PROMPT = ML_ROOT / "prompts" / "triage-extraction-v3.2.txt"
 SCHEMA = ML_ROOT.parent / "schemas" / "triage-extraction-v3.json"
 EVAL_SETS = [
     "triage-eval-v3-dev-candidates.jsonl",
@@ -40,3 +40,15 @@ def test_prompt_examples_do_not_leak_evaluation_cases():
     for report, output in zip(reports, outputs):
         assert report.casefold() not in inputs
         assert output["victim_location"].casefold() not in test_locations
+
+
+def ngrams(text: str, n: int = 5) -> set[tuple[str, ...]]:
+    words = re.findall(r"\w+", text.casefold())
+    return {tuple(words[i : i + n]) for i in range(len(words) - n + 1)}
+
+
+def test_prompt_shares_no_five_word_sequence_with_the_test_set():
+    prompt = ngrams(PROMPT.read_text(encoding="utf-8"))
+    for case in load_cases(ML_ROOT / "data" / "triage-eval-v3.0.1.jsonl"):
+        shared = prompt & ngrams(case["input"])
+        assert not shared, (case["id"], shared)

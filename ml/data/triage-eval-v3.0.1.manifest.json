@@ -23,8 +23,11 @@
     "People on a roof with no stated flooding: water_level null (no inferred flood)",
     "Gold urgency: a critical symptom resolved within 24 hours is URGENT; a resolved minor injury alone gives no urgency"
   ],
+  "contract_revisions": [
+    "2026-10-25: triage-extraction-v3 property order changed so that victim_profile is generated last (dev experiment: fewer spurious review requests). Meaning and labels unchanged; data checksum unchanged."
+  ],
   "contract_sha256": {
-    "schema": "a4f88ae61f98b88642a4f54c423a5ed7e6e4adc7d1ef4069d39b30027e110180",
+    "schema": "c9b3ed10855da712c544ecc998db0f841e250313e31ff6cec953932b759a1051",
     "urgency_result_schema": "9f8e2bd9373f53a7e19c0da5a99c5ecd9943d1f8b7275f6d4f05abecbc3a62a7",
     "urgency_rules": "0d77492b2d776cf0c731f3f10ce59bbf83c6679172158f552aa79ce6ea965866",
     "annotation_guidelines": "58f9017cfa65c6849c5af17b4a046e98e97140a02044f29d421f539b2bbf921a"

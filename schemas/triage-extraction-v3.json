@@ -102,6 +102,23 @@
         ]
       }
     },
+    "confidence_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "needs_human_review": {
+      "type": "boolean"
+    },
+    "uncertainty_reasons": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      }
+    },
     "victim_profile": {
       "type": "object",
       "additionalProperties": false,
@@ -228,23 +245,6 @@
         "water_trend",
         "suggested_urgency"
       ]
-    },
-    "confidence_score": {
-      "type": "number",
-      "minimum": 0.0,
-      "maximum": 1.0
-    },
-    "needs_human_review": {
-      "type": "boolean"
-    },
-    "uncertainty_reasons": {
-      "type": "array",
-      "maxItems": 10,
-      "items": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 300
-      }
     }
   },
   "required": [
@@ -253,10 +253,10 @@
     "headcount",
     "required_asset",
     "hazards",
-    "victim_profile",
     "confidence_score",
     "needs_human_review",
-    "uncertainty_reasons"
+    "uncertainty_reasons",
+    "victim_profile"
   ],
-  "description": "V2 unchanged plus victim_profile: facts about the people and conditions that drive urgency and caller-location use. The model extracts categories; urgency is derived deterministically outside the model. victim_profile never decides needs_human_review."
+  "description": "V2 unchanged plus victim_profile: facts about the people and conditions that drive urgency and caller-location use. The model extracts categories; urgency is derived deterministically outside the model. victim_profile never decides needs_human_review. Field order is part of the serving contract: grammar-constrained decoding generates fields in this order, and victim_profile comes last so the review decision is written before any profile uncertainty."
 }

@@ -310,6 +310,24 @@ def run_identity(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+async def loaded_adapters(client: httpx.AsyncClient, args: argparse.Namespace) -> list[str]:
+    """Adapters the server actually applies (llama.cpp ``/lora-adapters``)."""
+    if args.backend != "llama-cpp":
+        return []
+    root = args.base_url.rstrip("/").removesuffix("/v1")
+    response = await client.get(f"{root}/lora-adapters")
+    response.raise_for_status()
+    return sorted(Path(a["path"]).name for a in response.json() if a.get("scale", 1.0) != 0)
+
+
+def check_adapter(declared: str, loaded: list[str]) -> None:
+    """Refuse to run when --adapter does not describe what the server serves."""
+    if declared == "none" and loaded:
+        raise ValueError(f"--adapter none, but the server applies {loaded}")
+    if declared != "none" and Path(declared).name not in loaded:
+        raise ValueError(f"--adapter {declared}, but the server applies {loaded or 'none'}")
+
+
 async def run(args: argparse.Namespace, transport: httpx.AsyncBaseTransport | None = None):
     cases = load_cases(args.dataset)
     prompt = args.prompt.read_text(encoding="utf-8").strip()
@@ -317,6 +335,9 @@ async def run(args: argparse.Namespace, transport: httpx.AsyncBaseTransport | No
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(schema)
     identity = run_identity(args)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0), transport=transport) as client:
+        identity["server_adapters"] = await loaded_adapters(client, args)
+    check_adapter(args.adapter, identity["server_adapters"])
 
     checkpoint = args.output.with_suffix(".checkpoint.jsonl")
     identity_path = args.output.with_suffix(".identity.json")
@@ -376,7 +397,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--model", default="Qwen/Qwen3-4B-Instruct-2507")
     parser.add_argument("--adapter", default="none",
-                        help="adapter loaded by the server (recorded in the run identity)")
+                        help="adapter file the server must be applying, or 'none' (checked)")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--prompt", type=Path, required=True)
     parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
