@@ -203,8 +203,11 @@ Adding the profile cost the adapter 7 exact matches and 2 missed reviews on
 the V2 fields. The adapter was trained on V2 outputs only, so the longer
 output it never learned costs some V2 accuracy. Invented profile facts in 13
 of 120 plain V2 messages, mostly a guessed reporter relation (9) or on-scene
-value (4). No critical under-triage (the carry-over has no gold-CRITICAL
-cases with stated conditions; see the carry-over labels).
+value (4). The 5 gold-CRITICAL carry-over cases all came out CRITICAL, but
+**only through invented facts**: "critical patient" became UNCONSCIOUS (2) or
+CARDIAC (1), and "on the roof" became `water_level: ROOF` (2), the inference
+the owner's strict rule excludes. Right urgency for the wrong reason; those
+facts would also reach a dispatcher as if stated.
 
 **Candidate B overall: fails** (critical under-triage, BREATHING recall, V2
 exact match, V2 review recall); passes UNCONSCIOUS, CARDIAC and BLEEDING
