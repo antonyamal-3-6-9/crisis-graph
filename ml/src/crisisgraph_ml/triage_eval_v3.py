@@ -265,8 +265,13 @@ def check_gates(
     baseline_exact_match: int,
     baseline_review_recall: float,
     baseline_p95_ms: float,
+    waived: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
-    """Apply the predeclared pass criteria to a candidate's two reports."""
+    """Apply the predeclared pass criteria to a candidate's two reports.
+
+    ``waived`` names checks the owner has waived (still computed and reported,
+    but not counted toward ``passed``), e.g. ``latency_p95`` for CPU serving.
+    """
     profile = test_report["profile"]
     medical = profile["medical_conditions"]["per_label"]
     v2 = carryover_report["v2_fields"]
@@ -288,8 +293,16 @@ def check_gates(
         "v2_review_recall": v2["human_review_recall"] >= baseline_review_recall,
         "latency_p95": p95 <= baseline_p95_ms * (1 + GATES["max_p95_latency_increase"]),
     }
-    return {"passed": all(checks.values()), "checks": checks, "v2_exact_match_cases": exact,
-            "p95_ms": p95}
+    unknown = waived - set(checks)
+    if unknown:
+        raise ValueError(f"unknown waived checks: {sorted(unknown)}")
+    return {
+        "passed": all(ok for name, ok in checks.items() if name not in waived),
+        "checks": checks,
+        "waived": sorted(waived),
+        "v2_exact_match_cases": exact,
+        "p95_ms": p95,
+    }
 
 
 def run_identity(args: argparse.Namespace) -> dict[str, Any]:

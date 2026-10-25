@@ -190,3 +190,22 @@ ELDERLY 14/21.
 
 The two BREATHING misses did not change urgency (both still CRITICAL through
 another critical condition).
+
+### Run 2 result: SFT-V3 adapter, V2 carry-over (120 cases)
+
+| V2 regression | V2 baseline (SFT-V3, prompt v2.1.1, V2 schema) | V3 (SFT-V3, prompt v3.2) | Gate |
+|---|---|---|---|
+| Exact match | 98/120 | **91/120** | >= 96 — **fail** |
+| Review recall | 60/68 | **58/68** | >= 60 — **fail** |
+| Spurious reviews | 3 | 2 | — |
+
+Adding the profile cost the adapter 7 exact matches and 2 missed reviews on
+the V2 fields. The adapter was trained on V2 outputs only, so the longer
+output it never learned costs some V2 accuracy. Invented profile facts in 13
+of 120 plain V2 messages, mostly a guessed reporter relation (9) or on-scene
+value (4). No critical under-triage (the carry-over has no gold-CRITICAL
+cases with stated conditions; see the carry-over labels).
+
+**Candidate B overall: fails** (critical under-triage, BREATHING recall, V2
+exact match, V2 review recall); passes UNCONSCIOUS, CARDIAC and BLEEDING
+recall and the remote-caller miss rate. Latency waived.

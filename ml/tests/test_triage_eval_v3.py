@@ -166,3 +166,14 @@ def test_declared_adapter_must_match_the_server(args):
 
     report = asyncio.run(run(args, model_server(adapters=["adapter-f16.gguf"])))
     assert report["identity"]["server_adapters"] == ["adapter-f16.gguf"]
+
+
+def test_waived_check_is_reported_but_not_counted(args):
+    report = asyncio.run(run(args, model_server()))
+    gates = check_gates(report, report, baseline_exact_match=42, baseline_review_recall=1.0,
+                        baseline_p95_ms=0.001, waived=frozenset({"latency_p95",
+                                                                 "critical_under_triage"}))
+    assert gates["checks"]["latency_p95"] is False
+    assert gates["passed"] is True
+    with pytest.raises(ValueError, match="unknown waived"):
+        check_gates(report, report, 42, 1.0, 1.0, waived=frozenset({"latency"}))
