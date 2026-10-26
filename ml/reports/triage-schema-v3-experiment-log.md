@@ -212,3 +212,18 @@ facts would also reach a dispatcher as if stated.
 **Candidate B overall: fails** (critical under-triage, BREATHING recall, V2
 exact match, V2 review recall); passes UNCONSCIOUS, CARDIAC and BLEEDING
 recall and the remote-caller miss rate. Latency waived.
+
+### Runs 3–4 result: base model (no adapter)
+
+Both completed without errors (the Claude Code session was interrupted again
+afterwards; no run was affected). Critical under-triage 8/56 (fails); recall
+UNCONSCIOUS 13/13, BREATHING 10/10, CARDIAC 10/10, BLEEDING 9/10 (all pass);
+remote-caller miss 1/12 (pass); V2 set 71/120 exact with 46/68 review recall
+(fails badly). Slightly better than the adapter on the profile, far worse on
+V2. **Neither candidate passes.** Full comparison, case table and decision
+options: `triage-schema-v3-evaluation.md`.
+
+**Key finding:** the oracle (gold labels through the rules) already
+under-triages 4 gold-CRITICAL cases (snakebite, swept away, hypothermia, roof
+without stated flood), so the gate of <= 1 cannot be met by any extraction
+model under urgency-rules-v1. The rules need a decision before more model work.
