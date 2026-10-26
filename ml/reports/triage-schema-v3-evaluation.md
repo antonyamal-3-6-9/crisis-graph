@@ -143,3 +143,32 @@ for B.
 Recommended: **1, then 2.** Option 1 is cheap and removes a floor that no
 model can get below; option 2 targets the specific extraction failures
 measured here.
+
+## Addendum: urgency-rules-v2 (owner decision, 2026-10-26)
+
+Owner decision: **any `other_conditions` entry is CRITICAL with immediate human
+review** (`OTHER_CONDITION_IMMEDIATE_REVIEW`). v1 is kept unchanged for
+reproducibility; v2 has its own hand-written cases (`data/urgency-rules-v2.jsonl`)
+and result schema (`schemas/urgency-result-v2.json`). The four final runs were
+re-scored under v2 from their saved outputs (`crisisgraph-triage-rescore-v3`),
+with no new model calls; gold labels are independent of the rules and unchanged.
+
+| Test set | Critical under-triage v1 → v2 | Over-triage v1 → v2 | Oracle gold-CRITICAL misses v1 → v2 | Passes |
+|---|---|---|---|---|
+| B: adapter | 9 → **5** | 12 → 16 | 4 → 1 | No |
+| A: base | 8 → **7** | 11 → 15 | 4 → 1 | No |
+
+- v2 closed 053 (snakebite), 055 (swept away) and 057 (hypothermia) for the
+  adapter, and 070 **by accident**: the adapter had wrongly written
+  "BEDRIDDEN" into `other_conditions`, which v2 now treats as CRITICAL. The
+  base model only gained 053, because it did not extract 055 as a condition.
+- Remaining for the adapter: **085** (roof with no flood stated: a rules gap
+  left by the strict roof rule) and four extraction misses: **028**
+  (Manglish bleeding), **065** (rising), **067** (ground floor under water),
+  **068** (whole house under water, terrace).
+- Cost: about four more over-triaged cases per candidate (e.g. labour, high
+  fever), accepted by the owner.
+
+The V2 regression failures are unaffected (scoring rules do not change V2
+fields). Neither candidate passes under v2 either. The remaining failures are
+extraction gaps, which points to SFT-V4 (option 2), plus a decision on 085.

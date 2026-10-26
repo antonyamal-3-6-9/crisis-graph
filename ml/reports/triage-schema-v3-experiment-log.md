@@ -227,3 +227,12 @@ options: `triage-schema-v3-evaluation.md`.
 under-triages 4 gold-CRITICAL cases (snakebite, swept away, hypothermia, roof
 without stated flood), so the gate of <= 1 cannot be met by any extraction
 model under urgency-rules-v1. The rules need a decision before more model work.
+
+### Rules v2 and re-score (2026-10-26)
+
+Owner decision: any `other_conditions` entry is CRITICAL with immediate human
+review. Implemented as `urgency-rules-v2` next to an unchanged v1; all four
+runs re-scored from saved outputs. Adapter critical under-triage 9 → 5, base
+8 → 7; over-triage up by about 4 each. Remaining adapter misses: 085 (roof
+rule) and four extraction gaps (028, 065, 067, 068). One fix (070) was an
+accident of the model's own mistake. Details in the evaluation addendum.

@@ -37,7 +37,7 @@ from crisisgraph_ml.triage_eval import (
     load_json,
     summarize_metrics,
 )
-from crisisgraph_ml.urgency import RANK, derive_urgency
+from crisisgraph_ml.urgency import RANK, RULE_VERSIONS, RULES_VERSION, derive_urgency
 
 DEFAULT_SCHEMA = ML_ROOT.parent / "schemas" / "triage-extraction-v3.json"
 DEFAULT_DATASET = ML_ROOT / "data" / "triage-eval-v3-dev-candidates.jsonl"
@@ -132,16 +132,18 @@ def invented_facts(expected: dict[str, Any], actual: dict[str, Any]) -> list[str
     return facts
 
 
-def score_profiles(results: list[CaseResult], cases: list[dict[str, Any]]) -> dict[str, Any]:
+def score_profiles(
+    results: list[CaseResult], cases: list[dict[str, Any]], rules: str = RULES_VERSION
+) -> dict[str, Any]:
     by_id = {case["id"]: case for case in cases}
     rows = []
     for result in results:
         case = by_id[result.case_id]
         expected = {**EMPTY_PROFILE, **case["expected"]["victim_profile"]}
         actual = predicted_profile(result)
-        derived = derive_urgency(actual)
-        rule_only = derive_urgency({**actual, "suggested_urgency": None})
-        oracle = derive_urgency({**expected, "suggested_urgency": None})
+        derived = derive_urgency(actual, rules)
+        rule_only = derive_urgency({**actual, "suggested_urgency": None}, rules)
+        oracle = derive_urgency({**expected, "suggested_urgency": None}, rules)
         rows.append(
             {
                 "case_id": result.case_id,
@@ -244,12 +246,16 @@ def grouped(rows: list[dict[str, Any]], key: str) -> dict[str, Any]:
 
 
 def summarize_v3(
-    results: list[CaseResult], cases: list[dict[str, Any]], identity: dict[str, Any]
+    results: list[CaseResult],
+    cases: list[dict[str, Any]],
+    identity: dict[str, Any],
+    rules: str = RULES_VERSION,
 ) -> dict[str, Any]:
-    profile = score_profiles(results, cases)
+    profile = score_profiles(results, cases, rules)
     rows = profile.pop("rows")
     return {
         "identity": identity,
+        "urgency_rules": rules,
         "v2_fields": summarize_metrics(results),
         "profile": profile,
         "profile_by_category": grouped(rows, "category"),
@@ -382,7 +388,7 @@ async def run(args: argparse.Namespace, transport: httpx.AsyncBaseTransport | No
             print(f"{len(results)}/{len(cases)} {result.case_id} "
                   f"{result.latency_ms / 1000:.1f}s error={result.error}", flush=True)
 
-    report = summarize_v3(results, cases, identity)
+    report = summarize_v3(results, cases, identity, args.rules)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return report
 
@@ -415,13 +421,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--prompt", type=Path, required=True)
     parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
     parser.add_argument("--max-tokens", type=int, default=768)
+    parser.add_argument("--rules", choices=RULE_VERSIONS, default=RULES_VERSION,
+                        help="urgency rules used for scoring (not part of the run identity)")
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args(argv)
 
 
+def rescore(report: dict[str, Any], dataset: Path, rules: str) -> dict[str, Any]:
+    """Score saved model outputs again under other urgency rules (no model calls)."""
+    if hashlib.sha256(dataset.read_bytes()).hexdigest() != report["identity"]["dataset_sha256"]:
+        raise ValueError("dataset differs from the one the run used")
+    results = [CaseResult(**result) for result in report["results"]]
+    return summarize_v3(results, load_cases(dataset), report["identity"], rules)
+
+
 def main() -> None:
     report = asyncio.run(run(parse_args()))
+    print(json.dumps(headline(report), indent=2))
+
+
+def main_rescore() -> None:
+    parser = argparse.ArgumentParser(description="Re-score a V3 run under other urgency rules")
+    parser.add_argument("report", type=Path)
+    parser.add_argument("--dataset", type=Path, required=True)
+    parser.add_argument("--rules", choices=RULE_VERSIONS, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    report = rescore(load_json(args.report), args.dataset, args.rules)
+    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(headline(report), indent=2))
 
 

@@ -2,12 +2,14 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from crisisgraph_ml.triage_eval import ML_ROOT, load_cases, load_json
-from crisisgraph_ml.urgency import RANK, derive_urgency
+from crisisgraph_ml.urgency import RANK, RULES_V1, RULES_V2, derive_urgency
 
 SCHEMA_V3 = ML_ROOT.parent / "schemas" / "triage-extraction-v3.json"
 SCHEMA_V2 = ML_ROOT.parent / "schemas" / "triage-extraction-v2.json"
 RULE_VECTORS = ML_ROOT / "data" / "urgency-rules-v1.jsonl"
 RESULT_SCHEMA = ML_ROOT.parent / "schemas" / "urgency-result-v1.json"
+RULE_VECTORS_V2 = ML_ROOT / "data" / "urgency-rules-v2.jsonl"
+RESULT_SCHEMA_V2 = ML_ROOT.parent / "schemas" / "urgency-result-v2.json"
 
 EMPTY_PROFILE = {
     "reporter_relation": None,
@@ -109,12 +111,12 @@ def test_rule_vectors_cover_every_tier():
 
 @pytest.mark.parametrize("vector", load_cases(RULE_VECTORS), ids=lambda v: v["id"])
 def test_urgency_rules_match_vectors(vector):
-    assert derive_urgency(vector["profile"]).as_dict() == vector["expected"]
+    assert derive_urgency(vector["profile"], RULES_V1).as_dict() == vector["expected"]
 
 
 @pytest.mark.parametrize("vector", load_cases(RULE_VECTORS), ids=lambda v: v["id"])
 def test_suggestion_never_lowers_priority(vector):
-    result = derive_urgency(vector["profile"])
+    result = derive_urgency(vector["profile"], RULES_V1)
     assert RANK[result.urgency] >= RANK[result.rule_urgency]
 
 
@@ -127,7 +129,7 @@ def result_validator():
 
 @pytest.mark.parametrize("vector", load_cases(RULE_VECTORS), ids=lambda v: v["id"])
 def test_derived_results_match_result_schema(result_validator, vector):
-    errors = list(result_validator.iter_errors(derive_urgency(vector["profile"]).as_dict()))
+    errors = list(result_validator.iter_errors(derive_urgency(vector["profile"], RULES_V1).as_dict()))
     assert not errors, errors
 
 
@@ -153,3 +155,31 @@ def test_rule_vectors_cover_every_review_priority():
 def test_under_review_relation_is_valid(validator):
     output = extraction(reporter_relation="UNDER_REVIEW", reporter_on_scene=None)
     assert not list(validator.iter_errors(output))
+
+
+@pytest.mark.parametrize("vector", load_cases(RULE_VECTORS_V2), ids=lambda v: v["id"])
+def test_urgency_rules_v2_match_vectors(vector):
+    assert derive_urgency(vector["profile"], RULES_V2).as_dict() == vector["expected"]
+
+
+@pytest.mark.parametrize("vector", load_cases(RULE_VECTORS_V2), ids=lambda v: v["id"])
+def test_v2_results_match_result_schema_v2(vector):
+    schema = load_json(RESULT_SCHEMA_V2)
+    Draft202012Validator.check_schema(schema)
+    result = derive_urgency(vector["profile"], RULES_V2).as_dict()
+    assert not list(Draft202012Validator(schema).iter_errors(result))
+
+
+def test_v2_differs_from_v1_only_on_other_conditions():
+    for vector in load_cases(RULE_VECTORS) + load_cases(RULE_VECTORS_V2):
+        profile = vector["profile"]
+        v1, v2 = derive_urgency(profile, RULES_V1), derive_urgency(profile, RULES_V2)
+        if not profile["other_conditions"]:
+            assert v1 == v2, vector["id"]
+        else:
+            assert v2.rule_urgency == "CRITICAL", vector["id"]
+
+
+def test_unknown_rules_version_is_rejected():
+    with pytest.raises(ValueError, match="unknown urgency rules"):
+        derive_urgency(EMPTY_PROFILE, "urgency-rules-v9")

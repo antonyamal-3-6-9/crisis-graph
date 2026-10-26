@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crisisgraph.local/schemas/urgency-result-v2.json",
+  "title": "CrisisGraph Derived Urgency V2",
+  "description": "Deterministic result of urgency-rules-v2 applied to a triage-extraction-v3 victim_profile. Produced by code, never by the model. review_priority orders the dispatcher review/callback queue and is set only when the final urgency is UNKNOWN. Under v2 any other_conditions entry is CRITICAL with OTHER_CONDITION_IMMEDIATE_REVIEW.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "urgency": {
+      "type": "string",
+      "enum": [
+        "CRITICAL",
+        "URGENT",
+        "UNKNOWN",
+        "STABLE"
+      ]
+    },
+    "rule_urgency": {
+      "type": "string",
+      "enum": [
+        "CRITICAL",
+        "URGENT",
+        "UNKNOWN",
+        "STABLE"
+      ]
+    },
+    "review_priority": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "OTHER_CONDITION_IMMEDIATE_REVIEW",
+          "SUGGESTED_URGENCY_RAISED",
+          "SUGGESTED_URGENCY_LOWER_IGNORED",
+          "UNKNOWN_REVIEW_REQUIRED"
+        ]
+      }
+    }
+  },
+  "required": [
+    "urgency",
+    "rule_urgency",
+    "review_priority",
+    "flags"
+  ],
+  "if": {
+    "properties": {
+      "urgency": {
+        "const": "UNKNOWN"
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "review_priority": {
+        "type": "string"
+      },
+      "flags": {
+        "contains": {
+          "const": "UNKNOWN_REVIEW_REQUIRED"
+        }
+      }
+    }
+  },
+  "else": {
+    "properties": {
+      "review_priority": {
+        "type": "null"
+      },
+      "flags": {
+        "not": {
+          "contains": {
+            "const": "UNKNOWN_REVIEW_REQUIRED"
+          }
+        }
+      }
+    }
+  }
+}

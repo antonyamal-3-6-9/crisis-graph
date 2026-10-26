@@ -41,8 +41,10 @@ def model_server(transform=lambda case, output: output, adapters=()):
 def args(tmp_path):
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("test prompt")
+    # The gap tests below are about urgency-rules-v1; v2 is checked separately.
     return parse_args(
-        ["--dataset", str(DEV_SET), "--prompt", str(prompt), "--output", str(tmp_path / "run.json")]
+        ["--dataset", str(DEV_SET), "--prompt", str(prompt), "--output", str(tmp_path / "run.json"),
+         "--rules", "urgency-rules-v1"]
     )
 
 
@@ -177,3 +179,26 @@ def test_waived_check_is_reported_but_not_counted(args):
     assert gates["passed"] is True
     with pytest.raises(ValueError, match="unknown waived"):
         check_gates(report, report, 42, 1.0, 1.0, waived=frozenset({"latency"}))
+
+
+def test_rescore_under_v2_closes_the_other_condition_gap(args):
+    from crisisgraph_ml.triage_eval_v3 import rescore
+
+    report = asyncio.run(run(args, model_server()))
+    assert report["urgency_rules"] == "urgency-rules-v1"
+    v2 = rescore(report, DEV_SET, "urgency-rules-v2")
+    assert v2["urgency_rules"] == "urgency-rules-v2"
+    assert v2["profile"]["urgency"]["critical_under_triage_cases"] == []
+    assert v2["profile"]["urgency"]["oracle_under_triage_cases"] == []
+    # Same model outputs, so the V2 field scores are identical.
+    assert v2["v2_fields"] == report["v2_fields"]
+
+
+def test_rescore_rejects_a_different_dataset(args, tmp_path):
+    from crisisgraph_ml.triage_eval_v3 import rescore
+
+    report = asyncio.run(run(args, model_server()))
+    other = tmp_path / "other.jsonl"
+    other.write_text(DEV_SET.read_text() + "\n")
+    with pytest.raises(ValueError, match="dataset differs"):
+        rescore(report, other, "urgency-rules-v2")

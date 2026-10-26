@@ -79,6 +79,9 @@ documented experiment decision.
   never edit in place, never use for training, fine-tuning, prompt tuning or
   generating training examples. Tests fail if the file, its generator
   (`crisisgraph_ml.triage_eval_v3_candidates`) or the contract files change.
+- `urgency-rules-v2.jsonl` — current urgency rules (any `other_conditions`
+  entry is CRITICAL with immediate review); `urgency-rules-v1.jsonl` is kept
+  unchanged to reproduce earlier results.
 - `urgency-rules-v1.jsonl` — hand-specified cases for the deterministic urgency
   rules, shared by the Python reference (`crisisgraph_ml.urgency`) and the Rust
   implementation.
