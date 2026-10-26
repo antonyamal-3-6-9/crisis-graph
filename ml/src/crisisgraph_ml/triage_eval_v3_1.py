@@ -64,7 +64,9 @@ def sha256(path: Path) -> str:
 
 
 def ngrams(text: str, n: int = 5) -> set[tuple[str, ...]]:
-    words = re.findall(r"\w+", text.casefold())
+    # Words are runs of letters, digits and combining marks: Malayalam vowel signs
+    # (Mn/Mc) are not \w, so a plain \w+ split would cut words into letters.
+    words = re.findall(r"[\w\u0300-\u036f\u0d00-\u0d7f]+", text.casefold())
     return {tuple(words[i : i + n]) for i in range(len(words) - n + 1)}
 
 
@@ -147,9 +149,14 @@ def other_texts() -> tuple[set[str], set[str]]:
     return inputs, {p.casefold() for p in places if p}
 
 
+# Between datasets, short shared phrases ("and the water is rising") are normal
+# flood language, not copying; a shared 8-word run is treated as reuse.
+DATASET_NGRAM = 8
+
+
 def separation_problems(cases: list[dict[str, Any]]) -> list[str]:
     inputs, places = other_texts()
-    other_grams = set().union(*(ngrams(text) for text in inputs))
+    other_grams = set().union(*(ngrams(text, DATASET_NGRAM) for text in inputs))
     problems = []
     for case in cases:
         if case["input"] in inputs:
@@ -157,7 +164,7 @@ def separation_problems(cases: list[dict[str, Any]]) -> list[str]:
         place = (case["expected"]["victim_location"] or "").casefold()
         if place and place in places:
             problems.append(f"{case['id']}: place reused: {place}")
-        shared = ngrams(case["input"]) & other_grams
+        shared = ngrams(case["input"], DATASET_NGRAM) & other_grams
         if shared:
             problems.append(f"{case['id']}: shares wording {sorted(shared)[:2]}")
     return problems

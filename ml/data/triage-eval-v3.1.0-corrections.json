@@ -1,0 +1,6 @@
+{
+  "v3.1-test-052": {
+    "input": "My younger brother is epileptic and his medicine box floated off when the water came in. No seizure so far today. 3 of us at the Pazhanganad church hall.",
+    "reason": "Separation: the original shared an 8-word sequence with v3-test-052 (v3.0.1). Reworded; labels unchanged."
+  }
+}

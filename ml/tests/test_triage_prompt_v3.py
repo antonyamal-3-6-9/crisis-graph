@@ -43,7 +43,9 @@ def test_prompt_examples_do_not_leak_evaluation_cases():
 
 
 def ngrams(text: str, n: int = 5) -> set[tuple[str, ...]]:
-    words = re.findall(r"\w+", text.casefold())
+    # Words are runs of letters, digits and combining marks: Malayalam vowel signs
+    # (Mn/Mc) are not \w, so a plain \w+ split would cut words into letters.
+    words = re.findall(r"[\w\u0300-\u036f\u0d00-\u0d7f]+", text.casefold())
     return {tuple(words[i : i + n]) for i in range(len(words) - n + 1)}
 
 
