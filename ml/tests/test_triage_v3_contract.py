@@ -8,6 +8,7 @@ from crisisgraph_ml.urgency import (
     RULES_V1,
     RULES_V2,
     RULES_V3,
+    RULES_V4,
     derive_urgency,
 )
 
@@ -17,6 +18,7 @@ RULE_VECTORS = ML_ROOT / "data" / "urgency-rules-v1.jsonl"
 RESULT_SCHEMA = ML_ROOT.parent / "schemas" / "urgency-result-v1.json"
 RULE_VECTORS_V2 = ML_ROOT / "data" / "urgency-rules-v2.jsonl"
 RULE_VECTORS_V3 = ML_ROOT / "data" / "urgency-rules-v3.jsonl"
+RULE_VECTORS_V4 = ML_ROOT / "data" / "urgency-rules-v4.jsonl"
 RESULT_SCHEMA_V2 = ML_ROOT.parent / "schemas" / "urgency-result-v2.json"
 
 EMPTY_PROFILE = {
@@ -209,3 +211,19 @@ def test_v3_differs_from_v2_only_for_vulnerable_people_in_chest_deep_water():
             assert v2 == v3, vector["id"]
         else:
             assert v3.rule_urgency == "CRITICAL", vector["id"]
+
+
+@pytest.mark.parametrize("vector", load_cases(RULE_VECTORS_V4), ids=lambda v: v["id"])
+def test_urgency_rules_v4_match_vectors(vector):
+    assert derive_urgency(vector["profile"], RULES_V4).as_dict() == vector["expected"]
+
+
+def test_v4_differs_from_v3_only_for_children_in_chest_deep_water():
+    deep = {"CHEST", "ABOVE_HEAD", "ROOF"}
+    for vector in load_cases(RULE_VECTORS_V3) + load_cases(RULE_VECTORS_V4):
+        profile = vector["profile"]
+        v3, v4 = derive_urgency(profile, RULES_V3), derive_urgency(profile, RULES_V4)
+        if "CHILD" in profile["vulnerable_groups"] and profile["water_level"] in deep:
+            assert v4.rule_urgency == "CRITICAL", vector["id"]
+        else:
+            assert v3 == v4, vector["id"]

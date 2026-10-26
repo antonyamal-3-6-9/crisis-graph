@@ -33,6 +33,10 @@ urgency-rules-v3 (owner decision, 2026-10-26) adds: a low-mobility group
 is CRITICAL even when the water is not rising (blind test set review: an
 elderly mother and a pregnant woman in chest-deep water). v1 and v2 are kept.
 
+urgency-rules-v4 (owner decision, 2026-10-27) adds CHILD with water at CHEST
+or above: about 4 ft is at a child's chin or neck (SFT-V4 training review).
+INFANT was already covered by v3's low-mobility rule. v1–v3 are kept.
+
 When the result is still UNKNOWN (rule and final urgency both UNKNOWN), the
 case gets ``UNKNOWN_REVIEW_REQUIRED`` and a ``review_priority`` that orders the
 dispatcher review/callback queue. UNKNOWN never has medical or other
@@ -54,8 +58,9 @@ from typing import Any
 RULES_V1 = "urgency-rules-v1"
 RULES_V2 = "urgency-rules-v2"
 RULES_V3 = "urgency-rules-v3"
-RULES_VERSION = RULES_V3  # current rules
-RULE_VERSIONS = (RULES_V1, RULES_V2, RULES_V3)
+RULES_V4 = "urgency-rules-v4"
+RULES_VERSION = RULES_V4  # current rules
+RULE_VERSIONS = (RULES_V1, RULES_V2, RULES_V3, RULES_V4)
 
 WATER_ORDER = ("ANKLE", "KNEE", "WAIST", "CHEST", "ABOVE_HEAD", "ROOF")
 CRITICAL_CONDITIONS = frozenset({"UNCONSCIOUS", "BREATHING_DIFFICULTY", "CARDIAC", "BLEEDING"})
@@ -114,10 +119,11 @@ def rule_urgency(profile: dict[str, Any], rules: str = RULES_VERSION) -> str:
         or (groups & LOW_MOBILITY_GROUPS and _water_at_least(water, "WAIST") and rising)
         or (rules != RULES_V1 and other)
         or (
-            rules == RULES_V3
+            rules in (RULES_V3, RULES_V4)
             and groups & (LOW_MOBILITY_GROUPS | {"PREGNANT"})
             and _water_at_least(water, "CHEST")
         )
+        or (rules == RULES_V4 and "CHILD" in groups and _water_at_least(water, "CHEST"))
     ):
         return "CRITICAL"
     if (

@@ -84,11 +84,11 @@ documented experiment decision.
   later dataset.
 - `triage-annotation-guidelines-v3.2-changes.md` — rules decided after the v3.1.0
   freeze (coordinator "we have N people" phrasing, "cannot walk without help").
-- `urgency-rules-v3.jsonl` — current urgency rules: v2 (any `other_conditions`
-  entry is CRITICAL with immediate review) plus a low-mobility group or a
-  pregnant woman with water at chest level or above is CRITICAL.
-  `urgency-rules-v1.jsonl` and `urgency-rules-v2.jsonl` are kept unchanged to
-  reproduce earlier results.
+- `urgency-rules-v4.jsonl` — current urgency rules: v3 plus a child with water at
+  chest level or above is CRITICAL. v3 = v2 (any `other_conditions` entry is
+  CRITICAL with immediate review) plus a low-mobility group or a pregnant woman
+  with water at chest level or above. v1–v3 are kept unchanged to reproduce
+  earlier results.
 - `triage-eval-v3.1.0.jsonl` — the **frozen blind** V3 test set for SFT-V4 (frozen
   2026-10-26): drafted by a zero-context agent, AI-reviewed, owner-approved.
   The agent's draft (`-candidates.jsonl`) is unchanged; every change is in

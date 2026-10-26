@@ -31,6 +31,9 @@ EVAL_SETS = [
     DATA / "triage-eval-v3.1.0.jsonl",
 ]
 
+# Batches that passed the AI first pass and the owner review.
+OWNER_REVIEWED_BATCHES = {1}
+
 SELF = {"relation": "SELF", "on_scene": True}
 REMOTE_FAMILY = {"relation": "HOUSEHOLD", "on_scene": False}
 BYSTANDER = {"relation": "THIRD_PARTY", "on_scene": True}
@@ -105,7 +108,8 @@ def rec(
         "batch": batch,
         "failure_type": failure_type,
         "language": language,
-        "reviewer_status": "pending_manual_review",
+        "reviewer_status": "reviewed" if batch in OWNER_REVIEWED_BATCHES
+        else "pending_manual_review",
         "input": text,
         "target": target,
         "expected_urgency": gold,
@@ -117,7 +121,14 @@ def h(road: str | None, status: str | None, hours: int | None) -> dict[str, Any]
 
 
 def batch_1() -> list[dict[str, Any]]:
-    """T1 water described by the building; T2 ranges, units and band edges."""
+    """T1 water described by the building; T2 ranges, units and band edges.
+
+    Owner policy (batch 1 review): a fully submerged ground floor is CRITICAL
+    even with people safe upstairs, because it means about 3 m of water around
+    the house, no way out except by boat and one storey of headroom. About
+    2 ft (60 cm, thigh-deep) with healthy adults is STABLE in gold, although
+    the band rule labels it WAIST; that is accepted over-triage by the rules.
+    """
     def r(n, ft, lang, text, **kw):
         return rec(n, 1, ft, lang, text, **kw)
 
@@ -217,7 +228,7 @@ def batch_1() -> list[dict[str, Any]]:
           water="KNEE", trend="STABLE", **SELF),
         r(24, "T2", "en", "We have about 2 feet of water in the house now. 4 adults at Thottumkara "
           "bus stop, all fine.",
-          location="Thottumkara bus stop", headcount=4, asset=None, gold="URGENT",
+          location="Thottumkara bus stop", headcount=4, asset=None, gold="STABLE",
           water="WAIST", **SELF),
         r(25, "T2", "en", "Water is 3.5 feet in our hall. Three of us at Chirakkal temple. "
           "Need a rescue boat.",
@@ -229,15 +240,15 @@ def batch_1() -> list[dict[str, Any]]:
           water="ABOVE_HEAD", **SELF),
         r(27, "T2", "en", "The water level is 0.6 metres in the house at Edakkattuvayal and "
           "steady. 5 adults. Please send an evacuation truck.",
-          location="Edakkattuvayal", headcount=5, asset="EVAC_TRUCK", gold="URGENT",
+          location="Edakkattuvayal", headcount=5, asset="EVAC_TRUCK", gold="STABLE",
           water="WAIST", trend="STABLE"),
         r(28, "T2", "en", "Water is around 1.5 m deep at Kanjirakkad junction. Two people are on "
           "the bus shelter roof. Send a boat.",
           location="Kanjirakkad junction", headcount=2, asset="RESCUE_BOAT", gold="CRITICAL",
-          other=["stranded on a roof"], water="ROOF"),
+          other=["stranded on a roof"], water="ABOVE_HEAD"),  # stated depth; not a house roof
         r(29, "T2", "en", "There is 1 to 2 feet of water in the house at Mangattu junction. We are "
           "3 adults and not hurt.",
-          location="Mangattu junction", headcount=3, asset=None, gold="URGENT",
+          location="Mangattu junction", headcount=3, asset=None, gold="STABLE",
           water="WAIST", **SELF),
         r(30, "T2", "en", "Water between 4 and 6 feet near Cheruvallikkavu temple, rising. Family "
           "of five on the first floor. Need a boat.",
@@ -250,7 +261,7 @@ def batch_1() -> list[dict[str, Any]]:
         r(32, "T2", "en", "Water is just under a foot in the courtyard of Puthiyakavu temple. "
           "6 devotees want to leave. Evacuation truck please.",
           location="Puthiyakavu temple", headcount=6, asset="EVAC_TRUCK", gold="STABLE",
-          water="ANKLE"),
+          water="KNEE"),  # "just under a foot": "nearly" is ignored, so 1 ft
         r(33, "T2", "en", "My grandmother is at home alone near Valiyaparambu church. Her neighbour "
           "says the water is 1.1 metres inside. I am in Chennai.",
           location="Valiyaparambu church", headcount=1, asset=None, gold="CRITICAL",
@@ -261,7 +272,7 @@ def batch_1() -> list[dict[str, Any]]:
           water="KNEE", **SELF),
         r(35, "T2", "ml", "വീട്ടിൽ രണ്ടടി വെള്ളമുണ്ട്. ഞങ്ങൾ നാലുപേർ, ആർക്കും പ്രശ്നമില്ല. "
           "തെക്കേക്കര ലൈബ്രറിക്ക് അടുത്ത്.",
-          location="തെക്കേക്കര ലൈബ്രറി", headcount=4, asset=None, gold="URGENT",
+          location="തെക്കേക്കര ലൈബ്രറി", headcount=4, asset=None, gold="STABLE",
           water="WAIST", **SELF),
         r(36, "T2", "ml", "നാലടി വെള്ളം കയറി, കൂടിക്കൊണ്ടിരിക്കുന്നു. ഞങ്ങൾ മൂന്നുപേർ പുത്തൻവിള "
           "സ്കൂളിന് സമീപം. ബോട്ട് വേണം.",
@@ -288,7 +299,7 @@ def batch_1() -> list[dict[str, Any]]:
           water="CHEST", **SELF),
         r(42, "T2", "manglish", "Randadi vellam und veettil, koodunnilla. Njangal 3 per Mullassery "
           "school il. Truck venam.",
-          location="Mullassery school", headcount=3, asset="EVAC_TRUCK", gold="URGENT",
+          location="Mullassery school", headcount=3, asset="EVAC_TRUCK", gold="STABLE",
           water="WAIST", trend="STABLE", **SELF),
         r(43, "T2", "manglish", "Naaladi vellam, vegam koodunnu! Njangal 4 per, athil oru kunju, 2 "
           "vayassu. Varikkattu junction. Boat venam.",

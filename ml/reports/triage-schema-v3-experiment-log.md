@@ -293,3 +293,19 @@ labels after seeing results would move the goalposts.
   or a pregnant woman in chest-deep or deeper water CRITICAL. Under v3 the
   rules never rate a v3.1.0 gold label lower (oracle ceiling 0; 15 accepted
   over-triage cases).
+
+## 7. SFT-V4 training data (2026-10-26 → 27)
+
+- **Conversion:** all 372 SFT-V3 records converted to V3 targets (messages and V2
+  labels unchanged, tested). Owner review set the twelve "We have N people who
+  need …" rows to an unknown reporter (coordinator phrasing, guideline change 5)
+  and aligned t273 with test case 105; only 8 converted records keep profile
+  facts, so the new set grows to ~290 training records to keep ~50% profile-rich.
+- **Batch 1 (50, water T1–T2):** AI first pass caught coordinator phrasing, a
+  roof-convention slip, a river-gauge reading treated as depth, and ambiguous
+  Manglish headcounts. Owner review then set about-2-ft-with-healthy-adults
+  to gold STABLE (rule over-triage accepted), "just under a foot" to KNEE, a
+  bus-shelter roof with stated depth to ABOVE_HEAD, and confirmed "ground floor
+  submerged → CRITICAL" on its own merits.
+- **urgency-rules-v4:** a child in chest-deep or deeper water is CRITICAL (from
+  the batch 1 review). No change on v3.1.0: rules still never below gold.
