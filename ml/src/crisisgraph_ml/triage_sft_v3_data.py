@@ -201,10 +201,15 @@ def validation_rows() -> list[dict[str, Any]]:
     return r
 
 
+# Files that are deliberate derivatives of these V3 records (same inputs,
+# new targets), so they are not independent references for overlap checks.
+DERIVED_FROM_V3 = ("triage-sft-v4-converted-candidates.jsonl",)
+
+
 def reference_rows() -> list[dict[str, Any]]:
     rows = []
     for path in sorted(DATA.glob("*.jsonl")):
-        if path not in OUTPUTS.values():
+        if path not in OUTPUTS.values() and path.name not in DERIVED_FROM_V3:
             rows.extend(load_cases(path))
     return rows
 

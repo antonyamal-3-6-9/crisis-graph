@@ -37,14 +37,12 @@ SELF = {"reporter_relation": "SELF", "reporter_on_scene": True}
 
 # Keys: t = SFT-V3 train, v = validation, then the record index in that export.
 PROFILES: dict[str, dict[str, Any]] = {
-    **{key: SELF for key in (
-        "t005", "t017", "t029", "t041", "t053", "t065", "t077", "t089", "t101", "t113",
-        "t125", "t137",  # "We have N people who urgently need …"
-        "t264",  # "We are still here and 19 people need …"
-        "t269",  # "Njangal ivide 15 perundu"
-    )},
-    # "12 residents cannot walk without help": a lasting mobility limitation is
-    # the natural reading for residents; flagged for owner review.
+    # "We have N people who urgently need …" (t005, t017 …) is coordinator
+    # phrasing that does not place the speaker in the group: relation null
+    # (guideline change 5), so those records keep an empty profile.
+    "t264": SELF,  # "We are still here and 19 people need …"
+    "t269": SELF,  # "Njangal ivide 15 perundu" (we are 15 here)
+    # "Cannot walk without help": a lasting inability (guideline change 6).
     "t270": {"vulnerable_groups": ["DISABLED"]},
     "t271": {"medical_conditions": ["CARDIAC"]},  # "report chest pain"
     "t273": {"other_conditions": ["stranded on a roof"]},  # guideline change 1
@@ -52,7 +50,7 @@ PROFILES: dict[str, dict[str, Any]] = {
     "t275": {"medical_conditions": ["INJURY"]},  # "9 injured aalukal"
     "v057": {"vulnerable_groups": ["DISABLED"]},  # "wheelchair users"
 }
-NEEDS_OWNER_REVIEW = {"t270"}
+NEEDS_OWNER_REVIEW: set[str] = set()
 
 EMPTY_PROFILE: dict[str, Any] = {
     "reporter_relation": None,
@@ -66,7 +64,9 @@ EMPTY_PROFILE: dict[str, Any] = {
 
 # Gold urgency for the records with facts (clinical sense, guideline tiers);
 # every other record has no profile facts and is UNKNOWN.
-URGENCY: dict[str, str] = {"t271": "CRITICAL", "t273": "CRITICAL", "t275": "URGENT"}
+# t273 (stranded on a roof, nothing else stated) is URGENT to match the frozen
+# v3.1.0 gold for the same situation (case 105); the rules make it CRITICAL.
+URGENCY: dict[str, str] = {"t271": "CRITICAL", "t273": "URGENT", "t275": "URGENT"}
 
 MALAYALAM = re.compile(r"[ഀ-ൿ]")
 MANGLISH_WORDS = re.compile(

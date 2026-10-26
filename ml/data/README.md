@@ -82,6 +82,8 @@ documented experiment decision.
 - `triage-annotation-guidelines-v3.1-changes.md` — labelling rules decided after
   the v3.0.1 freeze (e.g. people stranded on a roof); they apply to every
   later dataset.
+- `triage-annotation-guidelines-v3.2-changes.md` — rules decided after the v3.1.0
+  freeze (coordinator "we have N people" phrasing, "cannot walk without help").
 - `urgency-rules-v3.jsonl` — current urgency rules: v2 (any `other_conditions`
   entry is CRITICAL with immediate review) plus a low-mobility group or a
   pregnant woman with water at chest level or above is CRITICAL.
