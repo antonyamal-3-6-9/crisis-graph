@@ -50,7 +50,7 @@ scenarios; no test-set wording, places or case structure is reused.
 
 | Split | Existing, converted | New | Total |
 |---|---|---|---|
-| Train | 300 (all SFT-V3 train records) | ~230 | **~530** |
+| Train | 300 (all SFT-V3 train records) | ~260 | **~560** |
 | Validation | 72 (all SFT-V3 validation records) | ~30 | **~100** |
 
 **Conversion of existing records.** The message and every V2 label stay
@@ -58,7 +58,7 @@ exactly as reviewed. The system prompt is replaced with prompt v3.2 (option
 a: train and serve with the same prompt). The output becomes
 `triage-extraction-v3`, with `victim_profile` last. Profile labels are added
 under the V3 guideline plus `triage-annotation-guidelines-v3.1-changes.md`.
-About 35 of the 300 have profile facts; the rest get an empty profile.
+Reading all 372 found only **19 train and 1 validation** records with profile facts (the SFT-V3 data is mostly templated dispatch text); the rest get an empty profile. To keep at least 50% of training records profile-rich, the new set grows from ~230 to **~260** ((19 + 260) / 560 ≈ 50%). (Revised 2026-10-26.)
 
 **New records.** Profile-rich, built around T1–T13. Targets:
 
