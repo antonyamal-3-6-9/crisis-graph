@@ -22,6 +22,7 @@ import asyncio
 import hashlib
 import json
 import math
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -376,12 +377,19 @@ async def run(args: argparse.Namespace, transport: httpx.AsyncBaseTransport | No
             raise ValueError("Checkpoint order differs from dataset")
 
     semaphore = asyncio.Semaphore(1)
-    async with httpx.AsyncClient(timeout=httpx.Timeout(args.timeout), transport=transport) as client:
+    headers = {}
+    if args.api_key_env:
+        key = os.environ.get(args.api_key_env)
+        if not key:
+            raise SystemExit(f"environment variable {args.api_key_env} is not set")
+        headers["Authorization"] = f"Bearer {key}"
+
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(args.timeout), transport=transport, headers=headers
+    ) as client:
         for case in cases[len(results):]:
-            result = await evaluate_case(
-                client, semaphore, case, args.backend, args.base_url, args.model, prompt,
-                schema, validator, args.max_tokens,
-            )
+            result = await evaluate_with_retry(client, semaphore, case, args, prompt, schema,
+                                               validator)
             with checkpoint.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
             results.append(result)
@@ -391,6 +399,37 @@ async def run(args: argparse.Namespace, transport: httpx.AsyncBaseTransport | No
     report = summarize_v3(results, cases, identity, args.rules)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return report
+
+
+TRANSIENT = ("429", "500", "502", "503", "504", "timed out", "Timeout")
+
+
+def is_transient(error: str | None) -> bool:
+    """API-side failures (rate limit, overload, timeout), not model failures."""
+    return error is not None and any(marker in error for marker in TRANSIENT)
+
+
+async def evaluate_with_retry(client, semaphore, case, args, prompt, schema, validator):
+    """Pace requests and retry transient API errors with backoff.
+
+    A transient error is never recorded as a model result: after the last
+    retry the run stops, and rerunning the same command resumes from the
+    checkpoint.
+    """
+    for attempt in range(args.max_retries + 1):
+        if args.min_interval:
+            await asyncio.sleep(args.min_interval)
+        result = await evaluate_case(
+            client, semaphore, case, args.backend, args.base_url, args.model, prompt,
+            schema, validator, args.max_tokens,
+        )
+        if not is_transient(result.error):
+            return result
+        wait = min(30 * 2**attempt, 600)
+        print(f"  transient error on {case['id']} (attempt {attempt + 1}): "
+              f"{result.error[:120]}; waiting {wait}s", flush=True)
+        await asyncio.sleep(wait)
+    raise SystemExit(f"API still failing on {case['id']}; rerun the same command to resume")
 
 
 def headline(report: dict[str, Any]) -> dict[str, Any]:
@@ -412,7 +451,12 @@ def headline(report: dict[str, Any]) -> dict[str, Any]:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate CrisisGraph triage extraction V3")
-    parser.add_argument("--backend", choices=("llama-cpp", "vllm"), default="llama-cpp")
+    parser.add_argument("--backend", choices=("llama-cpp", "vllm", "openai"), default="llama-cpp")
+    parser.add_argument("--api-key-env", default=None,
+                        help="environment variable holding the API key (never logged)")
+    parser.add_argument("--min-interval", type=float, default=0.0,
+                        help="seconds to wait before each request (rate limits)")
+    parser.add_argument("--max-retries", type=int, default=5)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--model", default="Qwen/Qwen3-4B-Instruct-2507")
     parser.add_argument("--adapter", default="none",

@@ -202,3 +202,61 @@ def test_rescore_rejects_a_different_dataset(args, tmp_path):
     other.write_text(DEV_SET.read_text() + "\n")
     with pytest.raises(ValueError, match="dataset differs"):
         rescore(report, other, "urgency-rules-v2")
+
+
+def test_transient_api_errors_are_retried_not_recorded(args, monkeypatch):
+    import crisisgraph_ml.triage_eval_v3 as module
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(module.asyncio, "sleep", no_sleep)
+    inner = model_server()
+    calls = {"n": 0}
+
+    def flaky(request):
+        if request.url.path != "/lora-adapters":
+            calls["n"] += 1
+            if calls["n"] % 3 == 1:
+                return httpx.Response(503, json={"error": "high demand"})
+        return inner.handle_request(request)
+
+    report = asyncio.run(run(args, httpx.MockTransport(flaky)))
+    assert report["profile"]["usable_outputs"] == 42
+    assert report["v2_fields"]["error_count"] == 0
+
+
+def test_persistent_api_errors_stop_the_run_for_resume(args, monkeypatch):
+    import crisisgraph_ml.triage_eval_v3 as module
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(module.asyncio, "sleep", no_sleep)
+    inner = model_server()
+
+    def down(request):
+        if request.url.path == "/lora-adapters":
+            return inner.handle_request(request)
+        return httpx.Response(429, json={"error": "quota"})
+
+    with pytest.raises(SystemExit, match="resume"):
+        asyncio.run(run(args, httpx.MockTransport(down)))
+    assert not args.output.with_suffix(".checkpoint.jsonl").exists() or not (
+        args.output.with_suffix(".checkpoint.jsonl").read_text().strip()
+    )
+
+
+def test_api_key_is_sent_but_not_recorded(args, monkeypatch):
+    monkeypatch.setenv("TEST_API_KEY", "secret-value")
+    args.api_key_env = "TEST_API_KEY"
+    seen = []
+    inner = model_server()
+
+    def capture(request):
+        seen.append(request.headers.get("authorization"))
+        return inner.handle_request(request)
+
+    report = asyncio.run(run(args, httpx.MockTransport(capture)))
+    assert "Bearer secret-value" in seen
+    assert "secret-value" not in json.dumps(report)

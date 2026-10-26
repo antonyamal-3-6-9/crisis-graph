@@ -165,7 +165,8 @@ def request_payload(
         "temperature": 0.0,
         "max_tokens": max_tokens,
     }
-    if backend == "llama-cpp":
+    # "openai": any OpenAI-compatible API with json_schema output (e.g. Gemini).
+    if backend in ("llama-cpp", "openai"):
         payload["response_format"] = {
             "type": "json_schema",
             "json_schema": {
