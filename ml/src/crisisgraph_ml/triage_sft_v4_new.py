@@ -622,13 +622,18 @@ NOTES = {
     "sft-v4-new-b2-029": "Postpartum bleeding. The newborn is INFANT; the mother is no longer "
     "PREGNANT.",
     "sft-v4-new-b2-030": "Told by phone, but the reporter's own position is not stated: "
-    "on_scene null.",
-    "sft-v4-new-b2-032": "Minor cut that has stopped bleeding, knee-deep water, adults: "
-    "INJURY only; gold STABLE (safe for now). Owner check: STABLE or URGENT?",
+    "on_scene null. Nosebleed that will not stop: BLEEDING. Owner check: gold CRITICAL or "
+    "URGENT? (AI review: rarely life-threatening within an hour.)",
+    "sft-v4-new-b2-032": "Minor cut that has stopped bleeding, knee-deep water, nothing else "
+    "wrong: INJURY only; gold STABLE (safe for now). Owner check: STABLE or URGENT?",
+    "sft-v4-new-b2-031": "Glass in the foot, blood flowing, no 'won't stop'. Owner check: gold "
+    "CRITICAL or URGENT?",
     "sft-v4-new-b2-034": "Missed dialysis, weak but conscious: CHRONIC_CARE, not UNCONSCIOUS.",
     "sft-v4-new-b2-035": "Suspected snakebite counts (guideline change 3).",
     "sft-v4-new-b2-036": "Labour: gold URGENT; the rules make any other_conditions entry "
     "CRITICAL (accepted over-triage, rules v2).",
+    "sft-v4-new-b2-037": "Shock just now, talking: kept as a current condition (not resolved; "
+    "delayed heart-rhythm risk, live wire still in the water).",
     "sft-v4-new-b2-039": "Fast-rising knee-deep water: gold URGENT; the rules cannot prove "
     "STABLE while rising, so UNKNOWN.",
     "sft-v4-new-b2-042": "'If the water keeps rising' is hypothetical: trend null, and not "
@@ -637,7 +642,8 @@ NOTES = {
     "sft-v4-new-b2-044": "'My brother says': the reporter's position is not stated, so "
     "on_scene null.",
     "sft-v4-new-b2-045": "Bedridden father, 3 ft and falling: gold URGENT; the rules make "
-    "BEDRIDDEN with water at WAIST CRITICAL. Owner check: URGENT or CRITICAL?",
+    "BEDRIDDEN with water at WAIST CRITICAL. Owner check: URGENT or CRITICAL? (AI review: "
+    "CRITICAL, a person who cannot be moved in 0.9 m of water can drown.)",
     "sft-v4-new-b2-048": "Water coming up through the drains is ongoing entry: RISING "
     "(guideline change 4).",
     "sft-v4-new-b2-054": "'If the water rises' is hypothetical: trend null.",

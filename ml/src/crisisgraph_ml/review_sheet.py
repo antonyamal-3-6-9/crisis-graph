@@ -34,10 +34,9 @@ def v2_cell(expected: dict[str, Any]) -> str:
         f"loc: {expected['victim_location']}<br>count: {expected['headcount']}"
         f"<br>asset: {expected['required_asset']}"
     )
-    if expected["hazards"]:
-        cell += "<br>hazards: " + "; ".join(
-            f"{h['road_segment']} {h['status']} {h['duration_hours']}" for h in expected["hazards"]
-        )
+    cell += "<br>hazards: " + ("; ".join(
+        f"{h['road_segment']} {h['status']} {h['duration_hours']}" for h in expected["hazards"]
+    ) or "none")
     return cell + f"<br>review: {expected['needs_human_review']}"
 
 
