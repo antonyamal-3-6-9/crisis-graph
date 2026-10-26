@@ -236,3 +236,29 @@ runs re-scored from saved outputs. Adapter critical under-triage 9 → 5, base
 8 → 7; over-triage up by about 4 each. Remaining adapter misses: 085 (roof
 rule) and four extraction gaps (028, 065, 067, 068). One fix (070) was an
 accident of the model's own mistake. Details in the evaluation addendum.
+
+### Frontier reference check: Gemini (2026-10-26, dev set only, partial)
+
+Owner request: compare a frontier model against Qwen3-4B on the same prompt
+(v3.2) and schema, through Gemini's OpenAI-compatible API (`--backend openai`).
+`gemini-2.5-flash` is retired for new keys, `gemini-3.8-flash` was overloaded
+(503), so `gemini-3.5-flash` was used; the quota error named the model
+`gemini-3.6-flash`, so the alias may be served by a newer model. The free tier
+allows **20 requests per day per model**, so the run stopped after 14 of 42
+dev cases (checkpoint kept). The frozen test set was not sent: free-tier
+inputs may be used for Google's training, which would contaminate the
+benchmark.
+
+| First 14 dev cases | Gemini 3.5 Flash | Qwen3-4B + SFT-V3 |
+|---|---|---|
+| V2 fields exact | 14/14 | 9/14 |
+| Urgency matches gold (rules v2) | 13/14 | 13/14 |
+| Critical under-triage | 0 | 0 |
+| Cases with invented facts | 0 | 5 |
+| Reporter relation | 13/14 | 11/14 |
+| Median latency | 8.9 s (API) | 19.1 s (CPU) |
+
+Directional only (14 cases). Gemini's one miss was 005, the UNDER_REVIEW
+case. **Owner decision: stay with Qwen3-4B**, a local model; the frontier
+result shows the headroom a small model could approach with better training
+data.
