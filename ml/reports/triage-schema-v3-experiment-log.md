@@ -262,3 +262,13 @@ Directional only (14 cases). Gemini's one miss was 005, the UNDER_REVIEW
 case. **Owner decision: stay with Qwen3-4B**, a local model; the frontier
 result shows the headroom a small model could approach with better training
 data.
+
+### Roof rule (owner decision, 2026-10-26)
+
+People stranded on a roof or at height awaiting rescue get
+`other_conditions: ["stranded on a roof"]`, a stated situation with no inferred
+flood, which rules v2 makes CRITICAL with immediate review. Recorded in
+`data/triage-annotation-guidelines-v3.1-changes.md` because the main guideline
+is pinned by the v3.0.1 manifest; applies from the next dataset version.
+v3.0.1 is not relabelled: case 085 stays a documented gap, since changing
+labels after seeing results would move the goalposts.

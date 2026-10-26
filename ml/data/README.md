@@ -79,6 +79,9 @@ documented experiment decision.
   never edit in place, never use for training, fine-tuning, prompt tuning or
   generating training examples. Tests fail if the file, its generator
   (`crisisgraph_ml.triage_eval_v3_candidates`) or the contract files change.
+- `triage-annotation-guidelines-v3.1-changes.md` — labelling rules decided after
+  the v3.0.1 freeze (e.g. people stranded on a roof); they apply to every
+  later dataset.
 - `urgency-rules-v2.jsonl` — current urgency rules (any `other_conditions`
   entry is CRITICAL with immediate review); `urgency-rules-v1.jsonl` is kept
   unchanged to reproduce earlier results.
