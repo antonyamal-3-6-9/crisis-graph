@@ -2,13 +2,21 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from crisisgraph_ml.triage_eval import ML_ROOT, load_cases, load_json
-from crisisgraph_ml.urgency import RANK, RULES_V1, RULES_V2, derive_urgency
+from crisisgraph_ml.urgency import (
+    LOW_MOBILITY_GROUPS,
+    RANK,
+    RULES_V1,
+    RULES_V2,
+    RULES_V3,
+    derive_urgency,
+)
 
 SCHEMA_V3 = ML_ROOT.parent / "schemas" / "triage-extraction-v3.json"
 SCHEMA_V2 = ML_ROOT.parent / "schemas" / "triage-extraction-v2.json"
 RULE_VECTORS = ML_ROOT / "data" / "urgency-rules-v1.jsonl"
 RESULT_SCHEMA = ML_ROOT.parent / "schemas" / "urgency-result-v1.json"
 RULE_VECTORS_V2 = ML_ROOT / "data" / "urgency-rules-v2.jsonl"
+RULE_VECTORS_V3 = ML_ROOT / "data" / "urgency-rules-v3.jsonl"
 RESULT_SCHEMA_V2 = ML_ROOT.parent / "schemas" / "urgency-result-v2.json"
 
 EMPTY_PROFILE = {
@@ -183,3 +191,21 @@ def test_v2_differs_from_v1_only_on_other_conditions():
 def test_unknown_rules_version_is_rejected():
     with pytest.raises(ValueError, match="unknown urgency rules"):
         derive_urgency(EMPTY_PROFILE, "urgency-rules-v9")
+
+
+@pytest.mark.parametrize("vector", load_cases(RULE_VECTORS_V3), ids=lambda v: v["id"])
+def test_urgency_rules_v3_match_vectors(vector):
+    assert derive_urgency(vector["profile"], RULES_V3).as_dict() == vector["expected"]
+
+
+def test_v3_differs_from_v2_only_for_vulnerable_people_in_chest_deep_water():
+    deep = {"CHEST", "ABOVE_HEAD", "ROOF"}
+    for vector in load_cases(RULE_VECTORS_V2) + load_cases(RULE_VECTORS_V3):
+        profile = vector["profile"]
+        v2, v3 = derive_urgency(profile, RULES_V2), derive_urgency(profile, RULES_V3)
+        affected = (set(profile["vulnerable_groups"]) & (LOW_MOBILITY_GROUPS | {"PREGNANT"})
+                    and profile["water_level"] in deep)
+        if not affected:
+            assert v2 == v3, vector["id"]
+        else:
+            assert v3.rule_urgency == "CRITICAL", vector["id"]

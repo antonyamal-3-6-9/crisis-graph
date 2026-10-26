@@ -82,9 +82,16 @@ documented experiment decision.
 - `triage-annotation-guidelines-v3.1-changes.md` — labelling rules decided after
   the v3.0.1 freeze (e.g. people stranded on a roof); they apply to every
   later dataset.
-- `urgency-rules-v2.jsonl` — current urgency rules (any `other_conditions`
-  entry is CRITICAL with immediate review); `urgency-rules-v1.jsonl` is kept
-  unchanged to reproduce earlier results.
+- `urgency-rules-v3.jsonl` — current urgency rules: v2 (any `other_conditions`
+  entry is CRITICAL with immediate review) plus a low-mobility group or a
+  pregnant woman with water at chest level or above is CRITICAL.
+  `urgency-rules-v1.jsonl` and `urgency-rules-v2.jsonl` are kept unchanged to
+  reproduce earlier results.
+- `triage-eval-v3.1.0.jsonl` — the **frozen blind** V3 test set for SFT-V4 (frozen
+  2026-10-26): drafted by a zero-context agent, AI-reviewed, owner-approved.
+  The agent's draft (`-candidates.jsonl`) is unchanged; every change is in
+  `triage-eval-v3.1.0-corrections.json` with its reason. Manifest:
+  `triage-eval-v3.1.0.manifest.json`.
 - `urgency-rules-v1.jsonl` — hand-specified cases for the deterministic urgency
   rules, shared by the Python reference (`crisisgraph_ml.urgency`) and the Rust
   implementation.

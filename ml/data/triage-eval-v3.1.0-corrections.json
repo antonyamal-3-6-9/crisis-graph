@@ -2,5 +2,68 @@
   "v3.1-test-052": {
     "input": "My younger brother is epileptic and his medicine box floated off when the water came in. No seizure so far today. 3 of us at the Pazhanganad church hall.",
     "reason": "Separation: the original shared an 8-word sequence with v3-test-052 (v3.0.1). Reworded; labels unchanged."
+  },
+  "v3.1-test-045": {
+    "expected_urgency": "CRITICAL",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): shock from a downed live line with a burn: delayed arrhythmia risk, live line still in the water"
+  },
+  "v3.1-test-055": {
+    "expected_urgency": "CRITICAL",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): symptomatic near-drowning child (vomiting): aspiration and lung deterioration risk"
+  },
+  "v3.1-test-071": {
+    "expected_urgency": "CRITICAL",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): two people over 80 in a loft with water already above head height: trapped if it rises"
+  },
+  "v3.1-test-102": {
+    "expected_urgency": "URGENT",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): waist-deep water with no dry refuge stated is not safe for now"
+  },
+  "v3.1-test-109": {
+    "expected_urgency": "UNKNOWN",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): 'nobody is a patient' rules out medical issues, not danger; matches 088/108"
+  },
+  "v3.1-test-040": {
+    "expected.hazards": [
+      {
+        "road_segment": null,
+        "status": "FLOODED",
+        "duration_hours": null
+      }
+    ],
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): 'the area has been flooded since then' is an area-level hazard; 'since' is elapsed time, so duration null"
+  },
+  "v3.1-test-078": {
+    "expected.headcount": null,
+    "input": "വീട്ടിൽ പ്രായമുള്ള രണ്ടുപേരുണ്ട്. മഞ്ഞുമ്മൽ ജംഗ്ഷനിൽ നിന്ന് കിഴക്കോട്ട് ആദ്യത്തെ വീട്. മുട്ടോളം വെള്ളമുണ്ട്.",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): same structure as 074/090 (family at home, reporter possibly among them): count unsettled; reworded to remove the 'two-year-old people' reading and the echo of the guideline's own example"
+  },
+  "v3.1-test-077": {
+    "input": "Appooppan kidappilaanu. Vellam veettinakathu keri. Njangalude veedu Kuzhivelippady school nte opposite aanu. 3 per und. Boat venam.",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): reworded so it does not echo the guideline's UNDER_REVIEW example; labels unchanged"
+  },
+  "v3.1-test-084": {
+    "expected.victim_profile.water_trend": "RISING",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): 'water entering the classrooms' is an ongoing rise, labelled like 035/069/083"
+  },
+  "v3.1-test-090": {
+    "expected.victim_profile.water_trend": "RISING",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): 'vellam kayari thudangi' (water has started coming in) is an ongoing rise, labelled like 035/069/083"
+  },
+  "v3.1-test-049": {
+    "input": "Ente aniyan Periyar il ozhuki poyi! Kaprassery kadavu il ninnu. 10 minute aayi. Boat ayakku pls",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): language: 'ozhuki poyi' (was swept away), not 'ozhukki' (washed something away)"
+  },
+  "v3.1-test-027": {
+    "input": "Veedinte melkoora idinju veenu. Randu perkku chora varunnu, oralkku shwasam muttal. Thevakkal school nte aduthu, njangal 5 per und. Boat venam.",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): language: 'melkoora' for roof"
+  },
+  "v3.1-test-021": {
+    "input": "കൈക്കുഞ്ഞിന് ശ്വാസം കിട്ടുന്നില്ലെന്ന് തോന്നുന്നു, ചുണ്ട് നീലിച്ചിരിക്കുന്നു. മൂക്കന്നൂർ പള്ളിക്ക് അടുത്താണ് ഞങ്ങൾ. 3 പേർ. ആംബുലൻസ്.",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): language: more natural phrasing for blue lips"
+  },
+  "v3.1-test-025": {
+    "input": "ഞാൻ ഖത്തറിൽ നിന്നാണ് വിളിക്കുന്നത്. ഏഴിക്കര സെന്റ് ആന്റണീസ് പള്ളിക്ക് സമീപമുള്ള വീട്ടിൽ എന്റെ അച്ഛന് നെഞ്ചുവേദനയുണ്ട്. അമ്മയും കൂടെ ഉണ്ട്. ആംബുലൻസ് അയക്കാമോ?",
+    "reason": "Owner review 2026-10-26 (AI review pass accepted by owner): language: word order ('in the house near the church')"
   }
 }

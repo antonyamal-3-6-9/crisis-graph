@@ -1,0 +1,60 @@
+{
+  "dataset": "CrisisGraph Triage Eval V3.1",
+  "version": "3.1.0",
+  "artifact": "triage-eval-v3.1.0.jsonl",
+  "sha256": "cc67e434cb8edbd23c66eb2fc71aa576df7ba448bc3d9bb042581a25fc1e6cc8",
+  "record_count": 120,
+  "frozen_on": "2026-10-26",
+  "frozen_benchmark": true,
+  "reviewer_status": "reviewed",
+  "authoring": "Drafted by a zero-context annotator agent from the guidelines only (no access to other datasets or the urgency rules), before any SFT-V4 training data existed.",
+  "review": "Drafted by a zero-context annotator agent; reviewed in one pass by a second zero-context frontier model (AI review), whose 15 corrections the owner accepted and recorded in triage-eval-v3.1.0-corrections.json, plus owner decisions on suspected life-threatening conditions, ongoing water entry, and urgency-rules-v3. Not certified by a medical or emergency-services domain expert; Malayalam wording not verified by a second native speaker.",
+  "candidates_sha256": "5586bff08e02fb58b4bb3ba91a2452c861f5ce0cade5a0bb51b82b2b37b50149",
+  "corrections_sha256": "6af7a68fad01cf1f72b02e0bb2dbc32a79e9ba8dc26abefecef6c6e37b1a86ee",
+  "contract_sha256": {
+    "schema": "c9b3ed10855da712c544ecc998db0f841e250313e31ff6cec953932b759a1051",
+    "annotation_guidelines": "58f9017cfa65c6849c5af17b4a046e98e97140a02044f29d421f539b2bbf921a",
+    "annotation_guideline_changes": "d4bd7d94130d198fffe3b8cd03033d2af30876b52a2e8a7b0fc13b781a63da14",
+    "urgency_rules": "a9c4bb8b4441900a36d6a78b543c8132e013872ec59cc18f61770e17dd2ded0a"
+  },
+  "counts": {
+    "category": {
+      "medical_critical": 28,
+      "buried_adversarial": 14,
+      "medical_other": 14,
+      "vulnerable_water": 20,
+      "reporter_location": 16,
+      "negation_temporal": 12,
+      "stranded_height": 6,
+      "no_profile": 6,
+      "irrelevant": 4
+    },
+    "language": {
+      "en": 58,
+      "ml": 32,
+      "manglish": 30
+    },
+    "expected_urgency": {
+      "CRITICAL": 57,
+      "URGENT": 32,
+      "STABLE": 12,
+      "UNKNOWN": 19
+    }
+  },
+  "permitted_use": [
+    "final model evaluation",
+    "regression testing",
+    "cross-model comparison"
+  ],
+  "prohibited_use": [
+    "model training",
+    "fine-tuning",
+    "prompt tuning",
+    "training-example generation"
+  ],
+  "required_reporting": [
+    "overall",
+    "per category",
+    "per language"
+  ]
+}

@@ -55,7 +55,7 @@ CONTRACT_FILES = {
     "schema": ML_ROOT.parent / "schemas" / "triage-extraction-v3.json",
     "annotation_guidelines": DATA / "triage-annotation-guidelines.md",
     "annotation_guideline_changes": DATA / "triage-annotation-guidelines-v3.1-changes.md",
-    "urgency_rules": DATA / "urgency-rules-v2.jsonl",
+    "urgency_rules": DATA / "urgency-rules-v3.jsonl",
 }
 
 

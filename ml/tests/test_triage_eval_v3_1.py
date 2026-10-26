@@ -50,3 +50,27 @@ def test_candidates_are_valid_labels():
     from crisisgraph_ml.triage_eval_v3_dev import validate_cases
 
     validate_cases(load_cases(CANDIDATES))
+
+
+def test_frozen_set_matches_manifest_and_sources():
+    import json
+
+    from crisisgraph_ml.triage_eval import load_cases
+    from crisisgraph_ml.triage_eval_v3_1 import (
+        CONTRACT_FILES,
+        CORRECTIONS,
+        FROZEN,
+        MANIFEST,
+        reviewed_cases,
+        sha256,
+    )
+
+    manifest = json.loads(MANIFEST.read_text())
+    assert manifest["frozen_benchmark"] is True and manifest["version"] == "3.1.0"
+    assert sha256(FROZEN) == manifest["sha256"]
+    assert sha256(CANDIDATES) == manifest["candidates_sha256"]
+    assert sha256(CORRECTIONS) == manifest["corrections_sha256"]
+    for name, path in CONTRACT_FILES.items():
+        assert sha256(path) == manifest["contract_sha256"][name], name
+    # Any later change must be a new version, not a silent edit.
+    assert load_cases(FROZEN) == reviewed_cases()

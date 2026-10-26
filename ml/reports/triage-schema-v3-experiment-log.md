@@ -272,3 +272,24 @@ flood, which rules v2 makes CRITICAL with immediate review. Recorded in
 is pinned by the v3.0.1 manifest; applies from the next dataset version.
 v3.0.1 is not relabelled: case 085 stays a documented gap, since changing
 labels after seeing results would move the goalposts.
+
+## 6. SFT-V4 preparation (2026-10-26)
+
+- **Spec approved** (`data/triage-sft-v4-spec.md`): option (a), train and serve
+  with prompt v3.2; ~530 training records (300 converted SFT-V3 + ~230 new
+  profile-rich), ~100 validation; new blind test set built first.
+- **Blind test set v3.1.0 frozen** (120 cases, sha256 `cc67e434…`). Drafted by a
+  zero-context agent from the guidelines only (no access to other datasets or
+  the urgency rules); my coverage and separation checks pass. Building the
+  separation check found my own bug (Malayalam words split into letters by
+  `\w+`, also in the prompt leak test) and one near-copy sentence (case 052),
+  reworded after confirming the set was not derived from v3.0.1 (similarity at
+  chance level). A second zero-context frontier model reviewed it; the owner
+  accepted its 15 corrections (urgency judgements, an area hazard, rising-water
+  consistency, Malayalam/Manglish wording). Not domain-expert certified.
+- **Owner decisions from that review:** suspected life-threatening other
+  conditions count as present; water still coming in counts as RISING
+  (guideline changes 3 and 4); **urgency-rules-v3** makes a low-mobility group
+  or a pregnant woman in chest-deep or deeper water CRITICAL. Under v3 the
+  rules never rate a v3.1.0 gold label lower (oracle ceiling 0; 15 accepted
+  over-triage cases).

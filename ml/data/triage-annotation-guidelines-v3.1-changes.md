@@ -28,3 +28,20 @@ under-triaged under both rule versions.
 Gold `expected_urgency` labels are set independently of the rules and are
 unchanged. For reference, `urgency-rules-v2` makes any `other_conditions` entry
 CRITICAL (was URGENT in v1); see `urgency-rules-v2.jsonl`.
+
+## 3. Suspected life-threatening other conditions (owner decision, 2026-10-26)
+
+The safety asymmetry of principle 3 also applies to life-threatening situations
+outside the categories: a stated *suspicion* of snakebite, electric shock,
+drowning or near-drowning is labelled as present (e.g. "I think a snake bit
+him" → `other_conditions: ["suspected snakebite"]`). Missing one is far worse
+than an extra entry; under the urgency rules it is CRITICAL with immediate
+review.
+
+## 4. Water that is still coming in is RISING (owner decision, 2026-10-26)
+
+Ongoing entry of water counts as `water_trend: RISING`: "water entering",
+"still entering", "keeps coming in", "coming up", "vellam kayari varunnu",
+"vellam kayari thudangi", "വെള്ളം കയറിക്കൊണ്ടിരിക്കുന്നു". Completed entry
+stated in the past with no ongoing sense ("water entered the house last
+night") stays `null`.
