@@ -309,3 +309,9 @@ labels after seeing results would move the goalposts.
   submerged → CRITICAL" on its own merits.
 - **urgency-rules-v4:** a child in chest-deep or deeper water is CRITICAL (from
   the batch 1 review). No change on v3.1.0: rules still never below gold.
+- **Batch 2 (60, medical phrasing T3 and water trend T4):** 48 Malayalam /
+  Manglish and 12 English records. Each critical condition gets six or seven
+  native-language positives next to near misses (dizzy but talking, known
+  asthma or heart disease with no episode, a cut that stopped bleeding,
+  symptoms resolved earlier today). Trend records cover rising, falling,
+  unchanged and hypothetical wording. Pending AI first pass and owner review.
