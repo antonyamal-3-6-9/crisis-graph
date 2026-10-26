@@ -158,23 +158,23 @@ def batch_1() -> list[dict[str, Any]]:
           "stuck inside the market building and need an evacuation truck.",
           location="Ottaplamoodu market", headcount=12, asset="EVAC_TRUCK", gold="UNKNOWN",
           hazards=[h(None, "FLOODED", None)]),
-        r(10, "T1", "manglish", "Veettil vellam kayari, ethra und ennu ariyilla. Njangal 2 per "
-          "Panayil kadavu il aanu. Ammachi und koode.",
-          location="Panayil kadavu", headcount=2, asset=None, gold="UNKNOWN",
+        r(10, "T1", "manglish", "Veettil vellam kayari, ethra und ennu ariyilla. Njangal randu "
+          "perum ammachiyum aanu, Panayil kadavu il.",
+          location="Panayil kadavu", headcount=3, asset=None, gold="UNKNOWN",
           groups=["ELDERLY"], **SELF),
-        r(11, "T1", "ml", "വീട്ടിനുള്ളിൽ വെള്ളം കയറി, എത്ര ഉയരമുണ്ടെന്ന് പറയാൻ പറ്റുന്നില്ല. "
+        r(11, "T1", "ml", "വീടിനുള്ളിൽ വെള്ളം കയറി, എത്ര ഉയരമുണ്ടെന്ന് പറയാൻ പറ്റുന്നില്ല. "
           "ഞങ്ങൾ നാലുപേർ കണ്ണമ്പിള്ളി ഹാളിന് അടുത്താണ്.",
           location="കണ്ണമ്പിള്ളി ഹാൾ", headcount=4, asset=None, gold="UNKNOWN", **SELF),
         r(12, "T1", "en", "My parents are stuck in their single-storey house at Vazhayil colony. "
           "The water is now above the windows inside the house and still rising. I am in Pune.",
           location="Vazhayil colony", headcount=2, asset=None, gold="CRITICAL",
-          trend="RISING", **REMOTE_FAMILY),
+          water="ABOVE_HEAD", trend="RISING", **REMOTE_FAMILY),
         r(13, "T1", "en", "Ground floor fully flooded at Paduthode school, 40 people from the camp "
           "have moved to the first floor. No one is sick. We need boats to shift them.",
           location="Paduthode school", headcount=40, asset="RESCUE_BOAT", gold="CRITICAL",
-          water="ABOVE_HEAD", **SELF),
+          water="ABOVE_HEAD"),  # "shift them": coordinator, relation unknown (rule 5)
         r(14, "T1", "manglish", "Thazhathe nila full aayi mungi, vellam ippozhum koodunnu. "
-          "Njangal 5 per und, oru kaikkunju und. Ayiramthengu junction.",
+          "Njangal 5 per und, athil oru kaikkunju. Ayiramthengu junction.",
           location="Ayiramthengu junction", headcount=5, asset=None, gold="CRITICAL",
           groups=["INFANT"], water="ABOVE_HEAD", trend="RISING", **SELF),
         r(15, "T1", "ml", "പാടത്തോട് സ്കൂളിന്റെ താഴത്തെ നില പൂർണ്ണമായും വെള്ളത്തിലായി. ക്യാമ്പിലെ "
@@ -206,7 +206,7 @@ def batch_1() -> list[dict[str, Any]]:
           "upper floors, including an elderly man on oxygen. Need boats.",
           location="Mannanthala flats", headcount=None, asset="RESCUE_BOAT", gold="CRITICAL",
           medical=["CHRONIC_CARE"], groups=["ELDERLY"], water="ABOVE_HEAD"),
-        r(22, "T1", "manglish", "Pallikkoodam thazhe nila full vellathil, njangal 20 per "
+        r(22, "T1", "manglish", "Pallikkoodathinte thazhathe nila full vellathil, njangal 20 per "
           "first floor il aanu. Vettiyar bridge inte aduthulla school aanu. Boat ayakkamo?",
           location="Vettiyar bridge", headcount=20, asset="RESCUE_BOAT", gold="CRITICAL",
           water="ABOVE_HEAD", **SELF),
@@ -234,7 +234,7 @@ def batch_1() -> list[dict[str, Any]]:
         r(28, "T2", "en", "Water is around 1.5 m deep at Kanjirakkad junction. Two people are on "
           "the bus shelter roof. Send a boat.",
           location="Kanjirakkad junction", headcount=2, asset="RESCUE_BOAT", gold="CRITICAL",
-          other=["stranded on a roof"], water="ABOVE_HEAD"),
+          other=["stranded on a roof"], water="ROOF"),
         r(29, "T2", "en", "There is 1 to 2 feet of water in the house at Mangattu junction. We are "
           "3 adults and not hurt.",
           location="Mangattu junction", headcount=3, asset=None, gold="URGENT",
@@ -290,11 +290,11 @@ def batch_1() -> list[dict[str, Any]]:
           "school il. Truck venam.",
           location="Mullassery school", headcount=3, asset="EVAC_TRUCK", gold="URGENT",
           water="WAIST", trend="STABLE", **SELF),
-        r(43, "T2", "manglish", "Naaladi vellam, vegam koodunnu! Njangal 4 per, oru kunju 2 "
+        r(43, "T2", "manglish", "Naaladi vellam, vegam koodunnu! Njangal 4 per, athil oru kunju, 2 "
           "vayassu. Varikkattu junction. Boat venam.",
           location="Varikkattu junction", headcount=4, asset="RESCUE_BOAT", gold="CRITICAL",
           groups=["CHILD"], water="CHEST", trend="RISING", **SELF),
-        r(44, "T2", "manglish", "Oradi vellame ulloo, kurayunnu und. Njangal 8 per Kannampilly "
+        r(44, "T2", "manglish", "Oradi vellame ulloo, kurayunnundu. Njangal 8 per Kannampilly "
           "church il. Camp il pokan truck venam.",
           location="Kannampilly church", headcount=8, asset="EVAC_TRUCK", gold="STABLE",
           water="KNEE", trend="FALLING", **SELF),
@@ -303,7 +303,7 @@ def batch_1() -> list[dict[str, Any]]:
           location="Kunnathukara bus stop", headcount=2, asset=None, gold="CRITICAL",
           water="ABOVE_HEAD", **SELF),
         r(46, "T2", "manglish", "Ammayude veettil 1.2 meter vellam und ennu ayalkkar paranju. "
-          "Amma 75 vayassu, oru kaal vayya. Paduthode junction. Njan Bangalore il aanu.",
+          "Amma ottakku aanu, 75 vayassu, oru kaal vayya. Paduthode junction. Njan Bangalore il aanu.",
           location="Paduthode junction", headcount=1, asset=None, gold="CRITICAL",
           groups=["ELDERLY"], water="CHEST", **REMOTE_FAMILY),
         r(47, "T2", "manglish", "Muttolam vellam, around 1.5 adi. Njangal 5 per, aarkkum "
@@ -314,8 +314,8 @@ def batch_1() -> list[dict[str, Any]]:
           "kadavu. Two of us and our 8-year-old. Need a boat now.",
           location="Pallathu kadavu", headcount=3, asset="RESCUE_BOAT", gold="CRITICAL",
           groups=["CHILD"], water="CHEST", **SELF),
-        r(49, "T2", "en", "The gauge at Kaithakkuzhi bridge reads 2 metres. Five of us are "
-          "upstairs in the shop beside it. Send a boat.",
+        r(49, "T2", "en", "The street outside our shop near Kaithakkuzhi bridge has 2 metres of "
+          "water. Five of us are upstairs in the shop. Send a boat.",
           location="Kaithakkuzhi bridge", headcount=5, asset="RESCUE_BOAT", gold="CRITICAL",
           water="ABOVE_HEAD", **SELF),
         r(50, "T2", "en", "Water about 2 to 3 feet in Ayiramthengu church hall, and a wheelchair "
