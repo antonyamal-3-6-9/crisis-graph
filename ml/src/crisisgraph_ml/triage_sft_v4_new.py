@@ -840,7 +840,231 @@ def batch_3() -> list[dict[str, Any]]:
     ]
 
 
-BATCHES = {1: batch_1, 2: batch_2, 3: batch_3}
+def batch_4() -> list[dict[str, Any]]:
+    """T8 stranded at height; T9 stranded somewhere that is not a height; T10
+    who is reporting.
+
+    T8 follows guideline change 1: a roof, terrace, tree or car roof gets an
+    ``other_conditions`` entry, and ``water_level`` stays null unless depth or
+    flooding of the house is stated (then ROOF). A roof with no water stated is
+    gold URGENT, as in the frozen set; a tree, or a roof over a flooded house,
+    is CRITICAL. Going up only to reach phone signal, or "if the water rises we
+    will go to the terrace", is not stranded. T9: stranded at a clinic, school,
+    camp, station or upper floor gets no ``other_conditions``. T10 covers every
+    relation value and on_scene only when the position is stated.
+    """
+    def r(n, ft, lang, text, **kw):
+        return rec(n, 4, ft, lang, text, **kw)
+
+    roof = ["stranded on a roof"]
+    terrace = ["stranded on a terrace"]
+    tree = ["stranded in a tree"]
+    return [
+        # --- T8: stranded at height ---
+        r(1, "T8", "en", "Our house flooded and the 4 of us have climbed onto the roof. Kizhakkepuram "
+          "chapel, please hurry.",
+          location="Kizhakkepuram chapel", headcount=4, asset=None, gold="CRITICAL",
+          other=roof, water="ROOF", **SELF),
+        r(2, "T8", "en", "Five people are on the roof of the Padamugal reading room waiting for a "
+          "boat.",
+          location="Padamugal reading room", headcount=5, asset="RESCUE_BOAT", gold="URGENT",
+          other=roof),  # no water stated: water null, gold as frozen 105
+        r(3, "T8", "en", "A man has climbed a coconut tree near Vadakkumpuram canal to get out of "
+          "the water. He has been up there for two hours. I'm watching from the bridge.",
+          location="Vadakkumpuram canal", headcount=1, asset=None, gold="CRITICAL",
+          other=tree, **BYSTANDER),
+        r(4, "T8", "manglish", "Njangal 3 per terrace il aanu, chuttum vellam, thazhe ellam mungi. "
+          "Kunnelpadi junction.",
+          location="Kunnelpadi junction", headcount=3, asset=None, gold="CRITICAL",
+          other=terrace, water="ROOF", **SELF),
+        r(5, "T8", "ml", "ഞങ്ങൾ ആറുപേർ ടെറസിൽ കുടുങ്ങി, വീടിനുള്ളിൽ കഴുത്തോളം വെള്ളം. "
+          "ആനിക്കാട് കവലയ്ക്ക് സമീപം.",
+          location="ആനിക്കാട് കവല", headcount=6, asset=None, gold="CRITICAL",
+          other=terrace, water="ROOF", **SELF),  # climbed up because the house is flooded
+        r(6, "T8", "en", "Two kids and their grandmother have climbed up onto their roof at Chempu "
+          "lane, the water is up to the eaves. I'm their neighbour and I can't get to them.",
+          location="Chempu lane", headcount=3, asset=None, gold="CRITICAL",
+          other=roof, groups=["CHILD", "ELDERLY"], water="ROOF",
+          relation="THIRD_PARTY", on_scene=False),
+        r(7, "T8", "manglish", "Oru appooppan maavinte mukalil kayari irikkunnu, thazhe nalla "
+          "ozhukku. Njan bridge il ninnu kaanunnundu. Kottuvally kadavu.",
+          location="Kottuvally kadavu", headcount=1, asset=None, gold="CRITICAL",
+          other=tree, groups=["ELDERLY"], **BYSTANDER),
+        r(8, "T8", "en", "Two of us are sitting on the roof of our car at Pallikkara junction, the "
+          "water is above the doors.",
+          location="Pallikkara junction", headcount=2, asset=None, gold="CRITICAL",
+          other=["stranded on a car roof"], **SELF),  # "above the doors": no band
+        r(9, "T8", "ml", "അഞ്ചുപേർ മാമ്പ്ര പള്ളിയുടെ മേൽക്കൂരയിൽ ബോട്ടിനായി "
+          "കാത്തിരിക്കുന്നു.",
+          location="മാമ്പ്ര പള്ളി", headcount=5, asset="RESCUE_BOAT", gold="URGENT",
+          other=roof),  # no water stated
+        r(10, "T8", "en", "I'm alone on the terrace of my house at Thanikkal. The stairs are under "
+          "water and it's still rising.",
+          location="Thanikkal", headcount=1, asset=None, gold="CRITICAL",
+          other=terrace, water="ROOF", trend="RISING", **SELF),
+        r(11, "T8", "manglish", "Ammayum njanum roof inte mele aanu, vellam ippo roof vare ethi. "
+          "Pottenkadu colony.",
+          location="Pottenkadu colony", headcount=2, asset=None, gold="CRITICAL",
+          other=roof, water="ROOF", **SELF),
+        r(12, "T8", "en", "My mother and father have gone up onto their roof at Vettampara. The ground floor "
+          "is completely under water. I'm in Bahrain.",
+          location="Vettampara", headcount=2, asset=None, gold="CRITICAL",
+          other=roof, water="ROOF", **REMOTE_FAMILY),
+        r(13, "T8", "ml", "ഒരു കുടുംബം മരത്തിൽ കയറി ഇരിക്കുകയാണ്, മൂന്നുപേർ, ഒരു "
+          "കൈക്കുഞ്ഞും ഉണ്ട്. ഞാൻ എന്റെ വീടിന്റെ മുകളിൽ നിന്ന് കാണുന്നു. "
+          "ചെങ്ങൽ തോടിന് അടുത്ത്.",
+          location="ചെങ്ങൽ തോട്", headcount=3, asset=None, gold="CRITICAL",
+          other=tree, groups=["INFANT"], **BYSTANDER),
+        r(14, "T8", "en", "The water is at roof level in Kaduvettoor colony and at least 10 families "
+          "are on their roofs. Send boats.",
+          location="Kaduvettoor colony", headcount=None, asset="RESCUE_BOAT", gold="CRITICAL",
+          other=["stranded on roofs"], water="ROOF"),
+        r(15, "T8", "manglish", "Vellam koodiyal terrace il kayaraam ennu vicharikkunnu, ippo first "
+          "floor il aanu. Njangal 5 per, thazhathe nila mungi. Nayathode kavala.",
+          location="Nayathode kavala", headcount=5, asset=None, gold="CRITICAL",
+          water="ABOVE_HEAD", **SELF),  # terrace is hypothetical: not stranded
+        r(16, "T8", "en", "We went up to the terrace only to get a phone signal; the water is ankle "
+          "deep downstairs. 4 of us at Mattappilly.",
+          location="Mattappilly", headcount=4, asset=None, gold="STABLE",
+          water="ANKLE", **SELF),  # not stranded
+        r(17, "T8", "ml", "താഴത്തെ നില മുങ്ങി, ഞങ്ങൾ മൂന്നുപേർ മുകളിലത്തെ നിലയിലാണ്. "
+          "മേൽക്കൂരയിലേക്ക് കയറാൻ വഴിയില്ല. കുറ്റിപ്പുഴ ചന്ത.",
+          location="കുറ്റിപ്പുഴ ചന്ത", headcount=3, asset=None, gold="CRITICAL",
+          water="ABOVE_HEAD", **SELF),  # upper floor, not on the roof
+        # --- T9: stranded somewhere that is not a height ---
+        r(18, "T9", "en", "20 people are stranded at the Kanjirathanam primary health centre, water "
+          "knee deep in the building. Need an evacuation truck.",
+          location="Kanjirathanam primary health centre", headcount=20, asset="EVAC_TRUCK",
+          gold="STABLE", water="KNEE"),
+        r(19, "T9", "manglish", "Ezhippuram school il 40 kuttikal kudungi, vellam school nte "
+          "chuttum und, ullil kayariyittilla.",
+          location="Ezhippuram school", headcount=40, asset=None, gold="STABLE",
+          groups=["CHILD"]),  # not inside: water null (as batch 3, 009)
+        r(20, "T9", "ml", "ഞങ്ങൾ പന്ത്രണ്ടുപേർ ക്യാമ്പിൽ കുടുങ്ങി, റോഡ് മുഴുവൻ വെള്ളത്തിൽ. "
+          "ഭക്ഷണം തീരാറായി. കോടനാട് ഹൈസ്കൂൾ ക്യാമ്പ്.",
+          location="കോടനാട് ഹൈസ്കൂൾ ക്യാമ്പ്", headcount=12, asset=None, gold="STABLE",
+          hazards=[h(None, "FLOODED", None)], **SELF),
+        r(21, "T9", "en", "About 60 passengers are stuck at Mattoor halt station; the road out is "
+          "flooded.",
+          location="Mattoor halt station", headcount=None, asset=None, gold="UNKNOWN",
+          hazards=[h(None, "FLOODED", None)]),  # "about 60": not exact
+        r(22, "T9", "en", "We are stuck inside the Kurumpilavu church hall. The water is chest deep "
+          "and rising. 9 of us.",
+          location="Kurumpilavu church hall", headcount=9, asset=None, gold="CRITICAL",
+          water="CHEST", trend="RISING", **SELF),
+        r(23, "T9", "manglish", "Njangal 30 per Vengoor mission hospital il aanu, generator nilachu. "
+          "Ground floor il muttolam vellam.",
+          location="Vengoor mission hospital", headcount=30, asset=None, gold="STABLE",
+          water="KNEE", **SELF),
+        r(24, "T9", "ml", "പുല്ലുവഴി ബസ് സ്റ്റാൻഡിൽ ഇരുപത് യാത്രക്കാർ കുടുങ്ങി, ചുറ്റും "
+          "വെള്ളം.",
+          location="പുല്ലുവഴി ബസ് സ്റ്റാൻഡ്", headcount=20, asset=None, gold="UNKNOWN"),
+        r(25, "T9", "en", "25 of us are on the first floor of the Kaippattoor community hall; the "
+          "ground floor is flooded to the ceiling.",
+          location="Kaippattoor community hall", headcount=25, asset=None, gold="CRITICAL",
+          water="ABOVE_HEAD", **SELF),
+        r(26, "T9", "en", "Six of us are stranded at the petrol pump at Kalloor junction, with knee "
+          "deep water around us.",
+          location="Kalloor junction", headcount=6, asset=None, gold="STABLE",
+          water="KNEE", **SELF),
+        r(27, "T9", "manglish", "Chembarakki mosque il 50 per kudungi, chuttum vellam, ellarum safe "
+          "aanu.",
+          location="Chembarakki mosque", headcount=50, asset=None, gold="STABLE"),
+        r(28, "T9", "ml", "ഇരിങ്ങോലിലെ അങ്കണവാടിയിൽ പത്ത് കുട്ടികളും രണ്ട് "
+          "ടീച്ചർമാരും കുടുങ്ങി, മുട്ടോളം വെള്ളം.",
+          location="ഇരിങ്ങോലിലെ അങ്കണവാടി", headcount=12, asset=None, gold="URGENT",
+          groups=["CHILD"], water="KNEE"),
+        r(29, "T9", "ml", "ഞങ്ങൾ പത്തുപേർ ഓഫീസിന്റെ രണ്ടാം നിലയിൽ ഉണ്ട്, താഴെ "
+          "നെഞ്ചോളം വെള്ളം. വല്ലം കടവ് റോഡ്.",
+          location="വല്ലം കടവ് റോഡ്", headcount=10, asset=None, gold="URGENT",
+          water="CHEST", **SELF),
+        r(30, "T9", "manglish", "Njangal 8 per Thrikkapady temple il aanu, vellam kanankaal vare, "
+          "pedikkaanilla.",
+          location="Thrikkapady temple", headcount=8, asset=None, gold="STABLE",
+          water="ANKLE", **SELF),
+        r(31, "T9", "en", "Eight workers are stuck at the Kuzhivelippady industrial estate. The water is waist "
+          "deep in the factory and the access road is flooded.",
+          location="Kuzhivelippady industrial estate", headcount=8, asset=None, gold="URGENT",
+          hazards=[h(None, "FLOODED", None)], water="WAIST"),
+        r(32, "T9", "en", "We moved to the Kottamam LP school camp and now the camp is cut off. 80 "
+          "people, nobody is sick.",
+          location="Kottamam LP school camp", headcount=80, asset=None, gold="STABLE",
+          **SELF),
+        r(33, "T9", "ml", "ഞങ്ങൾ നാലുപേർ കടയുടെ മുകളിലത്തെ നിലയിൽ ആണ്, താഴെ അരയോളം "
+          "വെള്ളം. ഒക്കൽ ചന്തക്ക് അടുത്ത്.",
+          location="ഒക്കൽ ചന്ത", headcount=4, asset=None, gold="URGENT",
+          water="WAIST", **SELF),
+        # --- T10: who is reporting ---
+        r(34, "T10", "en", "Me and my two kids are stuck at home near Kodikuthimala temple, the water "
+          "is knee deep.",
+          location="Kodikuthimala temple", headcount=3, asset=None, gold="URGENT",
+          groups=["CHILD"], water="KNEE", **SELF),  # with family: SELF
+        r(35, "T10", "en", "My sister and her 2 kids are in their house at Kidangoor lane. I'm "
+          "standing outside, I can't wade in, the water is chest deep.",
+          location="Kidangoor lane", headcount=3, asset=None, gold="CRITICAL",
+          groups=["CHILD"], water="CHEST", relation="HOUSEHOLD", on_scene=True),
+        r(36, "T10", "manglish", "Ente veettil vellam keri, ammayum randu kuttikalum avide und. "
+          "Kuruvilassery road.",
+          location="Kuruvilassery road", headcount=3, asset=None, gold="UNKNOWN",
+          groups=["CHILD"], relation="UNDER_REVIEW"),  # own home, reporter there?
+        r(37, "T10", "ml", "ഞങ്ങളുടെ വീട്ടിൽ അച്ഛനും അമ്മയും ഉണ്ട്, അരയോളം വെള്ളം. "
+          "മഞ്ഞപ്പെട്ടി കവല.",
+          location="മഞ്ഞപ്പെട്ടി കവല", headcount=2, asset=None, gold="URGENT",
+          water="WAIST", relation="UNDER_REVIEW"),
+        r(38, "T10", "en", "This is the Vengola village office. 14 families at Plamudi colony need "
+          "evacuation; the water is waist deep there.",
+          location="Plamudi colony", headcount=None, asset=None, gold="URGENT",
+          water="WAIST", relation="THIRD_PARTY"),  # official, position not stated
+        r(39, "T10", "en", "I left the house this morning; my wife and mother are still there at "
+          "Pulimoodu junction. The water is rising.",
+          location="Pulimoodu junction", headcount=2, asset=None, gold="UNKNOWN",
+          trend="RISING", **REMOTE_FAMILY),  # "mother": no ELDERLY
+        r(40, "T10", "en", "I can't reach my brother by phone. He lives alone near Kannamthoppu "
+          "church and his last message said water was inside.",
+          location="Kannamthoppu church", headcount=1, asset=None, gold="UNKNOWN",
+          **REMOTE_FAMILY),
+        r(41, "T10", "manglish", "Ayalpakkathe veettile chettanum chechiyum kudungi, njan ente "
+          "veettinte mukalil ninnu kaanunnu. Vellam nenjolam. Kottapuram lane.",
+          location="Kottapuram lane", headcount=2, asset=None, gold="URGENT",
+          water="CHEST", **BYSTANDER),
+        r(42, "T10", "ml", "മൂന്നുപേർ അത്താണി ബോട്ടുജെട്ടിക്ക് അടുത്ത് കുടുങ്ങി. ബോട്ട് "
+          "വേണം.",
+          location="അത്താണി ബോട്ടുജെട്ടി", headcount=3, asset="RESCUE_BOAT", gold="UNKNOWN"),
+        r(43, "T10", "en", "We have 22 people at the Moozhikkulam shelter who need an evacuation "
+          "truck.",
+          location="Moozhikkulam shelter", headcount=22, asset="EVAC_TRUCK",
+          gold="UNKNOWN"),  # coordinator phrasing (change 5)
+        r(44, "T10", "en", "We are 22 at the Thuruthy shelter and we need an evacuation truck.",
+          location="Thuruthy shelter", headcount=22, asset="EVAC_TRUCK", gold="UNKNOWN",
+          **SELF),  # "we are 22": SELF
+        r(45, "T10", "manglish", "Ente kootukaran vilichu, avante veettil 5 per kudungi, vellam "
+          "aravolam. Mudakkuzha il aanu. Njan avide illa.",
+          location="Mudakkuzha", headcount=5, asset=None, gold="URGENT",
+          water="WAIST", relation="THIRD_PARTY", on_scene=False),
+        r(46, "T10", "ml", "ഞാനും ഭാര്യയും അമ്മയും ആണ്, മുട്ടോളം വെള്ളം. അമ്മയ്ക്ക് "
+          "എഴുപത്തഞ്ച് വയസ്സ്. നെടുമ്പാറ റോഡ്.",
+          location="നെടുമ്പാറ റോഡ്", headcount=3, asset=None, gold="URGENT",
+          groups=["ELDERLY"], water="KNEE", **SELF),
+        r(47, "T10", "en", "There's an old woman alone in the house opposite mine at Kallil lane. I "
+          "can see her at the window and the water is chest deep.",
+          location="Kallil lane", headcount=1, asset=None, gold="CRITICAL",
+          groups=["ELDERLY"], water="CHEST", **BYSTANDER),
+        r(48, "T10", "manglish", "Ammachi ottakku aanu veettil, vellam kayari varunnu. Veedu "
+          "Panangad colony il aanu.",
+          location="Panangad colony", headcount=1, asset=None, gold="URGENT",
+          groups=["ELDERLY"], trend="RISING", relation="HOUSEHOLD"),
+        r(49, "T10", "en", "My neighbour's family of 5 is stuck next door at Anappara lane. The water "
+          "is above their windows. I've gone to my sister's place in Kakkanad.",
+          location="Anappara lane", headcount=5, asset=None, gold="CRITICAL",
+          water="ABOVE_HEAD", relation="THIRD_PARTY", on_scene=False),
+        r(50, "T10", "ml", "ഞാൻ ഇവിടെ ഒറ്റയ്ക്കാണ്, അരയോളം വെള്ളം, കാലിന് പരിക്കുണ്ട്. "
+          "ചെറുകുന്നത്തുപടി.",
+          location="ചെറുകുന്നത്തുപടി", headcount=1, asset=None, gold="URGENT",
+          medical=["INJURY"], water="WAIST", **SELF),
+    ]
+
+
+BATCHES = {1: batch_1, 2: batch_2, 3: batch_3, 4: batch_4}
 
 # Annotator notes shown on the owner review sheet (not part of the records).
 NOTES = {
@@ -927,6 +1151,37 @@ NOTES = {
     "sft-v4-new-b3-042": "'Fell, but not hurt': negation, no INJURY.",
     "sft-v4-new-b3-049": "Minor sprain: INJURY only, gold STABLE (as batch 2, 032).",
     "sft-v4-new-b3-050": "Fresh head wound with blood flowing: gold CRITICAL (change 9).",
+    "sft-v4-new-b4-002": "Roof with no water stated: water null, gold URGENT as frozen 105 "
+    "and t273.",
+    "sft-v4-new-b4-003": "In a tree for two hours with water below: gold CRITICAL (more "
+    "precarious than a roof). Owner check.",
+    "sft-v4-new-b4-005": "Climbed to the terrace because the house is flooded: ROOF, not the "
+    "inside depth (guideline ROOF row).",
+    "sft-v4-new-b4-008": "Car roof is a height (change 1). 'Above the doors' gives no band: "
+    "water null.",
+    "sft-v4-new-b4-010": "Stairs to the terrace under water: house flooded, so ROOF.",
+    "sft-v4-new-b4-015": "Terrace only if the water rises: hypothetical, not stranded.",
+    "sft-v4-new-b4-016": "On the terrace only for phone signal: not stranded.",
+    "sft-v4-new-b4-017": "Upper floor, cannot reach the roof: not stranded at height.",
+    "sft-v4-new-b4-019": "Water around the school but not inside: water null, gold STABLE (as "
+    "batch 3, 009).",
+    "sft-v4-new-b4-020": "Food running out is not a medical condition; gold STABLE.",
+    "sft-v4-new-b4-021": "'About 60' is not an exact count: headcount null.",
+    "sft-v4-new-b4-029": "Upper floor of an office, chest-deep water below: no "
+    "other_conditions; gold URGENT for adults.",
+    "sft-v4-new-b4-035": "Sister standing outside: HOUSEHOLD, on scene.",
+    "sft-v4-new-b4-036": "'Ente veettil' (my house) with mother and children there: whether "
+    "the reporter is among them is open, so UNDER_REVIEW.",
+    "sft-v4-new-b4-037": "'Our house' with the parents there: UNDER_REVIEW.",
+    "sft-v4-new-b4-038": "Village office: THIRD_PARTY; '14 families' gives no headcount.",
+    "sft-v4-new-b4-039": "'I left this morning': on_scene false. 'Mother' adds no ELDERLY.",
+    "sft-v4-new-b4-040": "'Can't reach him by phone': on_scene false. 'Water was inside' has no "
+    "depth.",
+    "sft-v4-new-b4-043": "Coordinator phrasing (change 5): relation null. Paired with 044.",
+    "sft-v4-new-b4-045": "Friend: THIRD_PARTY; 'njan avide illa' (I'm not there): on_scene "
+    "false.",
+    "sft-v4-new-b4-048": "'Ammachi ottakku' (alone at home) implies the reporter is elsewhere "
+    "but does not say where: HOUSEHOLD, on_scene null. Owner check.",
 }
 
 

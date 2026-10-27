@@ -329,3 +329,9 @@ labels after seeing results would move the goalposts.
   AI first pass: one fix (a warden's position is not stated). Owner review:
   pregnancy in ankle-deep water is gold STABLE, like an infant at the same
   depth; autism is DISABLED (change 10); no comma inserted into a location.
+- **Batch 4 (50, stranded at height T8, not at height T9, reporter T10):** 25
+  English, 13 Malayalam, 12 Manglish. Roofs, terraces, trees and a car roof
+  with and without stated flooding; hypothetical or incidental trips to the
+  terrace; stranding at clinics, schools, camps and upper floors; every
+  relation value including UNDER_REVIEW and coordinator phrasing. Pending AI
+  first pass and owner review.
