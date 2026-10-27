@@ -22,3 +22,20 @@ officials ("this is the village office") stay `THIRD_PARTY`.
 `vulnerable_groups: ["DISABLED"]`, whatever the cause, because dispatch needs
 the same help. "Difficulty walking" alone adds no group; label only the other
 stated facts (e.g. ELDERLY for "elderly people with difficulty walking").
+
+## 7. Labour is gold CRITICAL (owner decision, 2026-10-27)
+
+A woman in labour (`other_conditions: ["in labour"]`, plus `PREGNANT`) is gold
+`expected_urgency: CRITICAL`, as in the frozen v3.1.0 labels (cases with labour
+and no other complication). Training data follows the frozen set, as for the
+roof case (t273 and test 105), so the model is not taught a tier the benchmark
+scores as wrong. The urgency rules already give CRITICAL for any
+`other_conditions` entry.
+
+## 8. "If the water keeps rising" states that it is rising (owner decision, 2026-10-27)
+
+"If it keeps rising", "if it goes on rising" and "vellam iniyum koodiyal"
+presuppose that the water is rising now: `water_trend: RISING`. The
+conditional covers only what follows ("we will have to climb onto the roof"),
+which is not labelled. A plain "if the water rises" ("vellam koodiyal",
+"വെള്ളം കൂടിയാൽ") states no trend: `null`.

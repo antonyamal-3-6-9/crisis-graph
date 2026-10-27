@@ -314,4 +314,10 @@ labels after seeing results would move the goalposts.
   native-language positives next to near misses (dizzy but talking, known
   asthma or heart disease with no episode, a cut that stopped bleeding,
   symptoms resolved earlier today). Trend records cover rising, falling,
-  unchanged and hypothetical wording. Pending AI first pass and owner review.
+  unchanged and hypothetical wording. AI first pass: the text and profile labels
+  held up; it questioned bleeding golds and the bedridden case. Owner review:
+  bleeding is gold CRITICAL only when heavy, not stopping or postpartum (030,
+  031 to URGENT); a bedridden person in bed-height water is CRITICAL (045);
+  "if the water keeps rising" is RISING (change 8); labour aligned to the
+  frozen v3.1.0 gold, CRITICAL (change 7); an inner Malayalam genitive stays
+  in the location.

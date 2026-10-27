@@ -33,7 +33,7 @@ EVAL_SETS = [
 ]
 
 # Batches that passed the AI first pass and the owner review.
-OWNER_REVIEWED_BATCHES = {1}
+OWNER_REVIEWED_BATCHES = {1, 2}
 
 SELF = {"relation": "SELF", "on_scene": True}
 REMOTE_FAMILY = {"relation": "HOUSEHOLD", "on_scene": False}
@@ -347,13 +347,20 @@ def batch_2() -> list[dict[str, Any]]:
     covers rising, falling and explicitly unchanged water in all three
     languages, plus hypotheticals ("if the water rises") that leave the trend
     null. Relatives named by role ("achan", "amma", "monu") add no age group.
+
+    Owner policy (batch 2 review): bleeding is gold CRITICAL when it is heavy,
+    will not stop, or is postpartum, otherwise URGENT (the label stays
+    BLEEDING and the rules still give CRITICAL); a bleeding head wound (027)
+    awaits an owner decision. Labour is gold CRITICAL, as
+    in the frozen v3.1.0 set (guideline change 7). A bedridden person who
+    cannot be moved in water at bed height is CRITICAL even if it is falling.
     """
     def r(n, ft, lang, text, **kw):
         return rec(n, 2, ft, lang, text, **kw)
 
     return [
         # --- T3: UNCONSCIOUS ---
-        r(1, "T3", "manglish", "Achan bodham ketti veenu, vilichittu unarunnilla. Njangal 4 per und, "
+        r(1, "T3", "manglish", "Achan bodham kettu veenu, vilichittu unarunnilla. Njangal 4 per und, "
           "Karuvelikkunnu school road. Ambulance venam.",
           location="Karuvelikkunnu school road", headcount=4, asset="AMBULANCE", gold="CRITICAL",
           medical=["UNCONSCIOUS"], **SELF),
@@ -376,7 +383,7 @@ def batch_2() -> list[dict[str, Any]]:
           medical=["UNCONSCIOUS"], **REMOTE_FAMILY),
         r(6, "T3", "ml", "ബോധം കെട്ടു വീണ കുട്ടി ഇതുവരെ ഉണർന്നിട്ടില്ല. ഞങ്ങൾ ആറുപേർ "
           "ഇടവനക്കാട് പള്ളിയുടെ ഹാളിലാണ്.",
-          location="ഇടവനക്കാട് പള്ളി ഹാൾ", headcount=6, asset=None, gold="CRITICAL",
+          location="ഇടവനക്കാട് പള്ളിയുടെ ഹാൾ", headcount=6, asset=None, gold="CRITICAL",
           medical=["UNCONSCIOUS"], groups=["CHILD"], **SELF),
         r(7, "T3", "manglish", "Ammachikku thala karakkam und, pakshe samsarikkunnundu. Njangal 3 "
           "per Kombanadu LP school il. Vellam muttolam.",
@@ -477,11 +484,11 @@ def batch_2() -> list[dict[str, Any]]:
           medical=["BLEEDING"], groups=["INFANT"], **SELF),  # newborn: INFANT; not PREGNANT now
         r(30, "T3", "manglish", "Ente aniyathikku mookkil ninnu chora nilkkunnilla ennu avalude "
           "bharthavu vilichu paranju. Avar randu perum Kuzhuppilly kadavu il aanu.",
-          location="Kuzhuppilly kadavu", headcount=2, asset=None, gold="CRITICAL",
+          location="Kuzhuppilly kadavu", headcount=2, asset=None, gold="URGENT",
           medical=["BLEEDING"], relation="HOUSEHOLD"),  # reporter's position not stated
         r(31, "T3", "ml", "കുട്ടിയുടെ കാലിൽ കുപ്പിച്ചില്ല് കയറി, ചോര ഒഴുകുന്നു. ഞങ്ങൾ "
           "അഞ്ചുപേർ തിരുവാലൂർ റോഡിൽ.",
-          location="തിരുവാലൂർ റോഡ്", headcount=5, asset=None, gold="CRITICAL",
+          location="തിരുവാലൂർ റോഡ്", headcount=5, asset=None, gold="URGENT",
           medical=["BLEEDING", "INJURY"], groups=["CHILD"], **SELF),
         r(32, "T3", "manglish", "Kaiyil cheriya oru murivu und, chora ninnu. Vere kuzhappam onnum "
           "illa. Njangal 6 per Kaithappara colony il, muttolam vellam.",
@@ -502,7 +509,7 @@ def batch_2() -> list[dict[str, Any]]:
           other=["suspected snakebite"], **SELF),  # guideline change 3
         r(36, "T3", "manglish", "Bharyakku prasava vedana thudangi, 9 maasam aayi. Njangal 3 per "
           "Ponnarimangalam kadavu il. Boat venam.",
-          location="Ponnarimangalam kadavu", headcount=3, asset="RESCUE_BOAT", gold="URGENT",
+          location="Ponnarimangalam kadavu", headcount=3, asset="RESCUE_BOAT", gold="CRITICAL",
           other=["in labour"], groups=["PREGNANT"], **SELF),
         r(37, "T3", "ml", "വെള്ളത്തിലേക്ക് വൈദ്യുതി കമ്പി പൊട്ടിവീണു, ചേട്ടന് ഷോക്കടിച്ചു. "
           "ഇപ്പോൾ സംസാരിക്കുന്നുണ്ട്. ഞങ്ങൾ മൂന്നുപേർ തോട്ടുമുഖം പാലത്തിന് അടുത്ത്.",
@@ -527,8 +534,8 @@ def batch_2() -> list[dict[str, Any]]:
           water="WAIST", trend="STABLE"),
         r(42, "T4", "en", "If the water keeps rising we will have to climb onto the roof. Right "
           "now it is at knee level. 3 adults at Olipuram colony.",
-          location="Olipuram colony", headcount=3, asset=None, gold="STABLE",
-          water="KNEE", **SELF),  # hypothetical: no trend, not stranded
+          location="Olipuram colony", headcount=3, asset=None, gold="URGENT",
+          water="KNEE", trend="RISING", **SELF),  # "keeps rising": rising now (change 8)
         r(43, "T4", "en", "It rose all night but has been draining since 6 am. Chest deep earlier, "
           "now around the waist. Two of us and my mother, who is 80, at Maradikunnu.",
           location="Maradikunnu", headcount=3, asset=None, gold="URGENT",
@@ -539,7 +546,7 @@ def batch_2() -> list[dict[str, Any]]:
           trend="RISING", relation="HOUSEHOLD"),
         r(45, "T4", "en", "The water is receding at Kottappuram ferry, but my father is bedridden "
           "and we cannot move him. It is still about 3 feet in the room. We are 3 people.",
-          location="Kottappuram ferry", headcount=3, asset=None, gold="URGENT",
+          location="Kottappuram ferry", headcount=3, asset=None, gold="CRITICAL",
           groups=["BEDRIDDEN"], water="WAIST", trend="FALLING", **SELF),
         r(46, "T4", "en", "Water rising steadily at Kuzhikkattu lane, now chest high. 6 people "
           "including two kids.",
@@ -608,6 +615,8 @@ BATCHES = {1: batch_1, 2: batch_2}
 
 # Annotator notes shown on the owner review sheet (not part of the records).
 NOTES = {
+    "sft-v4-new-b2-006": "Owner review: only the outer locative is removed; the inner "
+    "genitive stays (guideline general rule 2).",
     "sft-v4-new-b2-007": "Dizzy but talking: not UNCONSCIOUS.",
     "sft-v4-new-b2-008": "Fainted this morning, fine now: resolved within 24 h, so no "
     "condition and gold URGENT (guideline, resolved conditions).",
@@ -621,29 +630,29 @@ NOTES = {
     "sft-v4-new-b2-025": "Chest pain this morning, gone now: no condition, gold URGENT.",
     "sft-v4-new-b2-029": "Postpartum bleeding. The newborn is INFANT; the mother is no longer "
     "PREGNANT.",
-    "sft-v4-new-b2-030": "Told by phone, but the reporter's own position is not stated: "
-    "on_scene null. Nosebleed that will not stop: BLEEDING. Owner check: gold CRITICAL or "
-    "URGENT? (AI review: rarely life-threatening within an hour.)",
+    "sft-v4-new-b2-030": "Reporter's position not stated: on_scene null. Owner review: "
+    "BLEEDING label, gold URGENT (a nosebleed that will not stop is rarely life-threatening "
+    "within an hour).",
+    "sft-v4-new-b2-031": "Owner review: gold URGENT; bleeding not described as heavy or not "
+    "stopping, and five people are there to apply pressure.",
     "sft-v4-new-b2-032": "Minor cut that has stopped bleeding, knee-deep water, nothing else "
-    "wrong: INJURY only; gold STABLE (safe for now). Owner check: STABLE or URGENT?",
-    "sft-v4-new-b2-031": "Glass in the foot, blood flowing, no 'won't stop'. Owner check: gold "
-    "CRITICAL or URGENT?",
+    "wrong: INJURY only. Owner review: gold STABLE.",
     "sft-v4-new-b2-034": "Missed dialysis, weak but conscious: CHRONIC_CARE, not UNCONSCIOUS.",
     "sft-v4-new-b2-035": "Suspected snakebite counts (guideline change 3).",
-    "sft-v4-new-b2-036": "Labour: gold URGENT; the rules make any other_conditions entry "
-    "CRITICAL (accepted over-triage, rules v2).",
+    "sft-v4-new-b2-036": "Owner review: labour is gold CRITICAL, aligned with the frozen "
+    "v3.1.0 labels (guideline change 7).",
     "sft-v4-new-b2-037": "Shock just now, talking: kept as a current condition (not resolved; "
     "delayed heart-rhythm risk, live wire still in the water).",
     "sft-v4-new-b2-039": "Fast-rising knee-deep water: gold URGENT; the rules cannot prove "
     "STABLE while rising, so UNKNOWN.",
-    "sft-v4-new-b2-042": "'If the water keeps rising' is hypothetical: trend null, and not "
-    "stranded at height.",
+    "sft-v4-new-b2-042": "Owner review: 'if the water keeps rising' presupposes it is rising "
+    "now, so RISING, gold URGENT as 039 (guideline change 8). The conditional covers only the "
+    "roof.",
     "sft-v4-new-b2-043": "Several levels: use the latest (waist, draining).",
     "sft-v4-new-b2-044": "'My brother says': the reporter's position is not stated, so "
     "on_scene null.",
-    "sft-v4-new-b2-045": "Bedridden father, 3 ft and falling: gold URGENT; the rules make "
-    "BEDRIDDEN with water at WAIST CRITICAL. Owner check: URGENT or CRITICAL? (AI review: "
-    "CRITICAL, a person who cannot be moved in 0.9 m of water can drown.)",
+    "sft-v4-new-b2-045": "Owner review: CRITICAL. 3 ft is above a normal mattress and he "
+    "cannot be moved; falling water does not remove the drowning risk yet.",
     "sft-v4-new-b2-048": "Water coming up through the drains is ongoing entry: RISING "
     "(guideline change 4).",
     "sft-v4-new-b2-054": "'If the water rises' is hypothetical: trend null.",
@@ -718,8 +727,11 @@ def main() -> None:
         sheet = DATA / f"triage-sft-v4-batch{args.review_sheet}-review-guide.md"
         sheet.write_text(render(
             review_cases(batch), f"SFT-V4 new records, batch {args.review_sheet}",
-            f"**Batch {args.review_sheet} ({len(batch)} records): awaiting AI first pass and "
-            "owner review.** Guideline changes 5 and 6 are in "
+            f"**Batch {args.review_sheet} ({len(batch)} records): "
+            + ("AI first pass and owner review complete.** "
+               if args.review_sheet in OWNER_REVIEWED_BATCHES
+               else "awaiting AI first pass and owner review.** ")
+            + "Guideline changes 5–8 are in "
             "`triage-annotation-guidelines-v3.2-changes.md`.",
             "src/crisisgraph_ml/triage_sft_v4_new.py"), encoding="utf-8")
         print(f"Wrote review sheet to {sheet}")
