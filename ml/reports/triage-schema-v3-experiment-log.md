@@ -344,5 +344,7 @@ labels after seeing results would move the goalposts.
   instructions try to empty or lower fields, inflate urgency, change the
   relation or skip review; complete V2 fields give no review whatever the
   profile and missing ones always do; negated, resolved and hypothetical
-  facts, including a hypothetical asset request. Pending AI first pass and
-  owner review.
+  facts, including a hypothetical asset request. AI first pass: no injected
+  instruction leaked into a label; fixed a location joined across clauses and
+  two wordings. Owner review: accepted; resolved non-category events follow
+  the 24 h rule (change 13).

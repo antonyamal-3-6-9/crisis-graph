@@ -73,3 +73,13 @@ below) is gold `CRITICAL`. With nothing else stated ("five people on the roof
 waiting for a boat") it is gold `URGENT`. Other facts can still raise it (an
 infant in a tree is `CRITICAL`). The urgency rules give `CRITICAL` for any
 stranding entry either way.
+
+## 13. Resolved life-threatening events outside the categories (owner decision, 2026-10-27)
+
+The resolved-conditions rule also covers `other_conditions`: a near-drowning,
+electric shock or similar event that is over and resolved within the last 24
+hours ("he was pulled out earlier today and is talking normally now") gets no
+`other_conditions` entry, and gold `expected_urgency` is `URGENT`, because
+delayed complications are likely. An event that has just happened stays
+labelled even if the person is responsive ("he got a shock, he is talking
+now", with the live wire still in the water).

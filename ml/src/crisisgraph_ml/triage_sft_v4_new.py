@@ -33,7 +33,7 @@ EVAL_SETS = [
 ]
 
 # Batches that passed the AI first pass and the owner review.
-OWNER_REVIEWED_BATCHES = {1, 2, 3, 4}
+OWNER_REVIEWED_BATCHES = {1, 2, 3, 4, 5}
 
 SELF = {"relation": "SELF", "on_scene": True}
 REMOTE_FAMILY = {"relation": "HOUSEHOLD", "on_scene": False}
@@ -1081,6 +1081,10 @@ def batch_5() -> list[dict[str, Any]]:
     whatever the profile (empty or rich); missing V2 fields give review
     whatever the profile. T13: negated, resolved (more or less than 24 h ago)
     and hypothetical facts, including a hypothetical asset request.
+
+    Owner policy (batch 5 review): a life-threatening event outside the
+    categories that resolved within 24 h gets no ``other_conditions`` and gold
+    URGENT (guideline change 13).
     """
     def r(n, ft, lang, text, **kw):
         return rec(n, 5, ft, lang, text, **kw)
@@ -1430,7 +1434,7 @@ NOTES = {
     "sft-v4-new-b5-026": "T12: rich profile, but location, headcount and asset missing: "
     "review. 'Achanu' (my father): HOUSEHOLD (AI review).",
     "sft-v4-new-b5-020": "'We don't know their condition': relay or control-room phrasing, "
-    "relation null (change 5). AI review suggests THIRD_PARTY. Owner check.",
+    "relation null (change 5; owner confirmed).",
     "sft-v4-new-b5-050": "Elderly at knee depth: gold URGENT, as frozen 078. Past stroke, walks "
     "now, no treatment: no CHRONIC_CARE.",
     "sft-v4-new-b5-027": "'My baby': HOUSEHOLD; the reporter's position is not stated.",
@@ -1443,11 +1447,11 @@ NOTES = {
     "asthma: CHRONIC_CARE.",
     "sft-v4-new-b5-040": "Fracture last week, in a cast now: a current injury, INJURY.",
     "sft-v4-new-b5-043": "Labour is hypothetical ('might go into labour'): PREGNANT only. "
-    "Ankle-deep: gold STABLE (batch 3 policy). Owner check.",
+    "Ankle-deep: gold STABLE (batch 3 policy, owner confirmed).",
     "sft-v4-new-b5-044": "Not a snakebite, a thorn: no other_conditions; minor wound INJURY.",
     "sft-v4-new-b5-047": "Near-drowning earlier today, now talking normally: treated as a "
-    "resolved critical event (no other_conditions, gold URGENT). Owner check: does the 24 h "
-    "rule apply to other_conditions? (contrast batch 2, 037)",
+    "resolved critical event: no other_conditions, gold URGENT (change 13). Batch 2, 037 "
+    "differs: the shock had just happened.",
     "sft-v4-new-b5-048": "Boat needed only if the water rises: hypothetical request, asset null.",
 }
 
