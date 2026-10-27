@@ -33,7 +33,7 @@ EVAL_SETS = [
 ]
 
 # Batches that passed the AI first pass and the owner review.
-OWNER_REVIEWED_BATCHES = {1, 2}
+OWNER_REVIEWED_BATCHES = {1, 2, 3}
 
 SELF = {"relation": "SELF", "on_scene": True}
 REMOTE_FAMILY = {"relation": "HOUSEHOLD", "on_scene": False}
@@ -622,6 +622,11 @@ def batch_3() -> list[dict[str, Any]]:
     age (grandmother, old age home); "old house" or "college students" give no
     group. T7 keeps INJURY beside the critical category and drops it under
     negation ("fell but not hurt"). Bleeding gold follows guideline change 9.
+
+    Owner policy (batch 3 review): autism is DISABLED (guideline change 10);
+    ankle-deep water with only a vulnerable group stated (wheelchair user,
+    children, pregnancy) is gold STABLE, while pregnancy in knee-deep water
+    stays URGENT.
     """
     def r(n, ft, lang, text, **kw):
         return rec(n, 3, ft, lang, text, **kw)
@@ -733,11 +738,11 @@ def batch_3() -> list[dict[str, Any]]:
           water="KNEE", **SELF),  # "old house": no ELDERLY
         r(26, "T6", "en", "20 residents of the Karunalayam old age home at Kizhakkumuri. Water is "
           "entering the hall.",
-          location="Karunalayam old age home, Kizhakkumuri", headcount=20, asset=None,
+          location="Karunalayam old age home", headcount=20, asset=None,
           gold="URGENT", groups=["ELDERLY"], trend="RISING"),  # change 4
         r(27, "T6", "manglish", "Ente bharya garbhini aanu, 7 maasam. Njangal 2 per Odakkali "
           "junction il, vellam kanankaal vare.",
-          location="Odakkali junction", headcount=2, asset=None, gold="URGENT",
+          location="Odakkali junction", headcount=2, asset=None, gold="STABLE",
           groups=["PREGNANT"], water="ANKLE", **SELF),
         r(28, "T6", "manglish", "Ente bharyayum njanum mathram, vellam muttolam, kuzhappamilla. "
           "Rayamangalam LP school.",
@@ -890,13 +895,16 @@ NOTES = {
     "sft-v4-new-b3-003": "Bedridden with water at bed height: gold CRITICAL (batch 2 owner "
     "policy, 045).",
     "sft-v4-new-b3-004": "Wheelchair user in ankle-deep water: gold STABLE (safe for now); the "
-    "rules give UNKNOWN. Owner check.",
-    "sft-v4-new-b3-006": "Autism labelled DISABLED (developmental disability). 'Makan' (son) "
-    "adds no CHILD. Owner check.",
+    "rules give UNKNOWN. Owner review: confirmed.",
+    "sft-v4-new-b3-006": "Owner review: autism is DISABLED (guideline change 10). 'Makan' "
+    "(son) adds no CHILD.",
     "sft-v4-new-b3-007": "Warden: THIRD_PARTY. Says who, not where, so on_scene null (AI "
     "review). Headcount counts residents only.",
+    "sft-v4-new-b3-027": "Owner review: gold STABLE. Ankle-deep water with only pregnancy "
+    "stated is safe for now, like 004, 029 and an infant at the same depth; 008 (knee) stays "
+    "URGENT.",
     "sft-v4-new-b3-009": "Water at the doorstep, not inside: no depth where they are, so null. "
-    "Gold STABLE (safe for now). Owner check.",
+    "Gold STABLE (safe for now). Owner review: confirmed.",
     "sft-v4-new-b3-011": "Oxygen with about 3 hours left: CHRONIC_CARE (no acute episode), gold "
     "URGENT.",
     "sft-v4-new-b3-017": "Ward member who cannot reach them: THIRD_PARTY, on_scene false.",
@@ -905,7 +913,8 @@ NOTES = {
     "sft-v4-new-b3-022": "College students and 'makal' (daughter): no CHILD. Reporter's "
     "position not stated: on_scene null.",
     "sft-v4-new-b3-025": "'Old house' describes the building: no ELDERLY.",
-    "sft-v4-new-b3-026": "Old age home residents: ELDERLY. 'Water is entering': RISING (change "
+    "sft-v4-new-b3-026": "Location is the named building; 'at Kizhakkumuri' is dropped, no "
+    "comma added (owner review). Old age home residents: ELDERLY. 'Water is entering': RISING (change "
     "4). Relation not stated.",
     "sft-v4-new-b3-030": "'Little brother' states no age: no CHILD.",
     "sft-v4-new-b3-031": "'Makkal' (offspring) states no age: no CHILD.",

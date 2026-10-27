@@ -50,3 +50,11 @@ just now). Otherwise it is `URGENT`: a nosebleed that will not stop, a foot
 wound with blood flowing and people there to apply pressure, or a head wound
 that has bled for hours in someone who is talking (frozen v3.1.0 case 033).
 The urgency rules still give `CRITICAL` for any `BLEEDING`.
+
+## 10. Autism and developmental disability are DISABLED (owner decision, 2026-10-27)
+
+"Autistic", "autism", "intellectual disability" and other developmental
+disabilities state a disability: `vulnerable_groups: ["DISABLED"]` (they are
+specified disabilities under India's Rights of Persons with Disabilities Act,
+2016). A relation word beside them ("my son is autistic") still adds no age
+group.

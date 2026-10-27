@@ -326,4 +326,6 @@ labels after seeing results would move the goalposts.
   "cannot walk without help", dialysis / insulin / oxygen as CHRONIC_CARE);
   paired bare relations against stated ages ("my father" / "my 78-year-old
   father"); INJURY kept beside critical conditions and dropped under negation.
-  Pending AI first pass and owner review.
+  AI first pass: one fix (a warden's position is not stated). Owner review:
+  pregnancy in ankle-deep water is gold STABLE, like an infant at the same
+  depth; autism is DISABLED (change 10); no comma inserted into a location.
