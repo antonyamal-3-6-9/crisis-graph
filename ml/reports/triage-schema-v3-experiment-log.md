@@ -339,3 +339,10 @@ labels after seeing results would move the goalposts.
   60 (change 11), stranding gold by stated flooding (change 12), "nobody is
   sick" stays UNKNOWN, UNDER_REVIEW households get a null headcount, and dry
   people above waist-deep water are STABLE.
+- **Batch 5 (50, injection T11, review independence T12, negation / past /
+  hypothetical T13):** 27 English, 12 Manglish, 11 Malayalam. Injected
+  instructions try to empty or lower fields, inflate urgency, change the
+  relation or skip review; complete V2 fields give no review whatever the
+  profile and missing ones always do; negated, resolved and hypothetical
+  facts, including a hypothetical asset request. Pending AI first pass and
+  owner review.
