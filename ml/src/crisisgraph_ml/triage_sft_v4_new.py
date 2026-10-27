@@ -910,8 +910,8 @@ def batch_4() -> list[dict[str, Any]]:
           "is completely under water. I'm in Bahrain.",
           location="Vettampara", headcount=2, asset=None, gold="CRITICAL",
           other=roof, water="ROOF", **REMOTE_FAMILY),
-        r(13, "T8", "ml", "ഒരു കുടുംബം മരത്തിൽ കയറി ഇരിക്കുകയാണ്, മൂന്നുപേർ, ഒരു "
-          "കൈക്കുഞ്ഞും ഉണ്ട്. ഞാൻ എന്റെ വീടിന്റെ മുകളിൽ നിന്ന് കാണുന്നു. "
+        r(13, "T8", "ml", "ഒരു കുടുംബം മരത്തിൽ കയറി ഇരിക്കുകയാണ്, മൂന്നുപേർ, അതിൽ "
+          "ഒരു കൈക്കുഞ്ഞ്. ഞാൻ എന്റെ വീടിന്റെ മുകളിൽ നിന്ന് കാണുന്നു. "
           "ചെങ്ങൽ തോടിന് അടുത്ത്.",
           location="ചെങ്ങൽ തോട്", headcount=3, asset=None, gold="CRITICAL",
           other=tree, groups=["INFANT"], **BYSTANDER),
@@ -1006,7 +1006,7 @@ def batch_4() -> list[dict[str, Any]]:
         r(36, "T10", "manglish", "Ente veettil vellam keri, ammayum randu kuttikalum avide und. "
           "Kuruvilassery road.",
           location="Kuruvilassery road", headcount=3, asset=None, gold="UNKNOWN",
-          groups=["CHILD"], relation="UNDER_REVIEW"),  # own home, reporter there?
+          groups=["CHILD"], relation="HOUSEHOLD"),  # "avide" (there): reporter away
         r(37, "T10", "ml", "ഞങ്ങളുടെ വീട്ടിൽ അച്ഛനും അമ്മയും ഉണ്ട്, അരയോളം വെള്ളം. "
           "മഞ്ഞപ്പെട്ടി കവല.",
           location="മഞ്ഞപ്പെട്ടി കവല", headcount=2, asset=None, gold="URGENT",
@@ -1170,8 +1170,10 @@ NOTES = {
     "sft-v4-new-b4-029": "Upper floor of an office, chest-deep water below: no "
     "other_conditions; gold URGENT for adults.",
     "sft-v4-new-b4-035": "Sister standing outside: HOUSEHOLD, on scene.",
-    "sft-v4-new-b4-036": "'Ente veettil' (my house) with mother and children there: whether "
-    "the reporter is among them is open, so UNDER_REVIEW.",
+    "sft-v4-new-b4-036": "'Avide und' (are there, distal) points to the reporter being away: "
+    "HOUSEHOLD, on_scene null (AI review; was UNDER_REVIEW).",
+    "sft-v4-new-b4-013": "Reworded to 'three, one of them a baby' so the headcount is "
+    "unambiguous (AI review).",
     "sft-v4-new-b4-037": "'Our house' with the parents there: UNDER_REVIEW.",
     "sft-v4-new-b4-038": "Village office: THIRD_PARTY; '14 families' gives no headcount.",
     "sft-v4-new-b4-039": "'I left this morning': on_scene false. 'Mother' adds no ELDERLY.",
@@ -1181,7 +1183,10 @@ NOTES = {
     "sft-v4-new-b4-045": "Friend: THIRD_PARTY; 'njan avide illa' (I'm not there): on_scene "
     "false.",
     "sft-v4-new-b4-048": "'Ammachi ottakku' (alone at home) implies the reporter is elsewhere "
-    "but does not say where: HOUSEHOLD, on_scene null. Owner check.",
+    "but does not say where: HOUSEHOLD, on_scene null (AI review agrees). Owner check.",
+    "sft-v4-new-b4-049": "'Above their windows' is ABOVE_HEAD, as owner-reviewed batch 1, 012.",
+    "sft-v4-new-b4-023": "Hospital that lost power, knee-deep water: gold STABLE. AI review "
+    "suggests URGENT. Owner check.",
 }
 
 
