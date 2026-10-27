@@ -656,7 +656,8 @@ def batch_3() -> list[dict[str, Any]]:
           "in wheelchairs. Water is waist deep on the ground floor and rising. Send an evacuation "
           "truck.",
           location="Karimugal old age home", headcount=12, asset="EVAC_TRUCK", gold="CRITICAL",
-          groups=["ELDERLY", "DISABLED"], water="WAIST", trend="RISING", **BYSTANDER),
+          groups=["ELDERLY", "DISABLED"], water="WAIST", trend="RISING",
+          relation="THIRD_PARTY"),  # role stated, position not: on_scene null
         r(8, "T5", "ml", "എട്ടുമാസം ഗർഭിണിയായ ഭാര്യയും ഞാനും ആണ്. മുട്ടോളം വെള്ളം. "
           "ഐരാപുരം പള്ളിക്ക് അടുത്ത്.",
           location="ഐരാപുരം പള്ളി", headcount=2, asset=None, gold="URGENT",
@@ -820,7 +821,7 @@ def batch_3() -> list[dict[str, Any]]:
           location="Chelad ferry", headcount=6, asset=None, gold="CRITICAL",
           medical=["INJURY", "BREATHING_DIFFICULTY"], **SELF),
         r(48, "T7", "manglish", "Ammakku kaiyil cheriya murivu, chora ninnu. Pakshe amma bodham "
-          "ketta pole kidakkunnu, vilichal anakkunnilla. Njangal 3 per Keezhillam school.",
+          "ketta pole kidakkunnu, vilichittu mindunnilla. Njangal 3 per Keezhillam school.",
           location="Keezhillam school", headcount=3, asset=None, gold="CRITICAL",
           medical=["INJURY", "UNCONSCIOUS"], **SELF),
         r(49, "T7", "en", "He sprained his ankle, nothing serious, he can still walk. 3 of us at "
@@ -892,6 +893,8 @@ NOTES = {
     "rules give UNKNOWN. Owner check.",
     "sft-v4-new-b3-006": "Autism labelled DISABLED (developmental disability). 'Makan' (son) "
     "adds no CHILD. Owner check.",
+    "sft-v4-new-b3-007": "Warden: THIRD_PARTY. Says who, not where, so on_scene null (AI "
+    "review). Headcount counts residents only.",
     "sft-v4-new-b3-009": "Water at the doorstep, not inside: no depth where they are, so null. "
     "Gold STABLE (safe for now). Owner check.",
     "sft-v4-new-b3-011": "Oxygen with about 3 hours left: CHRONIC_CARE (no acute episode), gold "
