@@ -333,5 +333,9 @@ labels after seeing results would move the goalposts.
   English, 13 Malayalam, 12 Manglish. Roofs, terraces, trees and a car roof
   with and without stated flooding; hypothetical or incidental trips to the
   terrace; stranding at clinics, schools, camps and upper floors; every
-  relation value including UNDER_REVIEW and coordinator phrasing. Pending AI
-  first pass and owner review.
+  relation value including UNDER_REVIEW and coordinator phrasing. AI first
+  pass: "avide" (there) places the reporter away (HOUSEHOLD, not
+  UNDER_REVIEW). Owner review, checked against the frozen set: "about 60" is
+  60 (change 11), stranding gold by stated flooding (change 12), "nobody is
+  sick" stays UNKNOWN, UNDER_REVIEW households get a null headcount, and dry
+  people above waist-deep water are STABLE.

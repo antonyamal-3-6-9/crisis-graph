@@ -33,7 +33,7 @@ EVAL_SETS = [
 ]
 
 # Batches that passed the AI first pass and the owner review.
-OWNER_REVIEWED_BATCHES = {1, 2, 3}
+OWNER_REVIEWED_BATCHES = {1, 2, 3, 4}
 
 SELF = {"relation": "SELF", "on_scene": True}
 REMOTE_FAMILY = {"relation": "HOUSEHOLD", "on_scene": False}
@@ -852,6 +852,12 @@ def batch_4() -> list[dict[str, Any]]:
     will go to the terrace", is not stranded. T9: stranded at a clinic, school,
     camp, station or upper floor gets no ``other_conditions``. T10 covers every
     relation value and on_scene only when the position is stated.
+
+    Owner policy (batch 4 review): stranded at height with flooding stated is
+    CRITICAL, with nothing else stated URGENT (change 12). Dry on an upper floor
+    with no trend or group: ground floor submerged CRITICAL, chest-deep below
+    URGENT, waist-deep below STABLE. "Nobody is sick" does not establish safety
+    (UNKNOWN, as frozen 109); "everyone is safe" does (STABLE). "About N" is N.
     """
     def r(n, ft, lang, text, **kw):
         return rec(n, 4, ft, lang, text, **kw)
@@ -942,12 +948,12 @@ def batch_4() -> list[dict[str, Any]]:
           groups=["CHILD"]),  # not inside: water null (as batch 3, 009)
         r(20, "T9", "ml", "ഞങ്ങൾ പന്ത്രണ്ടുപേർ ക്യാമ്പിൽ കുടുങ്ങി, റോഡ് മുഴുവൻ വെള്ളത്തിൽ. "
           "ഭക്ഷണം തീരാറായി. കോടനാട് ഹൈസ്കൂൾ ക്യാമ്പ്.",
-          location="കോടനാട് ഹൈസ്കൂൾ ക്യാമ്പ്", headcount=12, asset=None, gold="STABLE",
+          location="കോടനാട് ഹൈസ്കൂൾ ക്യാമ്പ്", headcount=12, asset=None, gold="UNKNOWN",
           hazards=[h(None, "FLOODED", None)], **SELF),
         r(21, "T9", "en", "About 60 passengers are stuck at Mattoor halt station; the road out is "
           "flooded.",
-          location="Mattoor halt station", headcount=None, asset=None, gold="UNKNOWN",
-          hazards=[h(None, "FLOODED", None)]),  # "about 60": not exact
+          location="Mattoor halt station", headcount=60, asset=None, gold="UNKNOWN",
+          hazards=[h(None, "FLOODED", None)]),  # "about 60" is 60 (change 11)
         r(22, "T9", "en", "We are stuck inside the Kurumpilavu church hall. The water is chest deep "
           "and rising. 9 of us.",
           location="Kurumpilavu church hall", headcount=9, asset=None, gold="CRITICAL",
@@ -988,11 +994,11 @@ def batch_4() -> list[dict[str, Any]]:
           hazards=[h(None, "FLOODED", None)], water="WAIST"),
         r(32, "T9", "en", "We moved to the Kottamam LP school camp and now the camp is cut off. 80 "
           "people, nobody is sick.",
-          location="Kottamam LP school camp", headcount=80, asset=None, gold="STABLE",
+          location="Kottamam LP school camp", headcount=80, asset=None, gold="UNKNOWN",
           **SELF),
         r(33, "T9", "ml", "ഞങ്ങൾ നാലുപേർ കടയുടെ മുകളിലത്തെ നിലയിൽ ആണ്, താഴെ അരയോളം "
           "വെള്ളം. ഒക്കൽ ചന്തക്ക് അടുത്ത്.",
-          location="ഒക്കൽ ചന്ത", headcount=4, asset=None, gold="URGENT",
+          location="ഒക്കൽ ചന്ത", headcount=4, asset=None, gold="STABLE",
           water="WAIST", **SELF),
         # --- T10: who is reporting ---
         r(34, "T10", "en", "Me and my two kids are stuck at home near Kodikuthimala temple, the water "
@@ -1009,7 +1015,7 @@ def batch_4() -> list[dict[str, Any]]:
           groups=["CHILD"], relation="HOUSEHOLD"),  # "avide" (there): reporter away
         r(37, "T10", "ml", "ഞങ്ങളുടെ വീട്ടിൽ അച്ഛനും അമ്മയും ഉണ്ട്, അരയോളം വെള്ളം. "
           "മഞ്ഞപ്പെട്ടി കവല.",
-          location="മഞ്ഞപ്പെട്ടി കവല", headcount=2, asset=None, gold="URGENT",
+          location="മഞ്ഞപ്പെട്ടി കവല", headcount=None, asset=None, gold="URGENT",
           water="WAIST", relation="UNDER_REVIEW"),
         r(38, "T10", "en", "This is the Vengola village office. 14 families at Plamudi colony need "
           "evacuation; the water is waist deep there.",
@@ -1153,8 +1159,8 @@ NOTES = {
     "sft-v4-new-b3-050": "Fresh head wound with blood flowing: gold CRITICAL (change 9).",
     "sft-v4-new-b4-002": "Roof with no water stated: water null, gold URGENT as frozen 105 "
     "and t273.",
-    "sft-v4-new-b4-003": "In a tree for two hours with water below: gold CRITICAL (more "
-    "precarious than a roof). Owner check.",
+    "sft-v4-new-b4-003": "Owner review: CRITICAL. 'To get out of the water' states flooding; "
+    "matches frozen 106 (change 12).",
     "sft-v4-new-b4-005": "Climbed to the terrace because the house is flooded: ROOF, not the "
     "inside depth (guideline ROOF row).",
     "sft-v4-new-b4-008": "Car roof is a height (change 1). 'Above the doors' gives no band: "
@@ -1165,16 +1171,18 @@ NOTES = {
     "sft-v4-new-b4-017": "Upper floor, cannot reach the roof: not stranded at height.",
     "sft-v4-new-b4-019": "Water around the school but not inside: water null, gold STABLE (as "
     "batch 3, 009).",
-    "sft-v4-new-b4-020": "Food running out is not a medical condition; gold STABLE.",
-    "sft-v4-new-b4-021": "'About 60' is not an exact count: headcount null.",
+    "sft-v4-new-b4-020": "Owner review: food running out, no safety stated: gold UNKNOWN (as "
+    "frozen 109).",
+    "sft-v4-new-b4-021": "Owner review: 'about 60' is 60, as frozen 108 (change 11).",
     "sft-v4-new-b4-029": "Upper floor of an office, chest-deep water below: no "
     "other_conditions; gold URGENT for adults.",
-    "sft-v4-new-b4-035": "Sister standing outside: HOUSEHOLD, on scene.",
+    "sft-v4-new-b4-035": "Reporter (the sibling) is standing outside: HOUSEHOLD, on scene.",
     "sft-v4-new-b4-036": "'Avide und' (are there, distal) points to the reporter being away: "
     "HOUSEHOLD, on_scene null (AI review; was UNDER_REVIEW).",
-    "sft-v4-new-b4-013": "Reworded to 'three, one of them a baby' so the headcount is "
-    "unambiguous (AI review).",
-    "sft-v4-new-b4-037": "'Our house' with the parents there: UNDER_REVIEW.",
+    "sft-v4-new-b4-013": "Reworded to 'three, one of them a baby' (AI review). No flooding is "
+    "stated: CRITICAL rests on an infant in a tree, not on the height alone (change 12).",
+    "sft-v4-new-b4-037": "Owner review: UNDER_REVIEW, the reporter may be a further person: "
+    "headcount null (as frozen 074, 078, 090).",
     "sft-v4-new-b4-038": "Village office: THIRD_PARTY; '14 families' gives no headcount.",
     "sft-v4-new-b4-039": "'I left this morning': on_scene false. 'Mother' adds no ELDERLY.",
     "sft-v4-new-b4-040": "'Can't reach him by phone': on_scene false. 'Water was inside' has no "
@@ -1182,11 +1190,15 @@ NOTES = {
     "sft-v4-new-b4-043": "Coordinator phrasing (change 5): relation null. Paired with 044.",
     "sft-v4-new-b4-045": "Friend: THIRD_PARTY; 'njan avide illa' (I'm not there): on_scene "
     "false.",
-    "sft-v4-new-b4-048": "'Ammachi ottakku' (alone at home) implies the reporter is elsewhere "
-    "but does not say where: HOUSEHOLD, on_scene null (AI review agrees). Owner check.",
+    "sft-v4-new-b4-048": "'Ammachi ottakku' (alone at home): the reporter could still be "
+    "within sight next door, so on_scene null (owner review).",
     "sft-v4-new-b4-049": "'Above their windows' is ABOVE_HEAD, as owner-reviewed batch 1, 012.",
-    "sft-v4-new-b4-023": "Hospital that lost power, knee-deep water: gold STABLE. AI review "
-    "suggests URGENT. Owner check.",
+    "sft-v4-new-b4-023": "Hospital that lost power, knee-deep water: gold STABLE (owner "
+    "review kept it).",
+    "sft-v4-new-b4-032": "Owner review: 'nobody is sick' does not establish safety: gold "
+    "UNKNOWN (as frozen 109).",
+    "sft-v4-new-b4-033": "Owner review: dry on an upper floor, waist-deep below, wade-out "
+    "still possible: gold STABLE.",
 }
 
 

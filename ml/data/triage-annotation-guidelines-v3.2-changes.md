@@ -58,3 +58,18 @@ disabilities state a disability: `vulnerable_groups: ["DISABLED"]` (they are
 specified disabilities under India's Rights of Persons with Disabilities Act,
 2016). A relation word beside them ("my son is autistic") still adds no age
 group.
+
+## 11. "About N people" is N (owner decision, 2026-10-27)
+
+An approximate count ("about 60 passengers", "ഇരുപതോളം പേർ") gives
+`headcount: N`, as in the frozen v3.1.0 labels. A count that leaves open
+whether someone is included ("three people, and a baby too") is still `null`.
+
+## 12. Gold tier for people stranded at height (owner decision, 2026-10-27)
+
+Stranded on a roof, terrace, tree or car roof (change 1) with flooding or the
+water stated ("to get out of the water", "the house is flooded", flowing water
+below) is gold `CRITICAL`. With nothing else stated ("five people on the roof
+waiting for a boat") it is gold `URGENT`. Other facts can still raise it (an
+infant in a tree is `CRITICAL`). The urgency rules give `CRITICAL` for any
+stranding entry either way.
