@@ -611,7 +611,230 @@ def batch_2() -> list[dict[str, Any]]:
     ]
 
 
-BATCHES = {1: batch_1, 2: batch_2}
+def batch_3() -> list[dict[str, Any]]:
+    """T5 groups in the right field; T6 groups only when stated; T7 INJURY next
+    to a more serious condition.
+
+    T5: bedridden, wheelchair, blind, "cannot walk without help" and pregnancy
+    are groups, never ``other_conditions``; dialysis, insulin and oxygen are
+    CHRONIC_CARE, not groups. T6 pairs a bare relation ("my father", "my son",
+    "makkal") with the same relation plus a stated age or a relation that states
+    age (grandmother, old age home); "old house" or "college students" give no
+    group. T7 keeps INJURY beside the critical category and drops it under
+    negation ("fell but not hurt"). Bleeding gold follows guideline change 9.
+    """
+    def r(n, ft, lang, text, **kw):
+        return rec(n, 3, ft, lang, text, **kw)
+
+    return [
+        # --- T5: groups in the right field ---
+        r(1, "T5", "en", "My mother has been bedridden since her stroke. The water is knee deep in "
+          "her room now. We are 3 at Pallarimangalam lane.",
+          location="Pallarimangalam lane", headcount=3, asset=None, gold="URGENT",
+          groups=["BEDRIDDEN"], water="KNEE", **SELF),  # past stroke, no treatment: no CHRONIC_CARE
+        r(2, "T5", "manglish", "Ammoomma kidappilaanu, vellam muttolam aayi. Njangal 4 per, "
+          "Chovvara kadavu.",
+          location="Chovvara kadavu", headcount=4, asset=None, gold="URGENT",
+          groups=["ELDERLY", "BEDRIDDEN"], water="KNEE", **SELF),
+        r(3, "T5", "ml", "അച്ഛൻ കിടപ്പുരോഗിയാണ്, അരയോളം വെള്ളം ഉണ്ട്. ഞങ്ങൾ മൂന്നുപേർ "
+          "കൂവപ്പടി റോഡിൽ.",
+          location="കൂവപ്പടി റോഡ്", headcount=3, asset=None, gold="CRITICAL",
+          groups=["BEDRIDDEN"], water="WAIST", **SELF),  # bed height (batch 2 policy)
+        r(4, "T5", "en", "My brother uses a wheelchair. Two of us at Thekkumbhagam colony, the "
+          "water is ankle deep.",
+          location="Thekkumbhagam colony", headcount=2, asset=None, gold="STABLE",
+          groups=["DISABLED"], water="ANKLE", **SELF),
+        r(5, "T5", "en", "My uncle is blind and lives alone at Kappoor junction. Water has come into "
+          "his house and he cannot tell how deep it is. I am in Kollam.",
+          location="Kappoor junction", headcount=1, asset=None, gold="URGENT",
+          groups=["DISABLED"], **REMOTE_FAMILY),
+        r(6, "T5", "manglish", "Ente makan autistic aanu, vellam kandu pedichu irikkukayaanu. "
+          "Njangal 3 per Pazhamthottam church nte aduthu.",
+          location="Pazhamthottam church", headcount=3, asset=None, gold="UNKNOWN",
+          groups=["DISABLED"], **SELF),  # developmental disability; "makan" adds no CHILD
+        r(7, "T5", "en", "I am the warden of the Karimugal old age home. 12 residents, three of them "
+          "in wheelchairs. Water is waist deep on the ground floor and rising. Send an evacuation "
+          "truck.",
+          location="Karimugal old age home", headcount=12, asset="EVAC_TRUCK", gold="CRITICAL",
+          groups=["ELDERLY", "DISABLED"], water="WAIST", trend="RISING", **BYSTANDER),
+        r(8, "T5", "ml", "എട്ടുമാസം ഗർഭിണിയായ ഭാര്യയും ഞാനും ആണ്. മുട്ടോളം വെള്ളം. "
+          "ഐരാപുരം പള്ളിക്ക് അടുത്ത്.",
+          location="ഐരാപുരം പള്ളി", headcount=2, asset=None, gold="URGENT",
+          groups=["PREGNANT"], water="KNEE", **SELF),
+        r(9, "T5", "en", "We have a 10-day-old baby with us. The water is at the doorstep but not "
+          "inside yet. 3 of us at Ayyampilly lane.",
+          location="Ayyampilly lane", headcount=3, asset=None, gold="STABLE",
+          groups=["INFANT"], **SELF),  # no depth where they are: water null
+        r(10, "T5", "manglish", "Achan dialysis patient aanu, naale dialysis und, pakshe road "
+          "muzhuvan vellathil. Njangal 2 per, Vengola kavala.",
+          location="Vengola kavala", headcount=2, asset=None, gold="URGENT",
+          hazards=[h(None, "FLOODED", None)], medical=["CHRONIC_CARE"], **SELF),
+        r(11, "T5", "en", "My grandfather is 91, bedridden and on oxygen. The power is gone and the "
+          "cylinder has about 3 hours left. We are 4 at Mudickal school road.",
+          location="Mudickal school road", headcount=4, asset=None, gold="URGENT",
+          medical=["CHRONIC_CARE"], groups=["ELDERLY", "BEDRIDDEN"], **SELF),
+        r(12, "T5", "ml", "അമ്മൂമ്മയ്ക്ക് കാഴ്ചയില്ല. ഞങ്ങൾ രണ്ടുപേർ, നെഞ്ചോളം വെള്ളം. "
+          "ഓണമ്പിള്ളി കടവിന് അടുത്ത്.",
+          location="ഓണമ്പിള്ളി കടവ്", headcount=2, asset=None, gold="CRITICAL",
+          groups=["ELDERLY", "DISABLED"], water="CHEST", **SELF),
+        r(13, "T5", "en", "There is a diabetic man here whose insulin got washed away. With him we "
+          "are 5 at the Vallathode ferry shed.",
+          location="Vallathode ferry shed", headcount=5, asset=None, gold="URGENT",
+          medical=["CHRONIC_CARE"], **SELF),
+        r(14, "T5", "manglish", "Oru kaikkunjum randu kuttikalum und, vellam aravolam. Njangal 5 "
+          "per Kavalangad kavala.",
+          location="Kavalangad kavala", headcount=5, asset=None, gold="CRITICAL",
+          groups=["INFANT", "CHILD"], water="WAIST", **SELF),
+        r(15, "T5", "en", "My father can't walk without help since his knee surgery. The water is "
+          "knee deep and rising slowly. 3 of us at Nellimattom road.",
+          location="Nellimattom road", headcount=3, asset=None, gold="URGENT",
+          groups=["DISABLED"], water="KNEE", trend="RISING", **SELF),  # change 6
+        r(16, "T5", "ml", "ഭിന്നശേഷിക്കാരനായ മകൻ ഉണ്ട്. താഴത്തെ നില മുങ്ങി, ഞങ്ങൾ "
+          "നാലുപേർ മുകളിൽ. പുന്നോർക്കോട് ജംഗ്ഷൻ.",
+          location="പുന്നോർക്കോട് ജംഗ്ഷൻ", headcount=4, asset=None, gold="CRITICAL",
+          groups=["DISABLED"], water="ABOVE_HEAD", **SELF),
+        r(17, "T5", "en", "An elderly couple, both over 80, at Pindimana church lane. Water at waist "
+          "height. Their neighbour called me; I'm the ward member and I can't reach them.",
+          location="Pindimana church lane", headcount=2, asset=None, gold="URGENT",
+          groups=["ELDERLY"], water="WAIST", relation="THIRD_PARTY", on_scene=False),
+        # --- T6: groups only when stated ---
+        r(18, "T6", "en", "My son is stuck at his office at Thottuva junction with 3 colleagues. "
+          "Water is all around the building. I'm at home in Kalady.",
+          location="Thottuva junction", headcount=4, asset=None, gold="UNKNOWN",
+          **REMOTE_FAMILY),  # "son": no CHILD
+        r(19, "T6", "en", "My 6-year-old son and I are on the first floor; the ground floor is under "
+          "water. Mekkadambu lane.",
+          location="Mekkadambu lane", headcount=2, asset=None, gold="CRITICAL",
+          groups=["CHILD"], water="ABOVE_HEAD", **SELF),
+        r(20, "T6", "en", "My father is alone at home near Manjapra temple and the water is knee "
+          "deep. I can't get there.",
+          location="Manjapra temple", headcount=1, asset=None, gold="STABLE",
+          water="KNEE", **REMOTE_FAMILY),  # "father": no ELDERLY
+        r(21, "T6", "en", "My 78-year-old father is alone at home near Iravipuram temple and the "
+          "water is knee deep. I can't get there.",
+          location="Iravipuram temple", headcount=1, asset=None, gold="URGENT",
+          groups=["ELDERLY"], water="KNEE", **REMOTE_FAMILY),
+        r(22, "T6", "manglish", "Ente makal ulpade 30 college students hostel il kudungi kidakkunnu, "
+          "ground floor il vellam keri. Kizhakkedathu hostel, Vazhappilly.",
+          location="Kizhakkedathu hostel, Vazhappilly", headcount=30, asset=None, gold="UNKNOWN",
+          relation="HOUSEHOLD"),  # college students, "makal": no CHILD
+        r(23, "T6", "ml", "അച്ഛനും അമ്മയും വീട്ടിൽ ഒറ്റയ്ക്കാണ്, മുട്ടോളം വെള്ളം. "
+          "തുറവുങ്കര ജംഗ്ഷൻ. ഞാൻ ബാംഗ്ലൂരിൽ ആണ്.",
+          location="തുറവുങ്കര ജംഗ്ഷൻ", headcount=2, asset=None, gold="STABLE",
+          water="KNEE", **REMOTE_FAMILY),
+        r(24, "T6", "ml", "എൺപത് വയസ്സുള്ള അമ്മ വീട്ടിൽ ഒറ്റയ്ക്കാണ്, അരയോളം വെള്ളം. "
+          "ചേലാമറ്റം പള്ളിക്ക് സമീപം. ഞാൻ ദുബായിൽ ആണ്.",
+          location="ചേലാമറ്റം പള്ളി", headcount=1, asset=None, gold="URGENT",
+          groups=["ELDERLY"], water="WAIST", **REMOTE_FAMILY),
+        r(25, "T6", "en", "Our house is very old and leaks badly. 4 of us inside at Kottayil lane, "
+          "the water is at our knees.",
+          location="Kottayil lane", headcount=4, asset=None, gold="STABLE",
+          water="KNEE", **SELF),  # "old house": no ELDERLY
+        r(26, "T6", "en", "20 residents of the Karunalayam old age home at Kizhakkumuri. Water is "
+          "entering the hall.",
+          location="Karunalayam old age home, Kizhakkumuri", headcount=20, asset=None,
+          gold="URGENT", groups=["ELDERLY"], trend="RISING"),  # change 4
+        r(27, "T6", "manglish", "Ente bharya garbhini aanu, 7 maasam. Njangal 2 per Odakkali "
+          "junction il, vellam kanankaal vare.",
+          location="Odakkali junction", headcount=2, asset=None, gold="URGENT",
+          groups=["PREGNANT"], water="ANKLE", **SELF),
+        r(28, "T6", "manglish", "Ente bharyayum njanum mathram, vellam muttolam, kuzhappamilla. "
+          "Rayamangalam LP school.",
+          location="Rayamangalam LP school", headcount=2, asset=None, gold="STABLE",
+          water="KNEE", **SELF),  # "bharya": no group
+        r(29, "T6", "en", "We are 3 adults and 2 kids at Edamalayar bus stop. The water is ankle "
+          "deep.",
+          location="Edamalayar bus stop", headcount=5, asset=None, gold="STABLE",
+          groups=["CHILD"], water="ANKLE", **SELF),
+        r(30, "T6", "en", "My little brother and I are stuck at the tuition centre near Panichayam. "
+          "The water is up to my waist.",
+          location="Panichayam", headcount=2, asset=None, gold="URGENT",
+          water="WAIST", **SELF),  # "little brother": no stated age, no CHILD
+        r(31, "T6", "ml", "മക്കൾ രണ്ടുപേരും ഞാനും ആണ് വീട്ടിൽ. അരയോളം വെള്ളം ഉണ്ട്. "
+          "മാറമ്പിള്ളി കനാൽ റോഡ്.",
+          location="മാറമ്പിള്ളി കനാൽ റോഡ്", headcount=3, asset=None, gold="URGENT",
+          water="WAIST", **SELF),  # "makkal" (offspring) states no age
+        r(32, "T6", "manglish", "Valiyachan ottakku aanu, vellam muttolam und. Asamannoor "
+          "church nte aduthulla veedu.",
+          location="Asamannoor church", headcount=1, asset=None, gold="STABLE",
+          water="KNEE", relation="HOUSEHOLD"),  # uncle: relation states no age
+        r(33, "T6", "en", "Two schoolgirls are stuck at the bus shelter near Kombanattu junction, "
+          "water at their knees. I can see them from my shop.",
+          location="Kombanattu junction", headcount=2, asset=None, gold="URGENT",
+          groups=["CHILD"], water="KNEE", **BYSTANDER),
+        r(34, "T6", "en", "Me, my husband and our 3-month-old daughter. Water is waist deep and "
+          "rising. Kodanad road.",
+          location="Kodanad road", headcount=3, asset=None, gold="CRITICAL",
+          groups=["INFANT"], water="WAIST", trend="RISING", **SELF),
+        # --- T7: INJURY next to a more serious condition ---
+        r(35, "T7", "en", "My husband just fell from the ladder and his head is bleeding. We are 2 "
+          "at Kurichilakode. Need an ambulance.",
+          location="Kurichilakode", headcount=2, asset="AMBULANCE", gold="CRITICAL",
+          medical=["BLEEDING", "INJURY"], **SELF),  # fresh head wound (change 9)
+        r(36, "T7", "en", "A wall collapsed on a man at Vayalkara market. His leg is crushed and he "
+          "is not responding. I'm one of the people trying to lift the wall.",
+          location="Vayalkara market", headcount=1, asset=None, gold="CRITICAL",
+          medical=["UNCONSCIOUS", "INJURY"], other=["trapped under debris"], **BYSTANDER),
+        r(37, "T7", "manglish", "Achante kaal odinju, pinne shwasam muttalum und. Njangal 3 per "
+          "Mazhuvannoor kavala.",
+          location="Mazhuvannoor kavala", headcount=3, asset=None, gold="CRITICAL",
+          medical=["BREATHING_DIFFICULTY", "INJURY"], **SELF),
+        r(38, "T7", "ml", "ഗ്യാസ് സിലിണ്ടർ പൊട്ടി, ചേട്ടന് പൊള്ളലേറ്റു, ശ്വാസം "
+          "കിട്ടുന്നില്ല. ഞങ്ങൾ മൂന്നുപേർ കീരംപാറ റോഡിൽ.",
+          location="കീരംപാറ റോഡ്", headcount=3, asset=None, gold="CRITICAL",
+          medical=["INJURY", "BREATHING_DIFFICULTY"], **SELF),  # burn is INJURY
+        r(39, "T7", "en", "My neighbour has a deep cut on his arm from a tin sheet and it won't stop "
+          "bleeding. I'm with him at Ramallur lane.",
+          location="Ramallur lane", headcount=1, asset=None, gold="CRITICAL",
+          medical=["BLEEDING", "INJURY"], **BYSTANDER),
+        r(40, "T7", "en", "My son broke his arm when he slipped on the stairs. Otherwise we are "
+          "fine. 4 of us at Nedungapra, water at the knees.",
+          location="Nedungapra", headcount=4, asset=None, gold="URGENT",
+          medical=["INJURY"], water="KNEE", **SELF),  # fracture only; "son": no CHILD
+        r(41, "T7", "manglish", "Ammakku thalayil murivu und, chora ninnu, pakshe ippo nenju "
+          "vedana thudangi. Njangal 2 per Kuttampuzha road.",
+          location="Kuttampuzha road", headcount=2, asset=None, gold="CRITICAL",
+          medical=["INJURY", "CARDIAC"], **SELF),  # bleeding stopped: INJURY, not BLEEDING
+        r(42, "T7", "ml", "അച്ഛൻ വീണു, പക്ഷേ പരിക്കൊന്നുമില്ല. ഞങ്ങൾ നാലുപേർ, മുട്ടോളം "
+          "വെള്ളം. വേങ്ങൂർ ലൈബ്രറിക്ക് അടുത്ത്.",
+          location="വേങ്ങൂർ ലൈബ്രറി", headcount=4, asset=None, gold="STABLE",
+          water="KNEE", **SELF),  # negation: no INJURY
+        r(43, "T7", "en", "My cousin was hit by floating debris and is unconscious, with a gash on "
+          "his forehead that is bleeding a lot. We are 2 at Pulluvazhy junction.",
+          location="Pulluvazhy junction", headcount=2, asset=None, gold="CRITICAL",
+          medical=["UNCONSCIOUS", "BLEEDING", "INJURY"], **SELF),
+        r(44, "T7", "manglish", "Aniyanu shock adichu, kaiyil pollalum und. Njangal 3 per "
+          "Thrikkariyoor kavala.",
+          location="Thrikkariyoor kavala", headcount=3, asset=None, gold="CRITICAL",
+          medical=["INJURY"], other=["electric shock"], **SELF),
+        r(45, "T7", "en", "My mother fell and we think her hip is broken. She is 82 and in a lot of "
+          "pain. We are 3 at Vadavucode church road.",
+          location="Vadavucode church road", headcount=3, asset=None, gold="URGENT",
+          medical=["INJURY"], groups=["ELDERLY"], **SELF),
+        r(46, "T7", "ml", "മരം വീണ് ആന്റിയുടെ കാലിൽ മുറിവ്, രക്തം നിൽക്കുന്നില്ല. ഞങ്ങൾ "
+          "മൂന്നുപേർ കോട്ടപ്പടി കവലയിൽ.",
+          location="കോട്ടപ്പടി കവല", headcount=3, asset=None, gold="CRITICAL",
+          medical=["BLEEDING", "INJURY"], **SELF),
+        r(47, "T7", "en", "Our boat tipped over near Chelad ferry. One of us has a broken leg and "
+          "another is struggling to breathe. We are 6 on the bank.",
+          location="Chelad ferry", headcount=6, asset=None, gold="CRITICAL",
+          medical=["INJURY", "BREATHING_DIFFICULTY"], **SELF),
+        r(48, "T7", "manglish", "Ammakku kaiyil cheriya murivu, chora ninnu. Pakshe amma bodham "
+          "ketta pole kidakkunnu, vilichal anakkunnilla. Njangal 3 per Keezhillam school.",
+          location="Keezhillam school", headcount=3, asset=None, gold="CRITICAL",
+          medical=["INJURY", "UNCONSCIOUS"], **SELF),
+        r(49, "T7", "en", "He sprained his ankle, nothing serious, he can still walk. 3 of us at "
+          "Payyal junction, water ankle deep.",
+          location="Payyal junction", headcount=3, asset=None, gold="STABLE",
+          medical=["INJURY"], water="ANKLE", **SELF),  # minor injury (as batch 2, 032)
+        r(50, "T7", "ml", "കല്ല് വീണ് അപ്പൂപ്പന്റെ തല പൊട്ടി, ചോര ഒഴുകുന്നു. ഞങ്ങൾ "
+          "നാലുപേർ ചെറുവട്ടൂർ കാവിന് അടുത്ത്.",
+          location="ചെറുവട്ടൂർ കാവ്", headcount=4, asset=None, gold="CRITICAL",
+          medical=["BLEEDING", "INJURY"], groups=["ELDERLY"], **SELF),  # fresh head wound
+    ]
+
+
+BATCHES = {1: batch_1, 2: batch_2, 3: batch_3}
 
 # Annotator notes shown on the owner review sheet (not part of the records).
 NOTES = {
@@ -661,6 +884,37 @@ NOTES = {
     "sft-v4-new-b2-055": "'Difficulty walking' adds no group (guideline change 6); "
     "grandmother gives ELDERLY.",
     "sft-v4-new-b2-059": "'If the water rises' is hypothetical: trend null.",
+    "sft-v4-new-b3-001": "Stroke in the past, no treatment stated: BEDRIDDEN only, no "
+    "CHRONIC_CARE.",
+    "sft-v4-new-b3-003": "Bedridden with water at bed height: gold CRITICAL (batch 2 owner "
+    "policy, 045).",
+    "sft-v4-new-b3-004": "Wheelchair user in ankle-deep water: gold STABLE (safe for now); the "
+    "rules give UNKNOWN. Owner check.",
+    "sft-v4-new-b3-006": "Autism labelled DISABLED (developmental disability). 'Makan' (son) "
+    "adds no CHILD. Owner check.",
+    "sft-v4-new-b3-009": "Water at the doorstep, not inside: no depth where they are, so null. "
+    "Gold STABLE (safe for now). Owner check.",
+    "sft-v4-new-b3-011": "Oxygen with about 3 hours left: CHRONIC_CARE (no acute episode), gold "
+    "URGENT.",
+    "sft-v4-new-b3-017": "Ward member who cannot reach them: THIRD_PARTY, on_scene false.",
+    "sft-v4-new-b3-018": "'Son' adds no CHILD; he is at his office.",
+    "sft-v4-new-b3-020": "Pair with 021: 'my father' adds no ELDERLY; '78-year-old father' does.",
+    "sft-v4-new-b3-022": "College students and 'makal' (daughter): no CHILD. Reporter's "
+    "position not stated: on_scene null.",
+    "sft-v4-new-b3-025": "'Old house' describes the building: no ELDERLY.",
+    "sft-v4-new-b3-026": "Old age home residents: ELDERLY. 'Water is entering': RISING (change "
+    "4). Relation not stated.",
+    "sft-v4-new-b3-030": "'Little brother' states no age: no CHILD.",
+    "sft-v4-new-b3-031": "'Makkal' (offspring) states no age: no CHILD.",
+    "sft-v4-new-b3-032": "'Valiyachan' (uncle) states no age: no ELDERLY. Reporter's position "
+    "not stated.",
+    "sft-v4-new-b3-035": "Fresh head wound: gold CRITICAL (change 9).",
+    "sft-v4-new-b3-038": "Burn is INJURY, kept beside BREATHING_DIFFICULTY.",
+    "sft-v4-new-b3-041": "Head wound has stopped bleeding: INJURY, not BLEEDING; chest pain "
+    "now: CARDIAC.",
+    "sft-v4-new-b3-042": "'Fell, but not hurt': negation, no INJURY.",
+    "sft-v4-new-b3-049": "Minor sprain: INJURY only, gold STABLE (as batch 2, 032).",
+    "sft-v4-new-b3-050": "Fresh head wound with blood flowing: gold CRITICAL (change 9).",
 }
 
 

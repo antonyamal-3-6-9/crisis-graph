@@ -321,3 +321,9 @@ labels after seeing results would move the goalposts.
   "if the water keeps rising" is RISING (change 8); labour aligned to the
   frozen v3.1.0 gold, CRITICAL (change 7); an inner Malayalam genitive stays
   in the location.
+- **Batch 3 (50, groups T5–T6 and injury T7):** 27 English, 12 Manglish, 11
+  Malayalam. Groups versus medical fields (bedridden, wheelchair, blind,
+  "cannot walk without help", dialysis / insulin / oxygen as CHRONIC_CARE);
+  paired bare relations against stated ages ("my father" / "my 78-year-old
+  father"); INJURY kept beside critical conditions and dropped under negation.
+  Pending AI first pass and owner review.
