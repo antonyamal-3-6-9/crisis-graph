@@ -184,7 +184,7 @@ def batch_1() -> list[dict[str, Any]]:
         r(13, "T1", "en", "Ground floor fully flooded at Paduthode school, 40 people from the camp "
           "have moved to the first floor. No one is sick. We need boats to shift them.",
           location="Paduthode school", headcount=40, asset="RESCUE_BOAT", gold="CRITICAL",
-          water="ABOVE_HEAD"),  # "shift them": coordinator, relation unknown (rule 5)
+          water="ABOVE_HEAD"),  # "shift them": coordinator, relation unknown (change 5)
         r(14, "T1", "manglish", "Thazhathe nila full aayi mungi, vellam ippozhum koodunnu. "
           "Njangal 5 per und, athil oru kaikkunju. Ayiramthengu junction.",
           location="Ayiramthengu junction", headcount=5, asset=None, gold="CRITICAL",
@@ -349,9 +349,9 @@ def batch_2() -> list[dict[str, Any]]:
     null. Relatives named by role ("achan", "amma", "monu") add no age group.
 
     Owner policy (batch 2 review): bleeding is gold CRITICAL when it is heavy,
-    will not stop, or is postpartum, otherwise URGENT (the label stays
-    BLEEDING and the rules still give CRITICAL); a bleeding head wound (027)
-    awaits an owner decision. Labour is gold CRITICAL, as
+    will not stop, is postpartum or is a fresh head wound, otherwise URGENT
+    (guideline change 9; the label stays BLEEDING and the rules still give
+    CRITICAL). Labour is gold CRITICAL, as
     in the frozen v3.1.0 set (guideline change 7). A bedridden person who
     cannot be moved in water at bed height is CRITICAL even if it is falling.
     """
@@ -628,6 +628,8 @@ NOTES = {
     "sft-v4-new-b2-021": "Camp volunteer on site: THIRD_PARTY, on scene.",
     "sft-v4-new-b2-024": "Known heart disease, medicine running low, no symptoms: CHRONIC_CARE.",
     "sft-v4-new-b2-025": "Chest pain this morning, gone now: no condition, gold URGENT.",
+    "sft-v4-new-b2-027": "Fresh head wound from a fall just now: gold CRITICAL (guideline "
+    "change 9).",
     "sft-v4-new-b2-029": "Postpartum bleeding. The newborn is INFANT; the mother is no longer "
     "PREGNANT.",
     "sft-v4-new-b2-030": "Reporter's position not stated: on_scene null. Owner review: "

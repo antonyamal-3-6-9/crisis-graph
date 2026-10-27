@@ -39,3 +39,14 @@ presuppose that the water is rising now: `water_trend: RISING`. The
 conditional covers only what follows ("we will have to climb onto the roof"),
 which is not labelled. A plain "if the water rises" ("vellam koodiyal",
 "വെള്ളം കൂടിയാൽ") states no trend: `null`.
+
+## 9. Gold tier for bleeding (owner decision, 2026-10-27)
+
+Any stated active bleeding is labelled `BLEEDING` (safety asymmetry governs
+the label, not the gold). Gold `expected_urgency` is `CRITICAL` when the
+bleeding is heavy ("a lot", "orupaadu chora"), will not stop ("chora
+nilkkunnilla"), is postpartum, or is a **fresh** head wound (a fall or blow
+just now). Otherwise it is `URGENT`: a nosebleed that will not stop, a foot
+wound with blood flowing and people there to apply pressure, or a head wound
+that has bled for hours in someone who is talking (frozen v3.1.0 case 033).
+The urgency rules still give `CRITICAL` for any `BLEEDING`.
