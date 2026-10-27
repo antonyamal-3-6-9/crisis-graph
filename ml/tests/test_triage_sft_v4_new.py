@@ -28,3 +28,10 @@ def test_review_decision_follows_the_v2_rule():
         )
         assert target["needs_human_review"] is incomplete, record["id"]
         assert bool(target["uncertainty_reasons"]) is incomplete, record["id"]
+
+
+def test_every_new_record_uses_a_zero_context_rewrite():
+    # The module's own texts were drafted after exposure to the evaluation sets.
+    from crisisgraph_ml.triage_sft_v4_new import build_records
+
+    assert all(record.get("text_source") == "zero-context rewrite" for record in build_records())

@@ -348,3 +348,25 @@ labels after seeing results would move the goalposts.
   instruction leaked into a label; fixed a location joined across clauses and
   two wordings. Owner review: accepted; resolved non-category events follow
   the 24 h rule (change 13).
+
+### Training-data leak and rewrite (2026-10-27)
+
+The owner's review of batch 5 found records that were close copies,
+respellings or transliterations of frozen test messages. The cause: the
+author model had read evaluation cases earlier in the session (to align label
+conventions) and its drafting drifted toward them. A script-independent
+spelling-skeleton check (`translit.py`) was added, and an audit agent that
+read both sides found 55 of the 260 new records resembling a specific
+evaluation message (about 17 from the v3.1.0 headline set, most of the rest
+from v3.0.1).
+
+Owner decision: keep every reviewed label and rewrite **all 260 message
+texts**. Five zero-context agents, which never saw any evaluation set or the
+old texts, wrote new messages from the labels, the failure type, the lesson
+and the guidelines only (`data/triage-sft-v4-new-rewrites.json`, applied at
+build time; the old texts stay in the generator for provenance). Five
+rewrites still shared short natural phrases with test messages ("Achan heart
+patient aanu", "my parents are on the roof of their house"), which shows that
+independent writers converge on common phrasing; they were reworded to pass
+the checks. Lesson: whoever writes training data must never have seen the
+test set, so batches 6–7 are written by zero-context agents too.

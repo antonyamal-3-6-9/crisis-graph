@@ -13,6 +13,7 @@ from every evaluation set is checked by ``separation_problems``.
 from __future__ import annotations
 
 import argparse
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,12 @@ from crisisgraph_ml.triage_sft_v4_convert import language, validate_records
 
 DATA = ML_ROOT / "data"
 DEFAULT_OUTPUT = DATA / "triage-sft-v4-new-candidates.jsonl"
+# Message texts rewritten by zero-context agents from the labels and lessons
+# only (owner decision after the batch 5 leak audit): the texts written in this
+# module were drafted by a model that had read the evaluation sets, and 55 of
+# them resembled specific test messages. Labels stay as reviewed; the texts
+# below are kept for provenance and replaced at build time.
+REWRITES = DATA / "triage-sft-v4-new-rewrites.json"
 EVAL_SETS = [
     DATA / "triage-eval-v3-dev-candidates.jsonl",
     DATA / "triage-eval-v3.0.1.jsonl",
@@ -1505,7 +1512,20 @@ def review_cases(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def build_records(batches: tuple[int, ...] = tuple(BATCHES)) -> list[dict[str, Any]]:
-    return [record for number in batches for record in BATCHES[number]()]
+    rewrites = json.loads(REWRITES.read_text(encoding="utf-8")) if REWRITES.exists() else {}
+    records = [record for number in batches for record in BATCHES[number]()]
+    unknown = set(rewrites) - {record["id"] for record in build_all()} if rewrites else set()
+    if unknown:
+        raise ValueError(f"rewrites for unknown ids: {sorted(unknown)}")
+    for record in records:
+        if record["id"] in rewrites:
+            record["input"] = rewrites[record["id"]]
+            record["text_source"] = "zero-context rewrite"
+    return records
+
+
+def build_all() -> list[dict[str, Any]]:
+    return [record for number in BATCHES for record in BATCHES[number]()]
 
 
 # Malayalam and Manglish are compared through a spelling skeleton, so a
