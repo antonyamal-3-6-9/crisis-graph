@@ -114,7 +114,8 @@ def convert(key: str, split: str, record: dict[str, Any]) -> dict[str, Any]:
         "split": "train" if split == "train" else "validation",
         "source": f"triage-sft-v3-{split}.jsonl#{key[1:]}",
         "language": language(user["content"]),
-        "reviewer_status": "pending_manual_review"
+        # Profile labels were owner-reviewed on 2026-10-26 (commit 53fd553).
+        "reviewer_status": "reviewed"
         if key in PROFILES else "v2_labels_reviewed_empty_profile",
         "input": user["content"],
         "target": target,

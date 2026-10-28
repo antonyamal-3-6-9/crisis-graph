@@ -1,7 +1,7 @@
 # CrisisGraph Triage SFT V4 specification
 
-Status: **draft for owner approval** (2026-10-26). No V4 data, exports or
-training artifacts exist yet.
+Status: **approved** (2026-10-26); data built and exported 2026-10-28
+(`triage-sft-v4-export-manifest.json`). See the revision note at the end.
 
 ## Experiment question
 
@@ -136,3 +136,22 @@ invented-fact rate, reported only where the frontier reference exists.
 Option (b) short prompt (optional later ablation), continuing training from
 the V3 adapter, more than one V4 training run before evaluation, any change to
 the frozen v3.0.1 labels.
+
+## Revision 2026-10-28 (as built)
+
+- **Counts:** 608 training records (300 converted + 308 new) and 102
+  validation records (72 converted + 30 new). 306 training records (50%)
+  have profile facts; at least 26 positives per critical condition; every
+  `reporter_relation` value present.
+- **Authorship changed** after a leak: the first drafts were written by a
+  model that had read the evaluation sets, and 55 of 260 resembled specific
+  test messages. All their texts were rewritten by zero-context agents from
+  the reviewed labels; batches 6–7 were written by zero-context agents from the
+  guidelines and `triage-sft-v4-owner-policies.md`. 17 records that still
+  matched evaluation items were dropped. Remaining overlap is at the
+  same-model convergence base rate (~7%) and is recorded in
+  `triage-sft-v4-leak-audit.json`.
+- **Evaluation addition:** the v3.1.0 headline is reported on all 120 cases and
+  on the cases without a close training neighbour (`sensitivity_exclude`).
+- **Rules:** scoring uses `urgency-rules-v5` (current); earlier versions are
+  reported where they matter.
