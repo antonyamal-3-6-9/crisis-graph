@@ -12,7 +12,7 @@ by hand.
   potential under-triage; rule higher is over-triage).
 - **Note** is the annotator's own comment, if any.
 
-**Batch 6 (65 records): awaiting AI first pass and owner review.** Guideline changes 5–8 are in `triage-annotation-guidelines-v3.2-changes.md`.
+**Batch 6 (63 records): awaiting AI first pass and owner review.** Guideline changes 5–8 are in `triage-annotation-guidelines-v3.2-changes.md`.
 
 
 ## T3
@@ -113,7 +113,6 @@ by hand.
 |---|---|---|---|---|---|---|---|
 | 023 | en | My 12-year-old son was pulled out of the water at Kallikadavu boat jetty ten minutes ago, he is breathless and keeps coughing. Please send an ambulance, Kallikadavu jetty road is flooded. | loc: Kallikadavu boat jetty<br>count: 1<br>asset: AMBULANCE<br>hazards: Kallikadavu jetty road FLOODED None<br>review: True | rel: HOUSEHOLD<br>med: BREATHING_DIFFICULTY<br>other: near-drowning<br>groups: CHILD | CRITICAL / CRITICAL | Breathless after a near-drowning that just happened: BREATHING_DIFFICULTY plus near-drowning entry; reporter position not stated -> on_scene null. |  |
 | 024 | ml | 80 വയസ്സുള്ള അമ്മയ്ക്ക് ആസ്ത്മ കൂടി ശ്വാസം കിട്ടുന്നില്ല, ഇൻഹേലർ തീർന്നു. വീട് ചെറുവള്ളിക്കര പള്ളിക്ക് അടുത്താണ്, അമ്മയും അച്ഛനും മാത്രമേ അവിടെയുള്ളൂ. ഞാൻ എറണാകുളത്താണ്, ദയവായി ആംബുലൻസ് അയക്കൂ. | loc: ചെറുവള്ളിക്കര പള്ളി<br>count: 2<br>asset: AMBULANCE<br>hazards: none<br>review: False | rel: HOUSEHOLD<br>on_scene: False<br>med: BREATHING_DIFFICULTY<br>groups: ELDERLY | CRITICAL / CRITICAL | Asthma attack now with empty inhaler: acute category only, no CHRONIC_CARE; reporter in Ernakulam -> on_scene false. |  |
-| 025 | manglish | Kaikkunjinte chundu neelachu varunnu, shwasam edukkan pattunnilla!! njangal 3 per Thekkumpuram kadavinte aduthulla veettil aanu, vellam aravolam. boat venam pettannu | loc: Thekkumpuram kadavu<br>count: 3<br>asset: RESCUE_BOAT<br>hazards: none<br>review: False | rel: SELF<br>on_scene: True<br>med: BREATHING_DIFFICULTY<br>groups: INFANT<br>water: WAIST | CRITICAL / CRITICAL | Lips turning blue and cannot breathe in an infant -> BREATHING_DIFFICULTY; 'njangal 3 per' -> SELF. |  |
 | 026 | en | Old man at Parappuram bus shelter is choking and wheezing, can't get air. He is alone there, water up to his knees and still coming up. I'm watching from the first floor of the shop opposite. | loc: Parappuram bus shelter<br>count: 1<br>asset: None<br>hazards: none<br>review: True | rel: THIRD_PARTY<br>on_scene: True<br>med: BREATHING_DIFFICULTY<br>groups: ELDERLY<br>water: KNEE<br>trend: RISING | CRITICAL / CRITICAL | No asset requested -> null; watching from opposite shop -> THIRD_PARTY on scene; 'still coming up' -> RISING. |  |
 | 027 | en | I think my grandfather is not breathing properly, his chest keeps heaving and he is bedridden. We are 5 in the house at Edanad Mill junction, water is at waist level inside. Send a boat. | loc: Edanad Mill junction<br>count: 5<br>asset: RESCUE_BOAT<br>hazards: none<br>review: False | rel: SELF<br>on_scene: True<br>med: BREATHING_DIFFICULTY<br>groups: ELDERLY, BEDRIDDEN<br>water: WAIST | CRITICAL / CRITICAL | Stated suspicion of breathing trouble is labelled present; bedridden at waist depth is CRITICAL anyway. |  |
 | 028 | ml | ഗർഭിണിയായ ചേച്ചിക്ക് ശ്വാസംമുട്ടൽ തുടങ്ങി, നിൽക്കാൻ പോലും പറ്റുന്നില്ല. ഞങ്ങൾ നാലുപേർ കൊടികുത്തുമല അമ്പലത്തിലാണ്. വെള്ളം മുട്ടോളം ഉണ്ട്, കുറഞ്ഞുവരുന്നുണ്ട്. ആംബുലൻസ് വിടണം. | loc: കൊടികുത്തുമല അമ്പലം<br>count: 4<br>asset: AMBULANCE<br>hazards: none<br>review: False | rel: SELF<br>on_scene: True<br>med: BREATHING_DIFFICULTY<br>groups: PREGNANT<br>water: KNEE<br>trend: FALLING | CRITICAL / CRITICAL | Breathlessness in a pregnant woman is acute BREATHING_DIFFICULTY; falling water does not lower the tier. |  |
@@ -184,12 +183,6 @@ by hand.
 |---|---|---|---|---|---|---|---|
 | 049 | en | Volunteer at the relief camp in Thekkumpuram St. Gregorios school. One man, around 50, is sweating heavily, left arm numb and pressing his chest, I think it's a heart attack. Send an ambulance, Thekkumpuram main road is under water. | loc: Thekkumpuram St. Gregorios school<br>count: 1<br>asset: AMBULANCE<br>hazards: Thekkumpuram main road FLOODED None<br>review: True | rel: THIRD_PARTY<br>on_scene: True<br>med: CARDIAC | CRITICAL / CRITICAL | Stated suspicion of a heart attack with classic signs is CARDIAC; volunteer at the camp is THIRD_PARTY on scene; age 50 adds no group. |  |
 | 050 | ml | ഞങ്ങൾ നാലുപേർ കരിമ്പനക്കൽ പള്ളിക്കടവിനടുത്തുള്ള വീടിന്റെ രണ്ടാം നിലയിൽ കുടുങ്ങിക്കിടക്കുകയാണ്. ഭർത്താവ് നെഞ്ചുവേദന എന്ന് പറഞ്ഞ് കുഴഞ്ഞുവീണു, ഇപ്പോൾ വിളിച്ചിട്ട് പ്രതികരിക്കുന്നില്ല. വെള്ളം കൂടിക്കൊണ്ടിരിക്കുന്നു. | loc: കരിമ്പനക്കൽ പള്ളിക്കടവ്<br>count: 4<br>asset: None<br>hazards: none<br>review: True | rel: SELF<br>on_scene: True<br>med: UNCONSCIOUS, CARDIAC<br>trend: RISING | CRITICAL / CRITICAL | Chest pain then collapse and not responding when called: CARDIAC + UNCONSCIOUS; no asset requested so null; no depth stated. |  |
-
-## T8
-
-| ID | Lang | Message | V2 labels | Profile | Gold / Rule | Note | Review |
-|---|---|---|---|---|---|---|---|
-| 051 | manglish | Njangal 6 per Thekkumpuram water tankinte aduthulla veedinte terrace-il kayari irikkuva, vellam ippozhum kayari varunnu. 8 vayassulla molkku asthma attack, inhaler theernnu, shwasam kittunnilla. Boat ayakku pls | loc: Thekkumpuram water tank<br>count: 6<br>asset: RESCUE_BOAT<br>hazards: none<br>review: False | rel: SELF<br>on_scene: True<br>med: BREATHING_DIFFICULTY<br>other: stranded on a terrace<br>groups: CHILD<br>trend: RISING | CRITICAL / CRITICAL | Acute attack after inhaler ran out takes only BREATHING_DIFFICULTY (not CHRONIC_CARE); terrace stranding; 'kayari varunnu' is RISING; no depth stated. |  |
 
 ## T10
 

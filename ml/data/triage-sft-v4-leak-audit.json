@@ -16,7 +16,9 @@
   "sft-v4-new-b5-001": "v3-dev-001",
   "sft-v4-new-b5-006": "v3-carryover-adversarial-006",
   "sft-v4-new-b5-007": "v3.1-test-034",
-  "sft-v4-new-b5-019": "v3-carryover-multilingual-malayalam-001"
+  "sft-v4-new-b5-019": "v3-carryover-multilingual-malayalam-001",
+  "sft-v4-new-b6-025": "v3.1-test-021",
+  "sft-v4-new-b6-051": "v3.1-test-010"
  },
  "kept_medium_overlap": [
   {
@@ -106,25 +108,74 @@
   {
    "train": "sft-v4-new-b1-039",
    "eval": "v3.1-test-060"
+  },
+  {
+   "train": "sft-v4-new-b6-017",
+   "eval": "v3.1-test-015"
+  },
+  {
+   "train": "sft-v4-new-b6-002",
+   "eval": "v3.1-test-005"
+  },
+  {
+   "train": "sft-v4-new-b6-008",
+   "eval": "v3.1-test-004"
+  },
+  {
+   "train": "sft-v4-new-b6-008",
+   "eval": "v3.1-test-020"
+  },
+  {
+   "train": "sft-v4-new-b6-019",
+   "eval": "v3.1-test-050"
+  },
+  {
+   "train": "sft-v4-new-b6-030",
+   "eval": "v3-dev-003"
+  },
+  {
+   "train": "sft-v4-new-b6-010",
+   "eval": "v3.1-test-048"
+  },
+  {
+   "train": "sft-v4-new-b6-035",
+   "eval": "v3.1-test-025"
+  },
+  {
+   "train": "sft-v4-new-b6-044",
+   "eval": "v3.1-test-067"
+  },
+  {
+   "train": "sft-v4-new-b6-050",
+   "eval": "v3.1-test-003"
   }
  ],
  "sensitivity_exclude": {
   "v3.1.0": [
+   "v3.1-test-003",
+   "v3.1-test-004",
+   "v3.1-test-005",
+   "v3.1-test-010",
    "v3.1-test-011",
    "v3.1-test-013",
    "v3.1-test-015",
    "v3.1-test-017",
+   "v3.1-test-020",
+   "v3.1-test-021",
+   "v3.1-test-025",
    "v3.1-test-028",
    "v3.1-test-034",
    "v3.1-test-039",
    "v3.1-test-043",
    "v3.1-test-045",
    "v3.1-test-047",
+   "v3.1-test-048",
    "v3.1-test-050",
    "v3.1-test-052",
    "v3.1-test-053",
    "v3.1-test-056",
    "v3.1-test-060",
+   "v3.1-test-067",
    "v3.1-test-080",
    "v3.1-test-100",
    "v3.1-test-103",
@@ -141,5 +192,13 @@
    "v3-test-091",
    "v3-test-101"
   ]
- }
+ },
+ "batches_6_7_audit": {
+  "date": "2026-10-28",
+  "audited": 95,
+  "high": 7,
+  "medium": 11,
+  "note": "Batches 6-7 were written by zero-context agents that never saw evaluation data or earlier records; 7/95 high matches is the base rate at which same-model writers converge on similar items from the same guidelines. Only training records are dropped (b6-025, b6-051); validation matches (b7-001, b7-010, b7-020, b7-021, b7-030 high) cannot inflate test results and are kept."
+ },
+ "base_rate_note": "Original batches 1-5 drafts: ~12% high matches (contamination by an author who had read the test sets); after zero-context rewrite: ~6%; fully zero-context batches 6-7: ~7% (convergence base rate)."
 }
