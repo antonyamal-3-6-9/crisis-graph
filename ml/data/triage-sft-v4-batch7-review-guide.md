@@ -20,7 +20,7 @@ by hand.
 | ID | Lang | Message | V2 labels | Profile | Gold / Rule | Note | Review |
 |---|---|---|---|---|---|---|---|
 | 001 | en | Ground floor of our house near Kizhakkekara Ayyappa temple is fully under water. 5 of us are upstairs, all ok for now. Pls send a rescue boat | loc: Kizhakkekara Ayyappa temple<br>count: 5<br>asset: RESCUE_BOAT<br>hazards: none<br>review: False | rel: SELF<br>on_scene: True<br>water: ABOVE_HEAD | CRITICAL / CRITICAL | Ground floor fully submerged is ABOVE_HEAD by building reference; owner policy makes it CRITICAL even with people safe upstairs. |  |
-| 002 | ml | മണലിക്കര പള്ളിക്കവലയ്ക്കടുത്തുള്ള ഞങ്ങളുടെ വീട്ടിൽ വെള്ളം കയറി. ഞങ്ങൾ 4 പേരുണ്ട്, അതിൽ ഒന്ന് കൈക്കുഞ്ഞാണ്. | loc: മണലിക്കര പള്ളിക്കവല<br>count: 4<br>asset: None<br>hazards: none<br>review: True | rel: SELF<br>on_scene: True<br>groups: INFANT | URGENT / UNKNOWN ⚠ | Water entered the house with no depth is water_level null; completed entry (കയറി) gives no trend. Infant with unknown depth judged URGENT. |  |
+| 002 | ml | മണലിക്കര പള്ളിക്കവലയ്ക്കടുത്തുള്ള ഞങ്ങളുടെ വീട്ടിൽ വെള്ളം കയറി. ഞങ്ങൾ 4 പേരുണ്ട്, അതിൽ ഒരാൾ കൈക്കുഞ്ഞാണ്. | loc: മണലിക്കര പള്ളിക്കവല<br>count: 4<br>asset: None<br>hazards: none<br>review: True | rel: SELF<br>on_scene: True<br>groups: INFANT | URGENT / UNKNOWN ⚠ | Water entered the house with no depth is water_level null; completed entry (കയറി) gives no trend. Infant with unknown depth judged URGENT. |  |
 
 ## T2
 
@@ -65,7 +65,7 @@ by hand.
 |---|---|---|---|---|---|---|---|
 | 015 | en | The old man next door slipped on the flooded steps just now, his head is bleeding badly and his leg looks broken. Near Ponnakkudam kavala bus shelter. Im with him, pls send ambulance | loc: Ponnakkudam kavala bus shelter<br>count: None<br>asset: AMBULANCE<br>hazards: none<br>review: True | rel: THIRD_PARTY<br>on_scene: True<br>med: BLEEDING, INJURY<br>groups: ELDERLY | CRITICAL / CRITICAL | INJURY (broken leg, fall) is labelled beside BLEEDING; a fresh heavy head wound is gold CRITICAL; one person with no number stays headcount null. |  |
 | 016 | manglish | Chettante mele thengu veenu, ippo maatti, pakshe bodham illa, kayyil valiya murivum und. Kurumbathuruth pallippadi aanu, njan kude und, ambulance pls | loc: Kurumbathuruth pallippadi<br>count: None<br>asset: AMBULANCE<br>hazards: none<br>review: True | rel: HOUSEHOLD<br>on_scene: True<br>med: UNCONSCIOUS, INJURY | CRITICAL / CRITICAL | 'murivu' (wound) is INJURY beside UNCONSCIOUS; the tree is already removed, so no 'trapped under debris'; brother is the victim, reporter present (HOUSEHOLD, on scene). |  |
-| 017 | ml | ചെറുവാരണം ഫെറി കടവിൽ പ്രായമായ ഒരാൾ വഴുതി വീണ് കൈ ഒടിഞ്ഞു, ഇപ്പോൾ നെഞ്ചുവേദനയുണ്ടെന്ന് പറയുന്നു. ഞാൻ അടുത്തുണ്ട്, ആംബുലൻസ് അയക്കണം. | loc: ചെറുവാരണം ഫെറി കടവ്<br>count: None<br>asset: AMBULANCE<br>hazards: none<br>review: True | rel: THIRD_PARTY<br>on_scene: True<br>med: CARDIAC, INJURY<br>groups: ELDERLY | CRITICAL / CRITICAL | Fracture (INJURY) plus current chest pain (CARDIAC); 'പ്രായമായ' is ELDERLY; 'ഒരാൾ' read as 'a person', headcount null (judgement call). |  |
+| 017 | ml | ചെറുവാരണം ഫെറി കടവിൽ പ്രായമായ ഒരാൾ വഴുതി വീണ് കൈ ഒടിഞ്ഞു, ഇപ്പോൾ നെഞ്ചുവേദനയുണ്ടെന്ന് പറയുന്നു. ഞാൻ അടുത്തുണ്ട്, ആംബുലൻസ് അയക്കണം. | loc: ചെറുവാരണം ഫെറി കടവ്<br>count: 1<br>asset: AMBULANCE<br>hazards: none<br>review: False | rel: THIRD_PARTY<br>on_scene: True<br>med: CARDIAC, INJURY<br>groups: ELDERLY | CRITICAL / CRITICAL | Fracture (INJURY) plus current chest pain (CARDIAC); 'പ്രായമായ' is ELDERLY; 'ഒരാൾ' (one person) states one: headcount 1 (AI review). |  |
 
 ## T8
 

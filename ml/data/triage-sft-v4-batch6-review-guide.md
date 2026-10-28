@@ -39,7 +39,7 @@ by hand.
 
 | ID | Lang | Message | V2 labels | Profile | Gold / Rule | Note | Review |
 |---|---|---|---|---|---|---|---|
-| 006 | en | Grandpa stepped on a nail in the water, his foot is bleeding, we are pressing a cloth on it. 4 of us including him at the house near Kunnelmukku bus stop, water waist high inside. | loc: Kunnelmukku bus stop<br>count: 4<br>asset: None<br>hazards: none<br>review: True | rel: SELF<br>on_scene: True<br>med: BLEEDING, INJURY<br>groups: ELDERLY<br>water: WAIST | URGENT / CRITICAL ⚠ | Foot wound bleeding with pressure applied: BLEEDING + INJURY, gold URGENT; elderly at waist depth is not raised to CRITICAL by policy. |  |
+| 006 | en | Grandpa stepped on a nail in the water, his foot is bleeding, we are pressing a cloth on it. 4 of us including him at the house near Kunnelmukku bus stop, water waist high inside. | loc: Kunnelmukku bus stop<br>count: 4<br>asset: None<br>hazards: none<br>review: True | rel: SELF<br>on_scene: True<br>med: BLEEDING, INJURY<br>groups: ELDERLY<br>water: WAIST | URGENT / CRITICAL ⚠ | Foot wound bleeding with pressure applied: BLEEDING + INJURY, gold URGENT (change 9). Elderly at waist depth is not covered by an owner policy: owner check. |  |
 
 ## T3
 
@@ -149,8 +149,8 @@ by hand.
 | ID | Lang | Message | V2 labels | Profile | Gold / Rule | Note | Review |
 |---|---|---|---|---|---|---|---|
 | 041 | en | Water came into our house at Pottachira north, near the anganwadi. Grandmother is 85 and can't walk without help. 4 people in the house, water is waist level and rising. Need a boat. | loc: Pottachira north<br>count: 4<br>asset: RESCUE_BOAT<br>hazards: none<br>review: False | rel: UNDER_REVIEW<br>groups: ELDERLY, DISABLED<br>water: WAIST<br>trend: RISING | CRITICAL / CRITICAL | 'Our house' and 'grandmother' point to the reporter's family, but it is open whether the reporter is one of the 4 -> UNDER_REVIEW. |  |
-| 042 | ml | വീട്ടിൽ കിടപ്പുരോഗിയായ അപ്പൂപ്പനും രണ്ട് കുട്ടികളും ഉണ്ട്, ആകെ അഞ്ചുപേർ. വെള്ളാരംകുന്ന് പോസ്റ്റ് ഓഫീസിന് അടുത്താണ് വീട്. വെള്ളം മുട്ടോളം, കൂടുന്നില്ല. ക്യാമ്പിലേക്ക് മാറ്റാൻ ഒരു ലോറി വേണം. | loc: വെള്ളാരംകുന്ന് പോസ്റ്റ് ഓഫീസ്<br>count: 5<br>asset: EVAC_TRUCK<br>hazards: none<br>review: False | rel: UNDER_REVIEW<br>groups: ELDERLY, BEDRIDDEN, CHILD<br>water: KNEE<br>trend: STABLE | URGENT / URGENT | Family home with 5 people, reporter's membership open -> UNDER_REVIEW; truck to shift people -> EVAC_TRUCK; elderly bedridden at knee -> URGENT. |  |
-| 043 | manglish | Veettil ammakku kaalil randu kuthu paadu, paambu aano ennu samshayam, neeru und. Kaitharappady ambalathinte aduthaanu veedu, njangal 3 per, muttolam vellam, Kaitharappady ambalam road muzhuvan block. ambulance venam | loc: Kaitharappady ambalam<br>count: 3<br>asset: AMBULANCE<br>hazards: Kaitharappady ambalam road BLOCKED None<br>review: True | rel: UNDER_REVIEW<br>other: suspected snakebite<br>water: KNEE | CRITICAL / CRITICAL | Suspected snakebite labelled present (change 3); 'veettil ammakku' leaves open whether the reporter is among the 3 -> UNDER_REVIEW. |  |
+| 042 | ml | വീട്ടിൽ കിടപ്പുരോഗിയായ അപ്പൂപ്പനും രണ്ട് കുട്ടികളും ഉണ്ട്, ആകെ അഞ്ചുപേർ. വെള്ളാരംകുന്ന് പോസ്റ്റ് ഓഫീസിന് അടുത്താണ് വീട്. വെള്ളം മുട്ടോളം, കൂടുന്നില്ല. ക്യാമ്പിലേക്ക് മാറ്റാൻ ഒരു ലോറി വേണം. | loc: വെള്ളാരംകുന്ന് പോസ്റ്റ് ഓഫീസ്<br>count: 5<br>asset: EVAC_TRUCK<br>hazards: none<br>review: False | rel: UNDER_REVIEW<br>groups: ELDERLY, BEDRIDDEN, CHILD<br>water: KNEE | URGENT / URGENT | Family home with 5 people, reporter's membership open -> UNDER_REVIEW; truck to shift people -> EVAC_TRUCK; elderly bedridden at knee -> URGENT. Trend null: 'കൂടുന്നില്ല' (not increasing) rules out rising only (AI review). |  |
+| 043 | manglish | Veettil ammakku kaalil randu kuthu paadu, paambu aano ennu samshayam, neeru und. Kaitharappady ambalathinte aduthaanu veedu, njangal 3 per, muttolam vellam, Kaitharappady ambalam road muzhuvan block. ambulance venam | loc: Kaitharappady ambalam<br>count: 3<br>asset: AMBULANCE<br>hazards: Kaitharappady ambalam road BLOCKED None<br>review: True | rel: SELF<br>on_scene: True<br>other: suspected snakebite<br>water: KNEE | CRITICAL / CRITICAL | Suspected snakebite labelled present (change 3). 'Njangal 3 per' places the speaker in the group: SELF (AI review; was UNDER_REVIEW). |  |
 | 044 | en | Water at our place in Kunnumpuram east has gone down to the ankles now. My wife is 8 months pregnant and there is a newborn, 3 people at home. Please send a truck to shift everyone to the camp. | loc: Kunnumpuram east<br>count: 3<br>asset: EVAC_TRUCK<br>hazards: none<br>review: False | rel: UNDER_REVIEW<br>groups: PREGNANT, INFANT<br>water: ANKLE<br>trend: FALLING | STABLE / URGENT ⚠ | Reporter's own home and family, open whether they are one of the 3 -> UNDER_REVIEW; ankle-deep and falling with no acute problem -> STABLE. |  |
 
 ## T7
@@ -169,7 +169,7 @@ by hand.
 
 | ID | Lang | Message | V2 labels | Profile | Gold / Rule | Note | Review |
 |---|---|---|---|---|---|---|---|
-| 047 | manglish | Ammachi muttathe vellathil vazhuthi veenu, thalayil ninnu chora nilkkunnilla, ippo vilichittu bodham illa. Kollamkudi kurishupalli de aduthaanu veedu, njangal 5 per und, pettennu oru ambulance ayakku | loc: Kollamkudi kurishupalli<br>count: 5<br>asset: AMBULANCE<br>hazards: none<br>review: False | rel: UNDER_REVIEW<br>med: UNCONSCIOUS, BLEEDING, INJURY<br>groups: ELDERLY | CRITICAL / CRITICAL | Ammachi + 'aanu veedu, 5 per und': whose house and whether the reporter is among the 5 is open, so UNDER_REVIEW; 'chora nilkkunnilla' and 'vilichittu bodham illa' phrasing. |  |
+| 047 | manglish | Ammachi muttathe vellathil vazhuthi veenu, thalayil ninnu chora nilkkunnilla, ippo vilichittu bodham illa. Kollamkudi kurishupalli de aduthaanu veedu, njangal 5 per und, pettennu oru ambulance ayakku | loc: Kollamkudi kurishupalli<br>count: 5<br>asset: AMBULANCE<br>hazards: none<br>review: False | rel: SELF<br>on_scene: True<br>med: UNCONSCIOUS, BLEEDING, INJURY<br>groups: ELDERLY | CRITICAL / CRITICAL | 'Njangal 5 per und' places the speaker in the group: SELF (AI review; was UNDER_REVIEW). 'Chora nilkkunnilla' + fresh head wound: CRITICAL. |  |
 
 ## T8
 
@@ -202,7 +202,7 @@ by hand.
 
 | ID | Lang | Message | V2 labels | Profile | Gold / Rule | Note | Review |
 |---|---|---|---|---|---|---|---|
-| 056 | en | This is the nurse at Kombanad Govt LP School relief camp. An elderly man here started gasping about an hour ago and has now gone unresponsive, we have no oxygen. Send an ambulance, 1 patient. | loc: Kombanad Govt LP School<br>count: 1<br>asset: AMBULANCE<br>hazards: none<br>review: False | rel: THIRD_PARTY<br>on_scene: True<br>med: UNCONSCIOUS, BREATHING_DIFFICULTY<br>groups: ELDERLY | CRITICAL / CRITICAL | Camp staff reporting from the camp: THIRD_PARTY, on_scene true; gasping then unresponsive gives both conditions. |  |
+| 056 | en | This is the nurse at Kombanad Govt LP School relief camp. An elderly man here started gasping about an hour ago and has now gone unresponsive, we have no oxygen. Send an ambulance, 1 patient. | loc: Kombanad Govt LP School relief camp<br>count: 1<br>asset: AMBULANCE<br>hazards: none<br>review: False | rel: THIRD_PARTY<br>on_scene: True<br>med: UNCONSCIOUS, BREATHING_DIFFICULTY<br>groups: ELDERLY | CRITICAL / CRITICAL | Camp staff reporting from the camp: THIRD_PARTY, on_scene true; gasping then unresponsive gives both conditions. |  |
 
 ## T7
 
