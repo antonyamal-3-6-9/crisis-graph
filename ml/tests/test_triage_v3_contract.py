@@ -9,6 +9,7 @@ from crisisgraph_ml.urgency import (
     RULES_V2,
     RULES_V3,
     RULES_V4,
+    RULES_V5,
     derive_urgency,
 )
 
@@ -19,6 +20,7 @@ RESULT_SCHEMA = ML_ROOT.parent / "schemas" / "urgency-result-v1.json"
 RULE_VECTORS_V2 = ML_ROOT / "data" / "urgency-rules-v2.jsonl"
 RULE_VECTORS_V3 = ML_ROOT / "data" / "urgency-rules-v3.jsonl"
 RULE_VECTORS_V4 = ML_ROOT / "data" / "urgency-rules-v4.jsonl"
+RULE_VECTORS_V5 = ML_ROOT / "data" / "urgency-rules-v5.jsonl"
 RESULT_SCHEMA_V2 = ML_ROOT.parent / "schemas" / "urgency-result-v2.json"
 
 EMPTY_PROFILE = {
@@ -227,3 +229,23 @@ def test_v4_differs_from_v3_only_for_children_in_chest_deep_water():
             assert v4.rule_urgency == "CRITICAL", vector["id"]
         else:
             assert v3 == v4, vector["id"]
+
+
+@pytest.mark.parametrize("vector", load_cases(RULE_VECTORS_V5), ids=lambda v: v["id"])
+def test_urgency_rules_v5_match_vectors(vector):
+    assert derive_urgency(vector["profile"], RULES_V5).as_dict() == vector["expected"]
+
+
+def test_v5_differs_from_v4_only_for_children_at_waist_and_bedridden_in_rising_knee_water():
+    for vector in load_cases(RULE_VECTORS_V4) + load_cases(RULE_VECTORS_V5):
+        profile = vector["profile"]
+        v4, v5 = derive_urgency(profile, RULES_V4), derive_urgency(profile, RULES_V5)
+        groups, water = profile["vulnerable_groups"], profile["water_level"]
+        child_waist = "CHILD" in groups and water == "WAIST"
+        bedridden_knee_rising = (
+            "BEDRIDDEN" in groups and water == "KNEE" and profile["water_trend"] == "RISING"
+        )
+        if child_waist or bedridden_knee_rising:
+            assert v5.rule_urgency == "CRITICAL", vector["id"]
+        else:
+            assert v4 == v5, vector["id"]

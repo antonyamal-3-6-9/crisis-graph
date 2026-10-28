@@ -379,3 +379,8 @@ test set, so batches 6–7 are written by zero-context agents too.
   chest-deep water URGENT, bedridden at knee depth with rising water CRITICAL,
   a near copy of frozen 094 reworded. Training now 608 records, 50% with
   profile facts, at least 26 positives per critical condition.
+- **urgency-rules-v5 (2026-10-28):** a child with water at WAIST or above, and
+  a bedridden person at KNEE with RISING water, are CRITICAL (owner gold in the
+  batch 5 and batch 6 reviews was above the rules). On v3.1.0 the rules still
+  never rate below gold; over-triaged cases go from 15 to 17. No CRITICAL
+  training gold is below the v5 rule result.

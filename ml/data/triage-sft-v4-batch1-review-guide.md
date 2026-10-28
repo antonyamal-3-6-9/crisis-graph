@@ -7,7 +7,7 @@ correction in the last column (e.g. `water: CHEST`, `groups: +ELDERLY`,
 by hand.
 
 - **Profile** lists only non-empty fields; anything missing is null / [].
-- **Gold** is the annotator's clinical-sense urgency; **Rule** is what urgency-rules-v4
+- **Gold** is the annotator's clinical-sense urgency; **Rule** is what urgency-rules-v5
   gives on these labels. ⚠ marks a mismatch (rule lower than gold is a
   potential under-triage; rule higher is over-triage).
 - **Note** is the annotator's own comment, if any.

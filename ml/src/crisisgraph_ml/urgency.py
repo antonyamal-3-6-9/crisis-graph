@@ -37,6 +37,13 @@ urgency-rules-v4 (owner decision, 2026-10-27) adds CHILD with water at CHEST
 or above: about 4 ft is at a child's chin or neck (SFT-V4 training review).
 INFANT was already covered by v3's low-mobility rule. v1–v3 are kept.
 
+urgency-rules-v5 (owner decision, 2026-10-28) adds two CRITICAL rules from the
+SFT-V4 owner reviews: CHILD with water at WAIST or above (adult waist depth is
+at a child's chest or neck, and adults cannot hold several children up), and
+BEDRIDDEN with water at KNEE and RISING (knee depth is near mattress height, so
+a person who cannot be moved reaches bed-height water within the hour). v1–v4
+are kept.
+
 When the result is still UNKNOWN (rule and final urgency both UNKNOWN), the
 case gets ``UNKNOWN_REVIEW_REQUIRED`` and a ``review_priority`` that orders the
 dispatcher review/callback queue. UNKNOWN never has medical or other
@@ -59,8 +66,9 @@ RULES_V1 = "urgency-rules-v1"
 RULES_V2 = "urgency-rules-v2"
 RULES_V3 = "urgency-rules-v3"
 RULES_V4 = "urgency-rules-v4"
-RULES_VERSION = RULES_V4  # current rules
-RULE_VERSIONS = (RULES_V1, RULES_V2, RULES_V3, RULES_V4)
+RULES_V5 = "urgency-rules-v5"
+RULES_VERSION = RULES_V5  # current rules
+RULE_VERSIONS = (RULES_V1, RULES_V2, RULES_V3, RULES_V4, RULES_V5)
 
 WATER_ORDER = ("ANKLE", "KNEE", "WAIST", "CHEST", "ABOVE_HEAD", "ROOF")
 CRITICAL_CONDITIONS = frozenset({"UNCONSCIOUS", "BREATHING_DIFFICULTY", "CARDIAC", "BLEEDING"})
@@ -119,11 +127,14 @@ def rule_urgency(profile: dict[str, Any], rules: str = RULES_VERSION) -> str:
         or (groups & LOW_MOBILITY_GROUPS and _water_at_least(water, "WAIST") and rising)
         or (rules != RULES_V1 and other)
         or (
-            rules in (RULES_V3, RULES_V4)
+            rules in (RULES_V3, RULES_V4, RULES_V5)
             and groups & (LOW_MOBILITY_GROUPS | {"PREGNANT"})
             and _water_at_least(water, "CHEST")
         )
         or (rules == RULES_V4 and "CHILD" in groups and _water_at_least(water, "CHEST"))
+        or (rules == RULES_V5 and "CHILD" in groups and _water_at_least(water, "WAIST"))
+        or (rules == RULES_V5 and "BEDRIDDEN" in groups and _water_at_least(water, "KNEE")
+            and rising)
     ):
         return "CRITICAL"
     if (

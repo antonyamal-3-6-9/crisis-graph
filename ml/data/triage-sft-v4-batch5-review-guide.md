@@ -7,7 +7,7 @@ correction in the last column (e.g. `water: CHEST`, `groups: +ELDERLY`,
 by hand.
 
 - **Profile** lists only non-empty fields; anything missing is null / [].
-- **Gold** is the annotator's clinical-sense urgency; **Rule** is what urgency-rules-v4
+- **Gold** is the annotator's clinical-sense urgency; **Rule** is what urgency-rules-v5
   gives on these labels. ⚠ marks a mismatch (rule lower than gold is a
   potential under-triage; rule higher is over-triage).
 - **Note** is the annotator's own comment, if any.
@@ -73,5 +73,5 @@ by hand.
 | 046 | manglish | Nechoor kadavu-il njangal 3 per. kurachu munpu ammaayi bodham poyi veenu, ippo bodham vannu, samsarikkunnund. | loc: Nechoor kadavu<br>count: 3<br>asset: None<br>hazards: none<br>review: True | rel: SELF<br>on_scene: True | URGENT / UNKNOWN ⚠ | Rewritten after owner review (the earlier text transliterated a frozen test message). Fainted a little while ago, awake now: no condition, gold URGENT. |  |
 | 047 | en | We are five at Thrikkalathur canal bridge. My cousin nearly drowned this morning, we pulled him out and he's talking normally now. | loc: Thrikkalathur canal bridge<br>count: 5<br>asset: None<br>hazards: none<br>review: True | rel: SELF<br>on_scene: True | URGENT / UNKNOWN ⚠ | Near-drowning earlier today, now talking normally: treated as a resolved critical event: no other_conditions, gold URGENT (change 13). Batch 2, 037 differs: the shock had just happened. |  |
 | 048 | ml | കടാതി പള്ളിയിൽ ഞങ്ങൾ 4 പേർ. ഇപ്പോൾ കണങ്കാൽ വരെ മാത്രം വെള്ളം. വെള്ളം കൂടിയാൽ മാത്രം ബോട്ട് വേണ്ടിവരും. | loc: കടാതി പള്ളി<br>count: 4<br>asset: None<br>hazards: none<br>review: True | rel: SELF<br>on_scene: True<br>water: ANKLE | STABLE / STABLE | Boat needed only if the water rises: hypothetical request, asset null. |  |
-| 049 | en | 5 people at Vettikkattumukku, 2 adults and 3 children, waist-deep water. No one is injured. | loc: Vettikkattumukku<br>count: 5<br>asset: None<br>hazards: none<br>review: True | groups: CHILD<br>water: WAIST | CRITICAL / URGENT ⚠ | Owner review: gold CRITICAL. Waist deep for adults is chest to neck on a child, and two adults cannot hold three children up. The rules give URGENT: a rule finding. |  |
+| 049 | en | 5 people at Vettikkattumukku, 2 adults and 3 children, waist-deep water. No one is injured. | loc: Vettikkattumukku<br>count: 5<br>asset: None<br>hazards: none<br>review: True | groups: CHILD<br>water: WAIST | CRITICAL / CRITICAL | Owner review: gold CRITICAL. Waist deep for adults is chest to neck on a child, and two adults cannot hold three children up. The rules give URGENT: a rule finding. |  |
 | 050 | manglish | Memury junction-il njangal 3 per, athil appooppanum und. pandu stroke vannathaanu, ippo nadakkum, marunnu onnum kazhikkunnilla. vellam muttolam. | loc: Memury junction<br>count: 3<br>asset: None<br>hazards: none<br>review: True | rel: SELF<br>on_scene: True<br>groups: ELDERLY<br>water: KNEE | URGENT / URGENT | Elderly at knee depth: gold URGENT, as frozen 078. Past stroke, walks now, no treatment: no CHRONIC_CARE. |  |
