@@ -260,3 +260,22 @@ def test_api_key_is_sent_but_not_recorded(args, monkeypatch):
     report = asyncio.run(run(args, httpx.MockTransport(capture)))
     assert "Bearer secret-value" in seen
     assert "secret-value" not in json.dumps(report)
+
+
+def test_rescore_can_drop_cases_for_the_sensitivity_check():
+    from pathlib import Path
+
+    from crisisgraph_ml.triage_eval import load_json
+    from crisisgraph_ml.triage_eval_v3 import rescore
+
+    run = Path(__file__).parents[1] / "runs" / "final-v3test-sftv3-prompt-v3.2.json"
+    if not run.exists():
+        pytest.skip("saved run not available")
+    dataset = Path(__file__).parents[1] / "data" / "triage-eval-v3.0.1.jsonl"
+    report = load_json(run)
+    full = rescore(report, dataset, "urgency-rules-v5")
+    subset = rescore(report, dataset, "urgency-rules-v5", frozenset({"v3-test-001", "v3-test-002"}))
+    assert subset["v2_fields"]["case_count"] == full["v2_fields"]["case_count"] - 2
+    assert subset["identity"]["excluded_case_ids"] == ["v3-test-001", "v3-test-002"]
+    with pytest.raises(ValueError):
+        rescore(report, dataset, "urgency-rules-v5", frozenset({"not-a-case"}))

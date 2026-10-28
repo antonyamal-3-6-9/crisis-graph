@@ -472,12 +472,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def rescore(report: dict[str, Any], dataset: Path, rules: str) -> dict[str, Any]:
-    """Score saved model outputs again under other urgency rules (no model calls)."""
+def rescore(report: dict[str, Any], dataset: Path, rules: str,
+            exclude: frozenset[str] = frozenset()) -> dict[str, Any]:
+    """Score saved model outputs again (no model calls): other urgency rules, or a
+    subset without ``exclude`` (the SFT-V4 sensitivity check drops test cases with
+    a close training neighbour, ``data/triage-sft-v4-leak-audit.json``)."""
     if hashlib.sha256(dataset.read_bytes()).hexdigest() != report["identity"]["dataset_sha256"]:
         raise ValueError("dataset differs from the one the run used")
-    results = [CaseResult(**result) for result in report["results"]]
-    return summarize_v3(results, load_cases(dataset), report["identity"], rules)
+    cases = load_cases(dataset)
+    unknown = exclude - {case["id"] for case in cases}
+    if unknown:
+        raise ValueError(f"excluded ids not in the dataset: {sorted(unknown)}")
+    cases = [case for case in cases if case["id"] not in exclude]
+    results = [CaseResult(**result) for result in report["results"]
+               if result["case_id"] not in exclude]
+    identity = {**report["identity"], "excluded_case_ids": sorted(exclude)} if exclude \
+        else report["identity"]
+    return summarize_v3(results, cases, identity, rules)
 
 
 def main() -> None:
@@ -491,8 +502,15 @@ def main_rescore() -> None:
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--rules", choices=RULE_VERSIONS, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--exclude-from", type=Path, default=None,
+                        help="leak audit JSON: drop its sensitivity_exclude ids for this dataset")
     args = parser.parse_args()
-    report = rescore(load_json(args.report), args.dataset, args.rules)
+    exclude: frozenset[str] = frozenset()
+    if args.exclude_from:
+        audit = load_json(args.exclude_from)["sensitivity_exclude"]
+        ids = {case["id"] for case in load_cases(args.dataset)}
+        exclude = frozenset(i for group in audit.values() for i in group if i in ids)
+    report = rescore(load_json(args.report), args.dataset, args.rules, exclude)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(headline(report), indent=2))
 
