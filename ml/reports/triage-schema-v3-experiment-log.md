@@ -370,3 +370,12 @@ patient aanu", "my parents are on the roof of their house"), which shows that
 independent writers converge on common phrasing; they were reworded to pass
 the checks. Lesson: whoever writes training data must never have seen the
 test set, so batches 6–7 are written by zero-context agents too.
+- **Batches 6–7 (63 training, 30 validation):** written, text and labels, by
+  four zero-context agents from the guidelines and owner policies
+  (`data/triage-sft-v4-owner-policies.md`); two training records (b6-025,
+  b6-051) dropped as close matches of v3.1.0 items. AI first pass and owner
+  review: SELF for "njangal N per", one person at an incident counts as 1,
+  pregnancy at knee depth with falling water STABLE (frozen 067), adults in
+  chest-deep water URGENT, bedridden at knee depth with rising water CRITICAL,
+  a near copy of frozen 094 reworded. Training now 608 records, 50% with
+  profile facts, at least 26 positives per critical condition.

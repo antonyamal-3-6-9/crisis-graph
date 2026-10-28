@@ -46,7 +46,7 @@ EVAL_SETS = [
 ]
 
 # Batches that passed the AI first pass and the owner review.
-OWNER_REVIEWED_BATCHES = {1, 2, 3, 4, 5}
+OWNER_REVIEWED_BATCHES = {1, 2, 3, 4, 5, 6, 7}
 
 SELF = {"relation": "SELF", "on_scene": True}
 REMOTE_FAMILY = {"relation": "HOUSEHOLD", "on_scene": False}

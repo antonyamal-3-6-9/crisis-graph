@@ -12,7 +12,7 @@ by hand.
   potential under-triage; rule higher is over-triage).
 - **Note** is the annotator's own comment, if any.
 
-**Batch 6 (63 records): awaiting AI first pass and owner review.** Guideline changes 5–8 are in `triage-annotation-guidelines-v3.2-changes.md`.
+**Batch 6 (63 records): AI first pass and owner review complete.** Guideline changes 5–8 are in `triage-annotation-guidelines-v3.2-changes.md`.
 
 
 ## T3
@@ -78,7 +78,7 @@ by hand.
 
 | ID | Lang | Message | V2 labels | Profile | Gold / Rule | Note | Review |
 |---|---|---|---|---|---|---|---|
-| 015 | ml | ഞങ്ങളുടെ വീട് മാമ്പ്ര കുരിശുപള്ളിക്ക് അടുത്താണ്. വീട്ടിൽ കിടപ്പിലായ അപ്പൂപ്പനും രണ്ട് കുട്ടികളും ഉണ്ട്. വെള്ളം മുട്ടോളം ആയി, ഇനിയും കയറിക്കൊണ്ടിരിക്കുന്നു. | loc: മാമ്പ്ര കുരിശുപള്ളി<br>count: None<br>asset: None<br>hazards: none<br>review: True | rel: UNDER_REVIEW<br>groups: ELDERLY, CHILD, BEDRIDDEN<br>water: KNEE<br>trend: RISING | URGENT / URGENT | Own home but reporter's presence open: UNDER_REVIEW; whether the reporter is also there is open, so headcount null; bedridden at knee depth and rising is URGENT. |  |
+| 015 | ml | ഞങ്ങളുടെ വീട് മാമ്പ്ര കുരിശുപള്ളിക്ക് അടുത്താണ്. വീട്ടിൽ കിടപ്പിലായ അപ്പൂപ്പനും രണ്ട് കുട്ടികളും ഉണ്ട്. വെള്ളം മുട്ടോളം ആയി, ഇനിയും കയറിക്കൊണ്ടിരിക്കുന്നു. | loc: മാമ്പ്ര കുരിശുപള്ളി<br>count: None<br>asset: None<br>hazards: none<br>review: True | rel: UNDER_REVIEW<br>groups: ELDERLY, CHILD, BEDRIDDEN<br>water: KNEE<br>trend: RISING | CRITICAL / URGENT ⚠ | Own home but reporter's presence open: UNDER_REVIEW; whether the reporter is also there is open, so headcount null; bedridden at knee depth and rising is URGENT. Owner review: bedridden at knee depth with water still coming in reaches bed height within the hour (batch 2, 045 policy). |  |
 
 ## T3
 
@@ -151,7 +151,7 @@ by hand.
 | 041 | en | Water came into our house at Pottachira north, near the anganwadi. Grandmother is 85 and can't walk without help. 4 people in the house, water is waist level and rising. Need a boat. | loc: Pottachira north<br>count: 4<br>asset: RESCUE_BOAT<br>hazards: none<br>review: False | rel: UNDER_REVIEW<br>groups: ELDERLY, DISABLED<br>water: WAIST<br>trend: RISING | CRITICAL / CRITICAL | 'Our house' and 'grandmother' point to the reporter's family, but it is open whether the reporter is one of the 4 -> UNDER_REVIEW. |  |
 | 042 | ml | വീട്ടിൽ കിടപ്പുരോഗിയായ അപ്പൂപ്പനും രണ്ട് കുട്ടികളും ഉണ്ട്, ആകെ അഞ്ചുപേർ. വെള്ളാരംകുന്ന് പോസ്റ്റ് ഓഫീസിന് അടുത്താണ് വീട്. വെള്ളം മുട്ടോളം, കൂടുന്നില്ല. ക്യാമ്പിലേക്ക് മാറ്റാൻ ഒരു ലോറി വേണം. | loc: വെള്ളാരംകുന്ന് പോസ്റ്റ് ഓഫീസ്<br>count: 5<br>asset: EVAC_TRUCK<br>hazards: none<br>review: False | rel: UNDER_REVIEW<br>groups: ELDERLY, BEDRIDDEN, CHILD<br>water: KNEE | URGENT / URGENT | Family home with 5 people, reporter's membership open -> UNDER_REVIEW; truck to shift people -> EVAC_TRUCK; elderly bedridden at knee -> URGENT. Trend null: 'കൂടുന്നില്ല' (not increasing) rules out rising only (AI review). |  |
 | 043 | manglish | Veettil ammakku kaalil randu kuthu paadu, paambu aano ennu samshayam, neeru und. Kaitharappady ambalathinte aduthaanu veedu, njangal 3 per, muttolam vellam, Kaitharappady ambalam road muzhuvan block. ambulance venam | loc: Kaitharappady ambalam<br>count: 3<br>asset: AMBULANCE<br>hazards: Kaitharappady ambalam road BLOCKED None<br>review: True | rel: SELF<br>on_scene: True<br>other: suspected snakebite<br>water: KNEE | CRITICAL / CRITICAL | Suspected snakebite labelled present (change 3). 'Njangal 3 per' places the speaker in the group: SELF (AI review; was UNDER_REVIEW). |  |
-| 044 | en | Water at our place in Kunnumpuram east has gone down to the ankles now. My wife is 8 months pregnant and there is a newborn, 3 people at home. Please send a truck to shift everyone to the camp. | loc: Kunnumpuram east<br>count: 3<br>asset: EVAC_TRUCK<br>hazards: none<br>review: False | rel: UNDER_REVIEW<br>groups: PREGNANT, INFANT<br>water: ANKLE<br>trend: FALLING | STABLE / URGENT ⚠ | Reporter's own home and family, open whether they are one of the 3 -> UNDER_REVIEW; ankle-deep and falling with no acute problem -> STABLE. |  |
+| 044 | en | Water at our place in Kunnumpuram east has gone down to the ankles now. My wife is 8 months pregnant and we have a 2-year-old, 3 of us at home. Please send a truck to shift everyone to the camp. | loc: Kunnumpuram east<br>count: 3<br>asset: EVAC_TRUCK<br>hazards: none<br>review: False | rel: UNDER_REVIEW<br>groups: PREGNANT, CHILD<br>water: ANKLE<br>trend: FALLING | STABLE / URGENT ⚠ | Reporter's own home and family, open whether they are one of the 3 -> UNDER_REVIEW; ankle-deep and falling with no acute problem -> STABLE. Owner review: newborn replaced by a toddler (a pregnant mother and a newborn did not fit a 3-person household). |  |
 
 ## T7
 
@@ -195,7 +195,7 @@ by hand.
 | ID | Lang | Message | V2 labels | Profile | Gold / Rule | Note | Review |
 |---|---|---|---|---|---|---|---|
 | 053 | en | We just pulled a 12-year-old boy out of the current at Thuruthipuram ferry kadavu, he's not waking up and his breathing is very weak and gurgling. Fishermen are doing CPR. Need an ambulance, the approach road to Thuruthipuram kadavu is flooded knee deep. | loc: Thuruthipuram ferry kadavu<br>count: 1<br>asset: AMBULANCE<br>hazards: approach road to Thuruthipuram kadavu FLOODED None<br>review: True | rel: THIRD_PARTY<br>on_scene: True<br>med: UNCONSCIOUS, BREATHING_DIFFICULTY<br>other: near-drowning<br>groups: CHILD | CRITICAL / CRITICAL | Rescuers on scene are THIRD_PARTY; near-drowning just happened so it stays in other_conditions; knee-deep water is on the road, not at the victim, so water_level null. |  |
-| 054 | ml | തോട്ടുംകര കവലയിൽ ഒരു കടയുടെ മുകളിൽ 3 പേർ ഉണ്ട്. ഒരു പ്രായമായ സ്ത്രീക്ക് നെഞ്ചിൽ ഭാരവും വേദനയും, കാലിൽ ഒരു മുറിവുമുണ്ട്. താഴത്തെ നില മുഴുവൻ മുങ്ങി. | loc: തോട്ടുംകര കവല<br>count: 3<br>asset: None<br>hazards: none<br>review: True | med: CARDIAC, INJURY<br>groups: ELDERLY<br>water: ABOVE_HEAD | CRITICAL / CRITICAL | Reporter not identified: relation null; chest heaviness and pain is CARDIAC; a leg wound with no bleeding stated is INJURY only. |  |
+| 054 | ml | തോട്ടുംകര കവലയിൽ ഒരു കടയുടെ മുകളിലത്തെ നിലയിൽ 3 പേർ ഉണ്ട്. ഒരു പ്രായമായ സ്ത്രീക്ക് നെഞ്ചിൽ ഭാരവും വേദനയും, കാലിൽ ഒരു മുറിവുമുണ്ട്. താഴത്തെ നില മുഴുവൻ മുങ്ങി. | loc: തോട്ടുംകര കവല<br>count: 3<br>asset: None<br>hazards: none<br>review: True | med: CARDIAC, INJURY<br>groups: ELDERLY<br>water: ABOVE_HEAD | CRITICAL / CRITICAL | Reporter not identified: relation null; chest heaviness and pain is CARDIAC; a leg wound with no bleeding stated is INJURY only. |  |
 | 055 | manglish | Wife nu prasavam kazhinju 4 divasame aayullu, ippo orupaadu chora pokunnu, nilkkunnilla. Njanum wifeum kunjum, 3 per, Kanniyamthodu SNDP hall nte aduthulla veettil kudungi kidakkuva. Boat venam | loc: Kanniyamthodu SNDP hall<br>count: 3<br>asset: RESCUE_BOAT<br>hazards: none<br>review: False | rel: SELF<br>on_scene: True<br>med: BLEEDING<br>groups: INFANT | CRITICAL / CRITICAL | Postpartum heavy bleeding is BLEEDING, gold CRITICAL; 4-day-old baby is INFANT; delivery is over so no PREGNANT and no 'in labour'. |  |
 
 ## T10
