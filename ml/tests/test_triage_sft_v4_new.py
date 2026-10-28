@@ -34,7 +34,7 @@ def test_every_new_record_uses_a_zero_context_rewrite():
     # The module's own texts were drafted after exposure to the evaluation sets.
     from crisisgraph_ml.triage_sft_v4_new import build_records
 
-    assert all(record.get("text_source") == "zero-context rewrite" for record in build_records())
+    assert all(record.get("text_source", "").startswith("zero-context") for record in build_records())
 
 
 def test_leak_audit_drops_are_applied():

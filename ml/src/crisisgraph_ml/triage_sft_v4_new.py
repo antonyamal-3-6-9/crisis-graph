@@ -1306,7 +1306,39 @@ def batch_5() -> list[dict[str, Any]]:
     ]
 
 
-BATCHES = {1: batch_1, 2: batch_2, 3: batch_3, 4: batch_4, 5: batch_5}
+# Batches 6 and 7 are written, text and labels, by zero-context agents from
+# the guidelines and owner policies only, and stored as data files.
+AGENT_BATCHES = {
+    6: (DATA / "triage-sft-v4-batch6-agent.jsonl", "train"),
+    7: (DATA / "triage-sft-v4-batch7-agent.jsonl", "validation"),
+}
+AGENT_NOTES: dict[str, str] = {}
+
+
+def agent_batch(number: int) -> list[dict[str, Any]]:
+    path, split = AGENT_BATCHES[number]
+    if not path.exists():
+        return []
+    records = []
+    for item in load_cases(path):
+        labels, profile = item["labels"], item["labels"]["victim_profile"]
+        record = rec(
+            item["n"], number, item["failure_type"], item["language"], item["input"],
+            location=labels["victim_location"], headcount=labels["headcount"],
+            asset=labels["required_asset"], gold=item["expected_urgency"],
+            hazards=labels["hazards"], relation=profile["reporter_relation"],
+            on_scene=profile["reporter_on_scene"], medical=profile["medical_conditions"],
+            other=profile["other_conditions"], groups=profile["vulnerable_groups"],
+            water=profile["water_level"], trend=profile["water_trend"], split=split,
+        )
+        record["text_source"] = "zero-context author"
+        AGENT_NOTES[record["id"]] = item.get("note", "")
+        records.append(record)
+    return records
+
+
+BATCHES = {1: batch_1, 2: batch_2, 3: batch_3, 4: batch_4, 5: batch_5,
+           6: lambda: agent_batch(6), 7: lambda: agent_batch(7)}
 
 # Annotator notes shown on the owner review sheet (not part of the records).
 NOTES = {
@@ -1512,7 +1544,7 @@ def review_cases(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         cases.append({"id": record["id"], "category": record["failure_type"],
                       "language": record["language"], "input": record["input"],
                       "expected": expected, "expected_urgency": record["expected_urgency"],
-                      "annotator_note": NOTES.get(record["id"], "")})
+                      "annotator_note": NOTES.get(record["id"], AGENT_NOTES.get(record["id"], ""))})
     return cases
 
 
