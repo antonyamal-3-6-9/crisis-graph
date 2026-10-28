@@ -12,14 +12,13 @@ by hand.
   potential under-triage; rule higher is over-triage).
 - **Note** is the annotator's own comment, if any.
 
-**Batch 1 (50 records): AI first pass and owner review complete.** Guideline changes 5–8 are in `triage-annotation-guidelines-v3.2-changes.md`.
+**Batch 1 (49 records): AI first pass and owner review complete.** Guideline changes 5–8 are in `triage-annotation-guidelines-v3.2-changes.md`.
 
 
 ## T1
 
 | ID | Lang | Message | V2 labels | Profile | Gold / Rule | Note | Review |
 |---|---|---|---|---|---|---|---|
-| 001 | en | Ground floor of our house on Thekkekara Library Road is completely under water. 4 of us are upstairs, please send a rescue boat. | loc: Thekkekara Library Road<br>count: 4<br>asset: RESCUE_BOAT<br>hazards: none<br>review: False | rel: SELF<br>on_scene: True<br>water: ABOVE_HEAD | CRITICAL / CRITICAL | Owner policy: a fully submerged ground floor means about 3 m of water around the house, no way out except by boat and one storey of headroom, so CRITICAL even with people safe upstairs (also 003, 004, 013, 015, 022, 045, 049). Not in conflict with test 105 / t273, which state no water. |  |
 | 002 | en | 32 people including children at Puthenvila school, the ground floor is fully submerged. Rescue boat needed. | loc: Puthenvila school<br>count: 32<br>asset: RESCUE_BOAT<br>hazards: none<br>review: False | groups: CHILD<br>water: ABOVE_HEAD | CRITICAL / CRITICAL |  |  |
 | 003 | manglish | Kallingal kadavu il njangal 3 per und. veedinte thazhathe nila muzhuvan vellathinadiyil aanu, help cheyyane | loc: Kallingal kadavu<br>count: 3<br>asset: None<br>hazards: none<br>review: True | rel: SELF<br>on_scene: True<br>water: ABOVE_HEAD | CRITICAL / CRITICAL |  |  |
 | 004 | ml | വാരിക്കാട്ട് പള്ളിക്ക് സമീപം ഞങ്ങൾ 5 പേരുണ്ട്. വീടിന്റെ താഴത്തെ നില മുഴുവൻ വെള്ളത്തിനടിയിലാണ്. റെസ്ക്യൂ ബോട്ട് വേണം. | loc: വാരിക്കാട്ട് പള്ളി<br>count: 5<br>asset: RESCUE_BOAT<br>hazards: none<br>review: False | rel: SELF<br>on_scene: True<br>water: ABOVE_HEAD | CRITICAL / CRITICAL |  |  |

@@ -33,6 +33,11 @@ DEFAULT_OUTPUT = DATA / "triage-sft-v4-new-candidates.jsonl"
 # them resembled specific test messages. Labels stay as reviewed; the texts
 # below are kept for provenance and replaced at build time.
 REWRITES = DATA / "triage-sft-v4-new-rewrites.json"
+# Records whose scenario still matched a specific evaluation message after the
+# rewrite (high-confidence rows of the leak audit): dropped, and replaced by
+# zero-context records in batch 6. Medium overlaps are kept and drive the
+# evaluation's sensitivity check.
+LEAK_AUDIT = DATA / "triage-sft-v4-leak-audit.json"
 EVAL_SETS = [
     DATA / "triage-eval-v3-dev-candidates.jsonl",
     DATA / "triage-eval-v3.0.1.jsonl",
@@ -1513,7 +1518,9 @@ def review_cases(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def build_records(batches: tuple[int, ...] = tuple(BATCHES)) -> list[dict[str, Any]]:
     rewrites = json.loads(REWRITES.read_text(encoding="utf-8")) if REWRITES.exists() else {}
-    records = [record for number in batches for record in BATCHES[number]()]
+    dropped = json.loads(LEAK_AUDIT.read_text(encoding="utf-8"))["dropped"] if LEAK_AUDIT.exists() else {}
+    records = [record for number in batches for record in BATCHES[number]()
+               if record["id"] not in dropped]
     unknown = set(rewrites) - {record["id"] for record in build_all()} if rewrites else set()
     if unknown:
         raise ValueError(f"rewrites for unknown ids: {sorted(unknown)}")
@@ -1539,7 +1546,7 @@ def separation_problems(records: list[dict[str, Any]]) -> list[str]:
     no 5-word spelling-skeleton run shared between Malayalam / Manglish texts.
 
     Translation between languages is not detectable this way; it is audited
-    separately (``data/triage-sft-v4-leak-audit.md``).
+    separately (``data/triage-sft-v4-leak-audit.json``).
     """
     inputs, places = set(), set()
     for path in EVAL_SETS:

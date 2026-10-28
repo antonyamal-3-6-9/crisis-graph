@@ -35,3 +35,13 @@ def test_every_new_record_uses_a_zero_context_rewrite():
     from crisisgraph_ml.triage_sft_v4_new import build_records
 
     assert all(record.get("text_source") == "zero-context rewrite" for record in build_records())
+
+
+def test_leak_audit_drops_are_applied():
+    import json
+
+    from crisisgraph_ml.triage_sft_v4_new import LEAK_AUDIT, build_records
+
+    dropped = json.loads(LEAK_AUDIT.read_text(encoding="utf-8"))["dropped"]
+    assert len(dropped) == 15
+    assert not {record["id"] for record in build_records()} & set(dropped)

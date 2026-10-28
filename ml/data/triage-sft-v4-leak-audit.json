@@ -1,0 +1,145 @@
+{
+ "audit_date": "2026-10-28",
+ "method": "agent that read every training input and every evaluation input; item-level resemblance (copy, respelling, transliteration, translation, close paraphrase)",
+ "dropped": {
+  "sft-v4-new-b1-001": "v3-test-067",
+  "sft-v4-new-b2-005": "v3.1-test-011",
+  "sft-v4-new-b2-024": "v3-test-051",
+  "sft-v4-new-b2-028": "v3.1-test-015",
+  "sft-v4-new-b2-043": "v3-test-077",
+  "sft-v4-new-b3-010": "v3.1-test-050",
+  "sft-v4-new-b3-026": "v3-test-091",
+  "sft-v4-new-b3-044": "v3.1-test-045",
+  "sft-v4-new-b3-045": "v3.1-test-043",
+  "sft-v4-new-b4-039": "v3.1-test-080",
+  "sft-v4-new-b4-045": "v3-test-080",
+  "sft-v4-new-b5-001": "v3-dev-001",
+  "sft-v4-new-b5-006": "v3-carryover-adversarial-006",
+  "sft-v4-new-b5-007": "v3.1-test-034",
+  "sft-v4-new-b5-019": "v3-carryover-multilingual-malayalam-001"
+ },
+ "kept_medium_overlap": [
+  {
+   "train": "sft-v4-new-b2-037",
+   "eval": "v3.1-test-045"
+  },
+  {
+   "train": "sft-v4-new-b2-019",
+   "eval": "v3.1-test-013"
+  },
+  {
+   "train": "sft-v4-new-b2-021",
+   "eval": "v3.1-test-028"
+  },
+  {
+   "train": "sft-v4-new-b2-038",
+   "eval": "v3.1-test-103"
+  },
+  {
+   "train": "sft-v4-new-b2-038",
+   "eval": "v3.1-test-047"
+  },
+  {
+   "train": "sft-v4-new-b2-025",
+   "eval": "v3-test-101"
+  },
+  {
+   "train": "sft-v4-new-b5-033",
+   "eval": "v3-test-101"
+  },
+  {
+   "train": "sft-v4-new-b5-005",
+   "eval": "v3-dev-011"
+  },
+  {
+   "train": "sft-v4-new-b2-035",
+   "eval": "v3-dev-011"
+  },
+  {
+   "train": "sft-v4-new-b3-011",
+   "eval": "v3.1-test-056"
+  },
+  {
+   "train": "sft-v4-new-b3-036",
+   "eval": "v3.1-test-053"
+  },
+  {
+   "train": "sft-v4-new-b3-043",
+   "eval": "v3.1-test-017"
+  },
+  {
+   "train": "sft-v4-new-b3-038",
+   "eval": "v3-test-047"
+  },
+  {
+   "train": "sft-v4-new-b4-007",
+   "eval": "v3-test-055"
+  },
+  {
+   "train": "sft-v4-new-b4-007",
+   "eval": "v3.1-test-039"
+  },
+  {
+   "train": "sft-v4-new-b4-009",
+   "eval": "v3.1-test-105"
+  },
+  {
+   "train": "sft-v4-new-b5-015",
+   "eval": "v3-dev-035"
+  },
+  {
+   "train": "sft-v4-new-b5-034",
+   "eval": "v3.1-test-052"
+  },
+  {
+   "train": "sft-v4-new-b5-043",
+   "eval": "v3.1-test-100"
+  },
+  {
+   "train": "sft-v4-new-b1-012",
+   "eval": "v3-dev-023"
+  },
+  {
+   "train": "sft-v4-new-b1-016",
+   "eval": "v3-test-085"
+  },
+  {
+   "train": "sft-v4-new-b1-039",
+   "eval": "v3.1-test-060"
+  }
+ ],
+ "sensitivity_exclude": {
+  "v3.1.0": [
+   "v3.1-test-011",
+   "v3.1-test-013",
+   "v3.1-test-015",
+   "v3.1-test-017",
+   "v3.1-test-028",
+   "v3.1-test-034",
+   "v3.1-test-039",
+   "v3.1-test-043",
+   "v3.1-test-045",
+   "v3.1-test-047",
+   "v3.1-test-050",
+   "v3.1-test-052",
+   "v3.1-test-053",
+   "v3.1-test-056",
+   "v3.1-test-060",
+   "v3.1-test-080",
+   "v3.1-test-100",
+   "v3.1-test-103",
+   "v3.1-test-105"
+  ],
+  "v3.0.1": [
+   "v3-test-047",
+   "v3-test-051",
+   "v3-test-055",
+   "v3-test-067",
+   "v3-test-077",
+   "v3-test-080",
+   "v3-test-085",
+   "v3-test-091",
+   "v3-test-101"
+  ]
+ }
+}
