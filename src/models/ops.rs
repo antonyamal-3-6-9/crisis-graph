@@ -4,7 +4,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::AssetType;
+use super::{AssetType, LocationSource, ReviewPriority, UrgencyResult};
 
 /// Declares a string-backed enum with stable wire names, `as_str()` and
 /// `parse()`, matching the values stored in Neo4j.
@@ -169,6 +169,24 @@ pub struct ExtractionRecord {
     /// All dispatch-critical facts present and no blocking errors.
     pub dispatch_ready: bool,
     pub review_reasons: Vec<String>,
+    /// Derived urgency; UNKNOWN (reviewed first) when no extraction exists.
+    pub urgency: UrgencyResult,
+    /// Which position `resolved_junction_id` came from (finding F-1); `None`
+    /// when no victim position is known.
+    pub location_source: Option<LocationSource>,
+    /// Asset suggested from the extracted facts when none was given (F-2).
+    /// Shown to the dispatcher; never dispatched on its own.
+    pub suggested_asset: Option<AssetType>,
+}
+
+/// An open incident whose urgency is UNKNOWN: the dispatcher calls back to
+/// establish the facts. Its task (if any) is already queued at URGENT rank.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallbackItem {
+    pub incident_id: String,
+    pub status: String,
+    pub review_priority: Option<ReviewPriority>,
+    pub created_at: DateTime<Utc>,
 }
 
 /// A report as seen by the triage worker when it starts processing it.
@@ -187,9 +205,11 @@ pub enum TriageCommit {
     /// The report was already linked (duplicate or redelivered message).
     AlreadyLinked { incident_id: String },
     /// A new incident was created; `task_id` is set when it is dispatch-ready.
-    Created { incident_id: String, task_id: Option<String> },
+    /// `alerted`: an `INCIDENT_CRITICAL` alert was queued for the dispatcher.
+    Created { incident_id: String, task_id: Option<String>, alerted: bool },
     /// Attached as a follow-up to an open incident from the same device (D-2).
-    Attached { incident_id: String, headcount_increased: bool },
+    /// `urgency_raised`: the follow-up raised the incident's urgency.
+    Attached { incident_id: String, headcount_increased: bool, urgency_raised: bool },
 }
 
 impl TriageCommit {

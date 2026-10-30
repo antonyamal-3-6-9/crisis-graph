@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use super::triage::{AssetType, RoadStatus, SosAlert, TriageReport};
+use super::victim::WaterLevel;
 
 pub const DEFAULT_BASELINE_HEADCOUNT: u32 = 4;
 
@@ -16,10 +17,12 @@ pub struct UncertaintyWaterfall {
     pub headcount_is_fallback: bool,
     pub original_headcount: Option<u32>,
     pub resolved_headcount: u32,
-    /// True if required asset was inferred from environmental/keyword context
-    pub asset_is_fallback: bool,
-    pub original_asset: Option<AssetType>,
-    pub resolved_asset: AssetType,
+    /// The asset the caller asked for. Never guessed: a missing asset blocks
+    /// automatic dispatch (finding F-2).
+    pub resolved_asset: Option<AssetType>,
+    /// When no asset was given: a suggestion from the extracted facts, shown
+    /// to the dispatcher to confirm. Never dispatched on its own.
+    pub suggested_asset: Option<AssetType>,
     /// Operational directives for field responders en route
     pub field_operational_directives: Vec<String>,
 }
@@ -59,45 +62,11 @@ impl UncertaintyWaterfall {
             _ => (true, DEFAULT_BASELINE_HEADCOUNT),
         };
 
-        // 3. Asset Waterfall: Infer asset from environmental and contextual cues
-        let (asset_is_fallback, resolved_asset) = match &triage.required_asset {
-            Some(asset) => (false, asset.clone()),
-            None => {
-                let lower = alert.raw_text.to_lowercase();
-                let inferred = if lower.contains("flood")
-                    || lower.contains("water")
-                    || lower.contains("river")
-                    || lower.contains("drown")
-                    || lower.contains("submerged")
-                    || lower.contains("vellam")
-                    || lower.contains("munki")
-                    || lower.contains("boat")
-                    || triage.hazards.iter().any(|h| h.status == Some(RoadStatus::Flooded))
-                {
-                    AssetType::RescueBoat
-                } else if lower.contains("injur")
-                    || lower.contains("bleed")
-                    || lower.contains("blood")
-                    || lower.contains("patient")
-                    || lower.contains("unconscious")
-                    || lower.contains("cardiac")
-                    || lower.contains("hospital")
-                    || lower.contains("ambulance")
-                {
-                    AssetType::Ambulance
-                } else if lower.contains("truck")
-                    || lower.contains("lorry")
-                    || lower.contains("heavy")
-                    || lower.contains("debris")
-                    || lower.contains("tree")
-                {
-                    AssetType::EvacTruck
-                } else {
-                    // Standard emergency medical response
-                    AssetType::Ambulance
-                };
-                (true, inferred)
-            }
+        // 3. Asset: never guessed. Without one, suggest from the extracted
+        //    facts for the dispatcher to confirm.
+        let suggested_asset = match triage.required_asset {
+            Some(_) => None,
+            None => suggest_asset(triage),
         };
 
         // 4. Generate operational directives for field responders
@@ -108,10 +77,9 @@ impl UncertaintyWaterfall {
                 DEFAULT_BASELINE_HEADCOUNT
             ));
         }
-        if asset_is_fallback {
+        if let Some(asset) = &suggested_asset {
             field_operational_directives.push(format!(
-                "Required asset unspecified by caller; inferred as '{}' from incident context. Responders: Conduct terrain and approach assessment.",
-                resolved_asset
+                "Required asset unspecified by caller; '{asset}' suggested from the extracted facts. Dispatcher: confirm the asset before dispatch."
             ));
         }
 
@@ -122,17 +90,35 @@ impl UncertaintyWaterfall {
             headcount_is_fallback,
             original_headcount: triage.headcount,
             resolved_headcount,
-            asset_is_fallback,
-            original_asset: triage.required_asset.clone(),
-            resolved_asset,
+            resolved_asset: triage.required_asset.clone(),
+            suggested_asset,
             field_operational_directives,
         }
     }
 }
 
+/// Asset suggestion from extracted categories, not raw-text keywords: water
+/// at waist depth or deeper, or a flooded road, suggests a boat; a medical
+/// condition suggests an ambulance; anything else gives no suggestion.
+pub fn suggest_asset(triage: &TriageReport) -> Option<AssetType> {
+    let profile = triage.victim_profile.as_ref();
+    let deep_water = profile
+        .and_then(|p| p.water_level)
+        .is_some_and(|level| level >= WaterLevel::Waist);
+    let flooded_road = triage.hazards.iter().any(|h| h.status == Some(RoadStatus::Flooded));
+    if deep_water || flooded_road {
+        return Some(AssetType::RescueBoat);
+    }
+    if profile.is_some_and(|p| !p.medical_conditions.is_empty()) {
+        return Some(AssetType::Ambulance);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{MedicalCondition, VictimProfile};
     use crate::models::triage::TriageInferenceMetadata;
 
     fn mock_metadata() -> TriageInferenceMetadata {
@@ -163,6 +149,9 @@ mod tests {
             needs_human_review: true,
             uncertainty_reasons: vec!["Victim location was not provided".into()],
             inference: mock_metadata(),
+            victim_profile: None,
+            urgency: None,
+            location_source: None,
         };
 
         let wf = UncertaintyWaterfall::resolve(&alert, &triage);
@@ -170,7 +159,7 @@ mod tests {
         assert!(wf.automated_callback_inquiry.unwrap().contains("Location not identified"));
         assert!(wf.dispatcher_dial_alert.unwrap().contains("Immediate operator phone dial required"));
         assert!(!wf.headcount_is_fallback);
-        assert!(!wf.asset_is_fallback);
+        assert!(wf.suggested_asset.is_none());
     }
 
     #[test]
@@ -186,6 +175,9 @@ mod tests {
             needs_human_review: true,
             uncertainty_reasons: vec!["Headcount was not provided".into()],
             inference: mock_metadata(),
+            victim_profile: None,
+            urgency: None,
+            location_source: None,
         };
 
         let wf = UncertaintyWaterfall::resolve(&alert, &triage);
@@ -196,27 +188,45 @@ mod tests {
         assert!(wf.field_operational_directives.iter().any(|d| d.contains("standard baseline unit")));
     }
 
-    #[test]
-    fn test_unspecified_asset_infers_boat_from_flood_context() {
-        let alert = SosAlert::new("SOS-FLOOD-3", "Periyar water entered our house, roads completely flooded and munki!");
-        let triage = TriageReport {
+    fn triage_without_asset(profile: Option<VictimProfile>) -> TriageReport {
+        TriageReport {
             victim_location_raw: Some("Aluva Manappuram".into()),
             resolved_junction_id: Some("node/7048449098".into()),
             headcount: Some(5),
-            required_asset: None, // Missing
+            required_asset: None,
             hazards: vec![],
             confidence_score: 0.9,
             needs_human_review: true,
             uncertainty_reasons: vec!["Required asset was not specified".into()],
             inference: mock_metadata(),
-        };
+            victim_profile: profile,
+            urgency: None,
+            location_source: None,
+        }
+    }
 
-        let wf = UncertaintyWaterfall::resolve(&alert, &triage);
-        assert!(!wf.location_missing);
-        assert!(!wf.headcount_is_fallback);
-        assert!(wf.asset_is_fallback);
-        assert_eq!(wf.resolved_asset, AssetType::RescueBoat);
-        assert!(wf.field_operational_directives.iter().any(|d| d.contains("RESCUE_BOAT")));
+    #[test]
+    fn unspecified_asset_is_suggested_from_categories_never_resolved() {
+        let alert = SosAlert::new("SOS-FLOOD-3", "Periyar water entered our house");
+        let deep = VictimProfile { water_level: Some(WaterLevel::Chest), ..Default::default() };
+        let wf = UncertaintyWaterfall::resolve(&alert, &triage_without_asset(Some(deep)));
+        assert_eq!(wf.resolved_asset, None);
+        assert_eq!(wf.suggested_asset, Some(AssetType::RescueBoat));
+        assert!(wf.field_operational_directives.iter().any(|d| d.contains("confirm the asset")));
+
+        let medical = VictimProfile { medical_conditions: vec![MedicalCondition::Injury], ..Default::default() };
+        let wf = UncertaintyWaterfall::resolve(&alert, &triage_without_asset(Some(medical)));
+        assert_eq!(wf.suggested_asset, Some(AssetType::Ambulance));
+    }
+
+    #[test]
+    fn raw_text_keywords_no_longer_pick_an_asset() {
+        // The old keyword rule picked a boat from "water"/"munki" in the text.
+        let alert = SosAlert::new("SOS-FLOOD-4", "water everywhere, munki, flood, boat please");
+        let wf = UncertaintyWaterfall::resolve(&alert, &triage_without_asset(Some(VictimProfile::default())));
+        assert_eq!(wf.suggested_asset, None);
+        let wf = UncertaintyWaterfall::resolve(&alert, &triage_without_asset(None));
+        assert_eq!(wf.suggested_asset, None);
     }
 
     #[test]
@@ -232,14 +242,17 @@ mod tests {
             needs_human_review: false,
             uncertainty_reasons: vec![],
             inference: mock_metadata(),
+            victim_profile: None,
+            urgency: None,
+            location_source: None,
         };
 
         let wf = UncertaintyWaterfall::resolve(&alert, &triage);
         assert!(!wf.location_missing);
         assert!(!wf.headcount_is_fallback);
-        assert!(!wf.asset_is_fallback);
+        assert!(wf.suggested_asset.is_none());
         assert_eq!(wf.resolved_headcount, 3);
-        assert_eq!(wf.resolved_asset, AssetType::Ambulance);
+        assert_eq!(wf.resolved_asset, Some(AssetType::Ambulance));
         assert!(wf.automated_callback_inquiry.is_none());
         assert!(wf.dispatcher_dial_alert.is_none());
         assert!(wf.field_operational_directives.is_empty());

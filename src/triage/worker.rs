@@ -140,12 +140,13 @@ impl TriageWorker {
             .await?;
         let flagged = self.flag(commit.incident_id()).await?;
         Ok(match commit {
-            TriageCommit::Created { incident_id, task_id } => TriageOutcome::Created {
-                incident_id,
-                ready: task_id.is_some(),
-                flagged,
-            },
-            TriageCommit::Attached { incident_id, headcount_increased } => TriageOutcome::Attached {
+            TriageCommit::Created { incident_id, task_id, alerted } => {
+                if alerted {
+                    metrics::counter!("crisisgraph_triage_critical_alerts_total").increment(1);
+                }
+                TriageOutcome::Created { incident_id, ready: task_id.is_some(), flagged }
+            }
+            TriageCommit::Attached { incident_id, headcount_increased, .. } => TriageOutcome::Attached {
                 incident_id,
                 headcount_increased,
                 flagged,

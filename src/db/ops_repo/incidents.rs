@@ -5,8 +5,10 @@ use neo4rs::{query, Query, Row, Txn};
 use serde_json::json;
 
 use super::reports::{report_from_row, REPORT_FIELDS};
-use super::{new_id, OpsRepoError, OpsRepository, SYSTEM_ACTOR, MAX_WRITE_ATTEMPTS};
-use crate::models::{ExtractionRecord, TriageCommit, TriageState, OPEN_INCIDENT_STATUSES};
+use super::{new_id, parse_enum, parse_time, OpsRepoError, OpsRepository, SYSTEM_ACTOR, MAX_WRITE_ATTEMPTS};
+use crate::models::{
+    CallbackItem, ExtractionRecord, ReviewPriority, TriageCommit, TriageState, OPEN_INCIDENT_STATUSES,
+};
 
 fn open_statuses() -> Vec<String> {
     OPEN_INCIDENT_STATUSES.iter().map(|s| s.to_string()).collect()
@@ -36,21 +38,33 @@ impl OpsRepository {
 
     /// Save the extraction on the report (the checkpoint before
     /// deduplication). Only a `PENDING` report is updated, so a redelivered
-    /// message never overwrites a saved extraction. The report's location is
-    /// the caller's coordinates if given, else the resolved junction.
+    /// message never overwrites a saved extraction.
+    ///
+    /// `location` is the victims' position (finding F-1): the caller's
+    /// coordinates only when the extraction placed the caller on scene
+    /// (`DEVICE_GPS`), otherwise the chosen junction, otherwise null. The
+    /// caller's own position is kept separately as `caller_location`.
     pub async fn save_extraction(&self, report_id: &str, record: &ExtractionRecord) -> Result<bool, OpsRepoError> {
+        let urgency = &record.urgency;
         let q = query(
             "MATCH (r:Report {report_id: $report_id}) \
              WHERE r.extraction_status = 'PENDING' \
              OPTIONAL MATCH (j:Junction {id: $junction_id}) \
-             WITH r, head(collect(j)) AS j \
+             WITH r, head(collect(j)) AS j, \
+                  CASE WHEN r.latitude IS NOT NULL AND r.longitude IS NOT NULL \
+                      THEN point({latitude: r.latitude, longitude: r.longitude}) END AS caller \
              SET r.extraction_status = $status, r.extraction_json = $json, \
                  r.headcount = $headcount, r.required_asset = $required_asset, \
+                 r.suggested_asset = $suggested_asset, \
                  r.resolved_junction_id = $junction_id, r.dispatch_ready = $ready, \
                  r.review_reasons = $reasons, r.extracted_at = datetime(), \
+                 r.urgency = $urgency, r.rule_urgency = $rule_urgency, \
+                 r.review_priority = $review_priority, r.review_rank = $review_rank, \
+                 r.urgency_flags = $urgency_flags, r.urgency_rules_version = $rules_version, \
+                 r.priority_rank = $priority_rank, r.immediate_attention = $immediate, \
+                 r.location_source = $location_source, r.caller_location = caller, \
                  r.location = CASE \
-                     WHEN r.latitude IS NOT NULL AND r.longitude IS NOT NULL \
-                         THEN point({latitude: r.latitude, longitude: r.longitude}) \
+                     WHEN $location_source = 'DEVICE_GPS' AND caller IS NOT NULL THEN caller \
                      WHEN j IS NOT NULL THEN point({latitude: j.lat, longitude: j.lon}) \
                      ELSE null END \
              RETURN r.report_id AS report_id",
@@ -62,7 +76,17 @@ impl OpsRepository {
         .param("required_asset", record.required_asset.as_ref().map(|a| a.to_string()))
         .param("junction_id", record.resolved_junction_id.clone())
         .param("ready", record.dispatch_ready)
-        .param("reasons", record.review_reasons.clone());
+        .param("reasons", record.review_reasons.clone())
+        .param("suggested_asset", record.suggested_asset.as_ref().map(|a| a.to_string()))
+        .param("urgency", urgency.urgency.as_str())
+        .param("rule_urgency", urgency.rule_urgency.as_str())
+        .param("review_priority", urgency.review_priority.map(|p| p.as_str()))
+        .param("review_rank", urgency.review_priority.map(|p| p.rank() as i64))
+        .param("urgency_flags", urgency.flags.iter().map(|f| f.as_str().to_string()).collect::<Vec<_>>())
+        .param("rules_version", urgency.rules_version.clone())
+        .param("priority_rank", urgency.urgency.rank() as i64)
+        .param("immediate", urgency.needs_immediate_attention())
+        .param("location_source", record.location_source.map(|s| s.as_str()));
         Ok(self.write_first_row(q).await?.is_some())
     }
 
@@ -99,6 +123,35 @@ impl OpsRepository {
                 other => return other,
             }
         }
+    }
+
+    /// The dispatcher callback list: open incidents with UNKNOWN urgency,
+    /// highest review priority first, then oldest first.
+    pub async fn callback_queue(&self, limit: usize) -> Result<Vec<CallbackItem>, OpsRepoError> {
+        let q = query(
+            "MATCH (i:OpsIncident) \
+             WHERE i.callback_required = true AND i.status IN $open \
+             RETURN i.incident_id AS incident_id, i.status AS status, \
+                    i.review_priority AS review_priority, toString(i.created_at) AS created_at \
+             ORDER BY coalesce(i.review_rank, 2) DESC, i.created_at ASC \
+             LIMIT $limit",
+        )
+        .param("open", open_statuses())
+        .param("limit", limit as i64);
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let mut items = Vec::new();
+        while let Some(row) = result.next().await? {
+            items.push(CallbackItem {
+                incident_id: row.get("incident_id")?,
+                status: row.get("status")?,
+                review_priority: row
+                    .get::<Option<String>>("review_priority")?
+                    .map(|p| parse_enum(&p, ReviewPriority::parse, "review priority"))
+                    .transpose()?,
+                created_at: parse_time(&row.get::<String>("created_at")?)?,
+            });
+        }
+        Ok(items)
     }
 
     /// Rule D-3, run after T1: link this incident to other open incidents at
@@ -169,6 +222,9 @@ async fn commit_triage_in(
              RETURN r.extraction_status AS status, r.device_id AS device_id, \
                     toString(r.received_at) AS received_at, \
                     coalesce(r.dispatch_ready, false) AND r.required_asset IS NOT NULL AS ready, \
+                    coalesce(r.urgency, 'UNKNOWN') AS urgency, coalesce(r.urgency_flags, []) AS flags, \
+                    r.review_priority AS review_priority, \
+                    coalesce(r.immediate_attention, false) AS immediate, \
                     i.incident_id AS linked",
         )
         .param("report_id", report_id),
@@ -187,6 +243,10 @@ async fn commit_triage_in(
     let device_id: String = row.get("device_id")?;
     let received_at: String = row.get("received_at")?;
     let ready: bool = row.get("ready")?;
+    let urgency: String = row.get("urgency")?;
+    let flags: Vec<String> = row.get("flags")?;
+    let review_priority: Option<String> = row.get("review_priority")?;
+    let immediate: bool = row.get("immediate")?;
 
     // 2. Rule D-2: an open incident with a report from the same device.
     let followup = txn_first_row(
@@ -215,27 +275,60 @@ async fn commit_triage_in(
                  SET i._lock = true \
                  REMOVE i._lock \
                  CREATE (r)-[:REPORTS {kind: 'FOLLOW_UP', attached_at: datetime(), rule: 'D-2'}]->(i) \
-                 WITH r, i, coalesce(i.headcount, 0) AS before \
+                 WITH r, i, coalesce(i.headcount, 0) AS before, \
+                      coalesce(r.priority_rank, 1) AS new_rank, coalesce(i.priority_rank, 1) AS old_rank \
+                 WITH r, i, before, \
+                      new_rank > old_rank OR (new_rank = old_rank \
+                          AND coalesce(i.urgency, 'UNKNOWN') = 'UNKNOWN' AND r.urgency = 'URGENT') AS raise \
+                 WITH r, i, before, raise, \
+                      NOT raise AND coalesce(i.urgency, 'UNKNOWN') = 'UNKNOWN' AND r.urgency = 'UNKNOWN' \
+                          AND coalesce(r.review_rank, 0) > coalesce(i.review_rank, 0) AS bump_review \
                  SET i.headcount = CASE WHEN coalesce(r.headcount, 0) > before THEN r.headcount ELSE i.headcount END, \
+                     i.urgency = CASE WHEN raise THEN r.urgency ELSE i.urgency END, \
+                     i.rule_urgency = CASE WHEN raise THEN r.rule_urgency ELSE i.rule_urgency END, \
+                     i.urgency_flags = CASE WHEN raise THEN r.urgency_flags ELSE i.urgency_flags END, \
+                     i.urgency_rules_version = CASE WHEN raise THEN r.urgency_rules_version \
+                         ELSE i.urgency_rules_version END, \
+                     i.priority_rank = CASE WHEN raise THEN r.priority_rank ELSE i.priority_rank END, \
+                     i.review_priority = CASE WHEN raise OR bump_review THEN r.review_priority \
+                         ELSE i.review_priority END, \
+                     i.review_rank = CASE WHEN raise OR bump_review THEN r.review_rank ELSE i.review_rank END, \
+                     i.callback_required = CASE WHEN raise THEN r.urgency = 'UNKNOWN' ELSE i.callback_required END, \
                      i.version = i.version + 1, i.updated_at = datetime(), \
                      i.report_count = coalesce(i.report_count, 1) + 1, r.dedup_rule = 'D-2' \
-                 WITH r, i, coalesce(r.headcount, 0) > before AS increased \
+                 WITH r, i, coalesce(r.headcount, 0) > before AS increased, raise, \
+                      raise AND coalesce(r.immediate_attention, false) AS alert \
+                 OPTIONAL MATCH (i)-[:HAS_TASK]->(t:Task) WHERE t.status IN ['QUEUED', 'PENDING_TRIGGER'] \
+                 FOREACH (x IN CASE WHEN raise AND t IS NOT NULL THEN [t] ELSE [] END | \
+                     SET x.urgency = i.urgency, x.priority_rank = i.priority_rank, x.version = x.version + 1) \
+                 WITH r, i, increased, raise, alert, count(t) AS tasks \
                  CREATE (i)-[:HAS_AUDIT_EVENT]->(:AuditEvent { \
                      event_id: $audit_id, aggregate_type: 'Incident', aggregate_id: i.incident_id, \
                      action: 'REPORT_ATTACHED', actor_id: $actor_id, previous_version: i.version - 1, \
                      new_version: i.version, reason: 'same-device follow-up (D-2): report ' + r.report_id, \
-                     occurred_at: datetime(), details_json: '{}' }) \
+                     occurred_at: datetime(), \
+                     details_json: '{\"urgency_raised\":' + toString(raise) + \
+                         ',\"urgency\":\"' + coalesce(i.urgency, 'UNKNOWN') + '\"}' }) \
                  CREATE (:OutboxEvent { \
                      event_id: $outbox_id, aggregate_id: i.incident_id, type: 'INCIDENT_UPDATED', \
                      payload_json: '{\"incident_id\":\"' + i.incident_id + '\",\"report_id\":\"' + r.report_id + \
-                         '\",\"headcount_increased\":' + toString(increased) + '}', \
+                         '\",\"headcount_increased\":' + toString(increased) + \
+                         ',\"urgency_raised\":' + toString(raise) + \
+                         ',\"urgency\":\"' + coalesce(i.urgency, 'UNKNOWN') + '\"}', \
                      created_at: datetime(), published: false, attempts: 0 }) \
-                 RETURN increased",
+                 FOREACH (_ IN CASE WHEN alert THEN [1] ELSE [] END | \
+                     CREATE (:OutboxEvent { \
+                         event_id: $alert_id, aggregate_id: i.incident_id, type: 'INCIDENT_CRITICAL', \
+                         payload_json: '{\"incident_id\":\"' + i.incident_id + '\",\"report_id\":\"' + r.report_id + \
+                             '\",\"urgency\":\"' + i.urgency + '\"}', \
+                         created_at: datetime(), published: false, attempts: 0 })) \
+                 RETURN increased, raise",
             )
             .param("report_id", report_id)
             .param("incident_id", incident_id.clone())
             .param("audit_id", new_id())
             .param("outbox_id", new_id())
+            .param("alert_id", new_id())
             .param("actor_id", SYSTEM_ACTOR),
         )
         .await?
@@ -243,6 +336,7 @@ async fn commit_triage_in(
         return Ok(TriageCommit::Attached {
             incident_id,
             headcount_increased: attached.get("increased")?,
+            urgency_raised: attached.get("raise")?,
         });
     }
 
@@ -262,9 +356,18 @@ async fn commit_triage_in(
              WITH r, head(collect(j)) AS j \
              CREATE (i:OpsIncident { \
                  incident_id: $incident_id, status: $status, version: 0, headcount: r.headcount, \
-                 required_asset: r.required_asset, location: r.location, \
+                 required_asset: r.required_asset, suggested_asset: r.suggested_asset, \
+                 location: r.location, location_source: r.location_source, \
+                 caller_location: r.caller_location, \
                  junction_id: r.resolved_junction_id, device_id: r.device_id, \
                  review_reasons: coalesce(r.review_reasons, []), report_count: 1, \
+                 urgency: coalesce(r.urgency, 'UNKNOWN'), rule_urgency: coalesce(r.rule_urgency, 'UNKNOWN'), \
+                 review_priority: CASE WHEN r.urgency IS NULL THEN 'HIGH' ELSE r.review_priority END, \
+                 review_rank: CASE WHEN r.urgency IS NULL THEN 2 ELSE r.review_rank END, \
+                 urgency_flags: coalesce(r.urgency_flags, []), \
+                 urgency_rules_version: r.urgency_rules_version, \
+                 priority_rank: coalesce(r.priority_rank, 1), \
+                 callback_required: coalesce(r.urgency, 'UNKNOWN') = 'UNKNOWN', \
                  created_at: datetime(), updated_at: datetime() }) \
              CREATE (r)-[:REPORTS {kind: 'PRIMARY', attached_at: datetime(), rule: 'NEW'}]->(i) \
              SET r.dedup_rule = 'NEW' \
@@ -272,8 +375,8 @@ async fn commit_triage_in(
              FOREACH (_ IN CASE WHEN $task_id IS NULL THEN [] ELSE [1] END | \
                  CREATE (i)-[:HAS_TASK {seq: 1}]->(:Task { \
                      task_id: $task_id, incident_id: $incident_id, kind: 'ROAD_PICKUP', status: 'QUEUED', \
-                     required_asset: r.required_asset, version: 0, created_at: datetime(), \
-                     queued_at: datetime() })) \
+                     required_asset: r.required_asset, urgency: i.urgency, priority_rank: i.priority_rank, \
+                     version: 0, created_at: datetime(), queued_at: datetime() })) \
              CREATE (i)-[:HAS_AUDIT_EVENT]->(:AuditEvent { \
                  event_id: $audit_id, aggregate_type: 'Incident', aggregate_id: $incident_id, \
                  action: 'INCIDENT_CREATED', actor_id: $actor_id, to_state: $status, new_version: 0, \
@@ -281,6 +384,10 @@ async fn commit_triage_in(
              CREATE (:OutboxEvent { \
                  event_id: $outbox_id, aggregate_id: $incident_id, type: $event_type, \
                  payload_json: $payload, created_at: datetime(), published: false, attempts: 0 }) \
+             FOREACH (_ IN CASE WHEN $immediate THEN [1] ELSE [] END | \
+                 CREATE (:OutboxEvent { \
+                     event_id: $alert_id, aggregate_id: $incident_id, type: 'INCIDENT_CRITICAL', \
+                     payload_json: $payload, created_at: datetime(), published: false, attempts: 0 })) \
              RETURN i.incident_id AS incident_id",
         )
         .param("report_id", report_id)
@@ -290,15 +397,20 @@ async fn commit_triage_in(
         .param("task_id", task_id.clone())
         .param("audit_id", new_id())
         .param("outbox_id", new_id())
+        .param("alert_id", new_id())
+        .param("immediate", immediate)
         .param("actor_id", SYSTEM_ACTOR)
         .param(
             "payload",
-            json!({ "incident_id": incident_id, "report_id": report_id, "task_id": task_id, "status": status })
-                .to_string(),
+            json!({
+                "incident_id": incident_id, "report_id": report_id, "task_id": task_id, "status": status,
+                "urgency": urgency, "urgency_flags": flags, "review_priority": review_priority,
+            })
+            .to_string(),
         ),
     )
     .await?;
-    Ok(TriageCommit::Created { incident_id, task_id })
+    Ok(TriageCommit::Created { incident_id, task_id, alerted: immediate })
 }
 
 /// Execute inside a transaction and return the first row, draining the rest

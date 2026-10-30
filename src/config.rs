@@ -45,6 +45,11 @@ pub struct PipelineParams {
     pub dedup_nearby_radius_m: f64,
     pub dedup_nearby_window_secs: u64,
 
+    // Victim location (finding F-1)
+    /// A caller within this distance (plus GPS accuracy) of the described
+    /// place counts as on scene when the extraction does not say.
+    pub on_scene_radius_m: f64,
+
     // Delivery
     pub stream_claim_idle_ms: u64,
     pub stream_max_retries: u32,
@@ -94,6 +99,7 @@ impl Default for PipelineParams {
             dedup_same_device_window_secs: 30 * 60,
             dedup_nearby_radius_m: 100.0,
             dedup_nearby_window_secs: 60 * 60,
+            on_scene_radius_m: 500.0,
             stream_claim_idle_ms: 60_000,
             stream_max_retries: 5,
             retry_backoff_initial_ms: 1_000,
@@ -169,6 +175,7 @@ impl PipelineParams {
             dedup_same_device_window_secs: u64_or("DEDUP_SAME_DEVICE_WINDOW_SECS", d.dedup_same_device_window_secs),
             dedup_nearby_radius_m: f64_or("DEDUP_NEARBY_RADIUS_M", d.dedup_nearby_radius_m, 10_000.0),
             dedup_nearby_window_secs: u64_or("DEDUP_NEARBY_WINDOW_SECS", d.dedup_nearby_window_secs),
+            on_scene_radius_m: f64_or("ON_SCENE_RADIUS_M", d.on_scene_radius_m, 10_000.0),
             stream_claim_idle_ms: u64_or("STREAM_CLAIM_IDLE_MS", d.stream_claim_idle_ms),
             stream_max_retries: u32_or("STREAM_MAX_RETRIES", d.stream_max_retries),
             retry_backoff_initial_ms: u64_or("RETRY_BACKOFF_INITIAL_MS", d.retry_backoff_initial_ms),

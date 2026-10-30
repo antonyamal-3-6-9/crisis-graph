@@ -234,7 +234,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     let extractor = TriageExtractor::new(&config);
-    let stages = PipelineStages::new(extractor, state_manager.clone(), redis.clone());
+    let stages = PipelineStages::new(extractor, state_manager.clone(), redis.clone())
+        .with_on_scene_radius_m(config.params.on_scene_radius_m);
     let orchestrator = PersistedCrisisOrchestrator::new(stages, incident_repository.clone());
 
     // Event broadcast channel for real-time SSE streaming to web dashboard
@@ -572,6 +573,9 @@ async fn process_waiting_queue(
                     prompt_eval_ms: None,
                     completion_tokens: None,
                 },
+                victim_profile: None,
+                urgency: None,
+                location_source: None,
             });
 
         match orchestrator
@@ -946,6 +950,9 @@ async fn handle_incident_review(
                         prompt_eval_ms: None,
                         completion_tokens: None,
                     },
+                    victim_profile: None,
+                    urgency: None,
+                    location_source: None,
                 });
 
             let mut reviewed_triage = base_triage;

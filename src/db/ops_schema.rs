@@ -63,6 +63,9 @@ const STATEMENTS: &[&str] = &[
      FOR (i:OpsIncident) ON (i.status, i.created_at)",
     "CREATE INDEX ops_ops_incident_junction IF NOT EXISTS \
      FOR (i:OpsIncident) ON (i.junction_id)",
+    // Dispatcher callback list (UNKNOWN urgency, M3b)
+    "CREATE INDEX ops_ops_incident_callback IF NOT EXISTS \
+     FOR (i:OpsIncident) ON (i.callback_required, i.review_rank)",
     // Fencing tokens for leader-only writes (outbox relay, matcher)
     "CREATE CONSTRAINT ops_lease_fence_name_unique IF NOT EXISTS \
      FOR (f:LeaseFence) REQUIRE f.name IS UNIQUE",

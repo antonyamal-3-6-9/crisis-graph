@@ -12,7 +12,10 @@ pub use worker::{TriageOutcome, TriageWorker, TRIAGE_GROUP};
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::models::{triage_is_dispatch_ready, CrisisState, ExtractionRecord, SosAlert, TriageReport};
+use crate::models::{
+    suggest_asset, triage_is_dispatch_ready, CrisisState, ExtractionRecord, SosAlert, TriageReport,
+    UrgencyResult,
+};
 use crate::pipeline::PipelineStages;
 
 /// Output of a successful extraction. `errors` are stage findings that need
@@ -72,6 +75,13 @@ pub fn record_from_output(output: &EngineOutput) -> ExtractionRecord {
         resolved_junction_id: triage.resolved_junction_id.clone(),
         dispatch_ready: output.errors.is_empty() && triage_is_dispatch_ready(triage),
         review_reasons,
+        // A V3 extraction always carries urgency; anything else is UNKNOWN.
+        urgency: triage.urgency.clone().unwrap_or_else(UrgencyResult::unknown_without_extraction),
+        location_source: triage.resolved_junction_id.as_ref().and(triage.location_source),
+        suggested_asset: match triage.required_asset {
+            Some(_) => None,
+            None => suggest_asset(triage),
+        },
     }
 }
 
@@ -86,5 +96,8 @@ pub fn failed_record(reason: &str) -> ExtractionRecord {
         resolved_junction_id: None,
         dispatch_ready: false,
         review_reasons: vec![reason.to_string()],
+        urgency: UrgencyResult::unknown_without_extraction(),
+        location_source: None,
+        suggested_asset: None,
     }
 }

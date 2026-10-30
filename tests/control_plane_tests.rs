@@ -48,6 +48,9 @@ fn triage(review: bool) -> TriageReport {
             prompt_eval_ms: None,
             completion_tokens: None,
         },
+        victim_profile: None,
+        urgency: None,
+        location_source: None,
     }
 }
 
