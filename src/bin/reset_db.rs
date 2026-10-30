@@ -26,13 +26,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Deleting ResourceReservation nodes...");
     neo4j.graph.run(query("MATCH (r:ResourceReservation) DETACH DELETE r")).await?;
 
-    // 3. Delete all HazardEvent nodes & clear operational hazard tags on road segments
-    info!("Clearing all operational hazards on road segments...");
-    state_mgr.clear_operational_hazards("aluva-periyar-pilot").await?;
+    // 3. Delete hazard records (and their audit), any old-style hazard
+    // properties on road segments, and legacy HazardEvent nodes. The overlay
+    // version only ever increases, so it is bumped to make running graph
+    // snapshots reload.
+    info!("Deleting hazard records and clearing old road-segment hazard properties...");
+    neo4j.graph.run(query(
+        "MATCH (h:Hazard) OPTIONAL MATCH (h)-[:HAS_AUDIT_EVENT]->(a:AuditEvent) DETACH DELETE h, a"
+    )).await?;
     neo4j.graph.run(query(
         "MATCH ()-[r:CONNECTS_TO]->() \
          WHERE r.operational_status IS NOT NULL \
-         SET r.operational_status = NULL, r.valid_until = NULL"
+         REMOVE r.operational_status, r.valid_until"
+    )).await?;
+    neo4j.graph.run(query(
+        "MATCH (o:OverlayState) SET o.overlay_version = o.overlay_version + 1, o.updated_at = datetime()"
     )).await?;
     neo4j.graph.run(query("MATCH (h:HazardEvent) DETACH DELETE h")).await?;
 

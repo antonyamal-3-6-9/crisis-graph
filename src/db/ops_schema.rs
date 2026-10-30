@@ -66,6 +66,15 @@ const STATEMENTS: &[&str] = &[
     // Dispatcher callback list (UNKNOWN urgency, M3b)
     "CREATE INDEX ops_ops_incident_callback IF NOT EXISTS \
      FOR (i:OpsIncident) ON (i.callback_required, i.review_rank)",
+    // Hazard records (M4): one active hazard per segment, idempotent commands
+    "CREATE CONSTRAINT ops_hazard_id_unique IF NOT EXISTS \
+     FOR (h:Hazard) REQUIRE h.hazard_id IS UNIQUE",
+    "CREATE CONSTRAINT ops_hazard_request_id_unique IF NOT EXISTS \
+     FOR (h:Hazard) REQUIRE h.request_id IS UNIQUE",
+    "CREATE CONSTRAINT ops_hazard_active_key_unique IF NOT EXISTS \
+     FOR (h:Hazard) REQUIRE h.active_key IS UNIQUE",
+    "CREATE INDEX ops_hazard_segment IF NOT EXISTS \
+     FOR (h:Hazard) ON (h.dataset, h.segment_id)",
     // Fencing tokens for leader-only writes (outbox relay, matcher)
     "CREATE CONSTRAINT ops_lease_fence_name_unique IF NOT EXISTS \
      FOR (f:LeaseFence) REQUIRE f.name IS UNIQUE",

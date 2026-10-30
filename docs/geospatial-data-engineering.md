@@ -142,6 +142,24 @@ else                                    => traversable
 
 This permits competing reports, expiry, audit history, and later review. A single mutable `status` property is acceptable for the prototype but not sufficient for an accountable operational system.
 
+### Implemented model (M4, 2026-10-30)
+
+Hazards are `:Hazard` records; nothing is written on `CONNECTS_TO` road segments any more (the earlier `operational_status` / `valid_until` properties are moved into records by `migrate_ops` and removed).
+
+```text
+(:Hazard {hazard_id, request_id, dataset, segment_id, status: FLOODED | BLOCKED,
+          valid_from, valid_until (null = until cleared), actor_id, reason,
+          source: OPERATOR | LEGACY_CONSOLE | MIGRATION, overlay_version,
+          active_key (dataset:segment_id, unique; removed when ended),
+          ended_at, end_reason: SUPERSEDED | CLEARED, ended_by, superseded_by})
+```
+
+- One active hazard per segment; a new one supersedes it and both stay as history. Conflict rule for now: the latest authorised change wins.
+- A hazard is in force while active, after `valid_from` and before `valid_until`. An open-ended hazard stays in force (fail closed).
+- Every change is transaction T7: record, `OverlayState.overlay_version` + 1, audit event and `HAZARDS_CHANGED` outbox event. Changes for a dataset are serialised on its `OverlayState`. Only `HAZARD_VERIFIER` / `EOC_ADMIN` may make them.
+- Confidence and a separate verification step (low-confidence reports) are not implemented: every recorded hazard comes from an authorised operator and blocks routing.
+- Routing (`GraphSnapshot`) and verification (`verify_path_segments`) both read the records; expiry needs no new version because both compare `valid_until` with the current time.
+
 ## Import pipeline
 
 1. Define and version a polygon boundary for the pilot area (`data/boundaries/aluva-periyar-pilot.geojson`).

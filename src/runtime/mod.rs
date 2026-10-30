@@ -9,7 +9,7 @@ pub mod shutdown;
 
 pub use breaker::{BreakerState, CircuitBreaker};
 pub use lease::Lease;
-pub use ops_http::{instrument, ops_router, ops_routes, OpsState};
+pub use ops_http::{instrument, ops_router, ops_routes, OpsState, ReadyGate};
 pub use shutdown::Shutdown;
 
 /// A pipeline role. One binary runs exactly one role per process; roles are

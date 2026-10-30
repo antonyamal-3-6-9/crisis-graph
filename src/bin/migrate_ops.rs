@@ -1,7 +1,8 @@
 //! Creates the operational data model next to the legacy one (M1).
 //!
 //! Idempotent: creates constraints and indexes, the hazard `OverlayState`,
-//! and vehicle records for the baseline fleet. Existing vehicles, legacy
+//! and vehicle records for the baseline fleet, and moves hazards stored on
+//! road segments into hazard records (M4). Existing vehicles, legacy
 //! reservations and legacy shelter counts are not modified.
 //!
 //! Example:
@@ -48,6 +49,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .param("dataset", DATASET),
         )
         .await?;
+
+    let migrated = OpsRepository::new(neo4j.clone()).migrate_segment_hazards().await?;
+    info!(migrated, "Road-segment hazards moved into hazard records");
 
     let created = OpsRepository::new(neo4j.clone())
         .seed_baseline_fleet(FleetCapacities::default())

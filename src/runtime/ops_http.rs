@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{
@@ -23,6 +25,30 @@ pub struct OpsState {
     pub neo4j: Neo4jClient,
     pub redis: RedisClient,
     pub metrics: PrometheusHandle,
+    /// Role-specific conditions `/readyz` also requires (e.g. the graph
+    /// snapshot loaded), each set by the role when it becomes true.
+    pub gates: Vec<ReadyGate>,
+}
+
+/// A named readiness condition owned by a role.
+#[derive(Clone)]
+pub struct ReadyGate {
+    pub name: &'static str,
+    pub ready: Arc<AtomicBool>,
+}
+
+impl ReadyGate {
+    pub fn new(name: &'static str) -> Self {
+        Self { name, ready: Arc::new(AtomicBool::new(false)) }
+    }
+
+    pub fn set_ready(&self) {
+        self.ready.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.ready.load(Ordering::SeqCst)
+    }
 }
 
 /// `/healthz` (liveness), `/readyz` (dependencies reachable) and `/metrics`
@@ -68,7 +94,13 @@ async fn healthz(State(state): State<OpsState>) -> Json<Value> {
 async fn readyz(State(state): State<OpsState>) -> (StatusCode, Json<Value>) {
     let neo4j = check(state.neo4j.ping()).await;
     let redis = check(state.redis.ping()).await;
-    let ready = neo4j.is_ok() && redis.is_ok();
+    let gates_ready = state.gates.iter().all(ReadyGate::is_ready);
+    let ready = neo4j.is_ok() && redis.is_ok() && gates_ready;
+    let gates: serde_json::Map<String, Value> = state
+        .gates
+        .iter()
+        .map(|gate| (gate.name.to_string(), json!({ "ok": gate.is_ready() })))
+        .collect();
 
     let status = if ready {
         StatusCode::OK
@@ -83,7 +115,8 @@ async fn readyz(State(state): State<OpsState>) -> (StatusCode, Json<Value>) {
             "dependencies": {
                 "neo4j": dependency_status(&neo4j),
                 "redis": dependency_status(&redis),
-            }
+            },
+            "gates": gates,
         })),
     )
 }

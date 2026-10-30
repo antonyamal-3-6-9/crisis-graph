@@ -1,8 +1,10 @@
 use neo4rs::query;
 
 use crisis_graph::config::Config;
-use crisis_graph::db::{Neo4jClient, StateManager, TraversalProfile};
-use crisis_graph::models::{AssetType, RoadStatus};
+use crisis_graph::db::{Neo4jClient, OpsRepository, StateManager, TraversalProfile};
+use crisis_graph::models::{
+    ActorContext, ActorRole, AssetType, HazardCommand, HazardSource, HazardStatus, RoadStatus,
+};
 use crisis_graph::solver::{DeterministicPathfinder, PathfinderError, RoutingQuery};
 
 #[tokio::test]
@@ -136,13 +138,19 @@ async fn test_neo4j_pilot_graph_and_operational_overlay() {
     assert_eq!(flagged, vec!["way/0/seg/0/fwd".to_string()]);
 
     // 8b. Open-ended hazard (no valid_until) is treated as active
-    let open_ended_q = query(
-        "MATCH ()-[r:CONNECTS_TO {segment_id: $segment_id, dataset: $dataset}]->() \
-         SET r.operational_status = 'FLOODED', r.valid_until = NULL",
-    )
-    .param("segment_id", flood_segment)
-    .param("dataset", dataset);
-    neo4j.graph.run(open_ended_q).await.expect("Apply open-ended hazard");
+    let open_ended = HazardCommand {
+        request_id: format!("baseline-test-open-ended-{}", uuid::Uuid::new_v4()),
+        dataset: dataset.to_string(),
+        segment_id: flood_segment.to_string(),
+        status: HazardStatus::Flooded,
+        valid_until: None,
+        reason: "open-ended hazard test".to_string(),
+        source: HazardSource::Operator,
+    };
+    OpsRepository::new(neo4j.clone())
+        .apply_hazard(&ActorContext::new("baseline-test", [ActorRole::HazardVerifier]), &open_ended)
+        .await
+        .expect("Apply open-ended hazard");
 
     let flagged = state_mgr.verify_path_segments(&clean_path, &ambulance).await
         .expect("Verify path with open-ended hazard");

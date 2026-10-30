@@ -1,11 +1,14 @@
 //! Triage-side writes: the extraction checkpoint, transaction T1 (create a
 //! new incident or attach a follow-up) and possible-duplicate flagging.
 
-use neo4rs::{query, Query, Row, Txn};
+use neo4rs::{query, Txn};
 use serde_json::json;
 
 use super::reports::{report_from_row, REPORT_FIELDS};
-use super::{new_id, parse_enum, parse_time, OpsRepoError, OpsRepository, SYSTEM_ACTOR, MAX_WRITE_ATTEMPTS};
+use super::{
+    new_id, parse_enum, parse_time, txn_first_row, OpsRepoError, OpsRepository, SYSTEM_ACTOR,
+    MAX_WRITE_ATTEMPTS,
+};
 use crate::models::{
     CallbackItem, ExtractionRecord, ReviewPriority, TriageCommit, TriageState, OPEN_INCIDENT_STATUSES,
 };
@@ -411,13 +414,4 @@ async fn commit_triage_in(
     )
     .await?;
     Ok(TriageCommit::Created { incident_id, task_id, alerted: immediate })
-}
-
-/// Execute inside a transaction and return the first row, draining the rest
-/// so the connection is ready for the next statement.
-async fn txn_first_row(txn: &mut Txn, q: Query) -> Result<Option<Row>, OpsRepoError> {
-    let mut stream = txn.execute(q).await?;
-    let first = stream.next(txn.handle()).await?;
-    while stream.next(txn.handle()).await?.is_some() {}
-    Ok(first)
 }

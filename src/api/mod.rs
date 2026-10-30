@@ -15,6 +15,12 @@ use serde::Deserialize;
 use serde_json::json;
 use tracing::warn;
 
+mod auth;
+mod hazards;
+
+pub use auth::{token_hash_hex, OperatorTokens};
+pub use hazards::{hazard_routes, validate_apply, HazardApiState};
+
 use crate::db::{OpsRepoError, OpsRepository};
 use crate::models::{NewReport, Report};
 
@@ -114,6 +120,7 @@ pub fn error_status(error: &OpsRepoError) -> StatusCode {
     match error {
         OpsRepoError::Database(_) | OpsRepoError::Transient(_) => StatusCode::SERVICE_UNAVAILABLE,
         OpsRepoError::NotFound(_) => StatusCode::NOT_FOUND,
+        OpsRepoError::Forbidden(_) => StatusCode::FORBIDDEN,
         OpsRepoError::Conflict(_) | OpsRepoError::NotAvailable(_) | OpsRepoError::Fenced(_) => {
             StatusCode::CONFLICT
         }

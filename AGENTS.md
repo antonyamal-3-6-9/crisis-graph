@@ -196,6 +196,8 @@ cargo test --test triage_worker_tests
 
 Triage workers (`--role triage`) consume `sos:extract` (consumer group `triage-workers`), save the extraction on the report before deduplicating (so a redelivery never calls the model twice), then in one transaction either attach a same-device follow-up (D-2) or create an `:OpsIncident` (`TRIAGE_APPROVED` + queued `ROAD_PICKUP` task, or `REVIEW_REQUIRED`). Nearby open incidents are flagged `POSSIBLE_DUPLICATE` (D-3), never merged. When extraction fails or the inference circuit breaker is open, the report still becomes a `REVIEW_REQUIRED` incident for manual triage.
 
+Since M4 hazards are `:Hazard` records, never properties on road segments: every change is transaction T7 (record + `overlay_version` + 1 + audit + `HAZARDS_CHANGED`), allowed for `HAZARD_VERIFIER` / `EOC_ADMIN` through `POST /api/v1/hazards` and `/api/v1/hazards/clear` on the api role, authenticated with operator tokens (`OPERATOR_TOKENS`, SHA-256 hashes; none configured means 401). The graph role loads the baseline graph once (`src/graph/`, `GraphSnapshot`), swaps the hazard overlay atomically on `HAZARDS_CHANGED` (plus a periodic refresh), and `/readyz` waits for the snapshot. Routes carry the `overlay_version` they used; verification stays live. Run `cargo run --bin migrate_ops` once to move any old road-property hazards into records.
+
 Since M3b the extractor uses schema V3 (`victim_profile`) with prompt v3.2, served with the SFT-V4 adapter (`llama-server ... --lora ml/artifacts/qwen3-4b-triage-sft-v4/adapter-f16.gguf`). Urgency is derived in Rust (`src/models/victim.rs`, urgency-rules-v5, checked against `ml/data/urgency-rules-v5.jsonl`); the model's `suggested_urgency` can only raise it. CRITICAL incidents also emit `INCIDENT_CRITICAL`; UNKNOWN incidents are dispatched at URGENT rank and listed for dispatcher callback. Finding F-1: the caller's GPS locates the victims only when the caller is on scene (`src/ingestion/location_policy.rs`); remote callers are located at the described place, or sent to review. Finding F-2: a missing asset is never guessed; a category-based `suggested_asset` is shown to the dispatcher. Unprocessable messages go to `sos:extract:dead`. New-pipeline incidents use the `:OpsIncident` label until the legacy console is removed.
 
 The relay is leader-elected (Redis lease `lease:outbox-relay` with a fencing token checked in Neo4j via `:LeaseFence`), publishes `REPORT_RECEIVED` to `sos:extract` and other events to `ops:events`, and delivers at least once: consumers must discard duplicates by `event_id`.
@@ -259,7 +261,7 @@ cargo run --bin normalize_osm -- \
    - Ingested 21,256 junctions and 48,626 directed segments in 7.1s.
 3. **Dynamic operational overlay & verification:**
    - `StateManager::get_passable_directed_subgraph` extracts passable directed edges filtering out active hazard closures.
-   - `StateManager::apply_segment_hazard` and `clear_operational_hazards` support temporal overlays.
+   - `StateManager::apply_segment_hazard` and `clear_operational_hazards` support temporal overlays (since M4 they write `:Hazard` records through T7).
    - Verified via integration tests in `tests/neo4j_baseline_tests.rs`.
 
 Run command:

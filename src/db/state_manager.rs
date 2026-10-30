@@ -1,10 +1,18 @@
 use super::neo4j::Neo4jClient;
+use super::OpsRepository;
 use crate::geospatial::{AccessFlags, BaselineStatus};
-use crate::models::{AssetType, HazardReport, ReservationRole, RoadStatus, Shelter};
+use crate::models::{
+    ActorContext, ActorRole, AssetType, HazardCommand, HazardOutcome, HazardReport, HazardSource,
+    HazardStatus, ReservationRole, RoadStatus, Shelter,
+};
 use crate::solver::RoutingEdge;
 use chrono::{Duration, Utc};
 use neo4rs::query;
 use serde::{Deserialize, Serialize};
+
+/// Actor recorded for hazard changes made through the legacy console, which
+/// has no authentication.
+pub const LEGACY_HAZARD_ACTOR: &str = "legacy-console-unauthenticated";
 
 #[derive(Clone)]
 pub struct StateManager {
@@ -196,7 +204,9 @@ impl StateManager {
         let q = query(
             "MATCH (a:Junction {dataset: $dataset})-[r:CONNECTS_TO {dataset: $dataset}]->(b:Junction {dataset: $dataset}) \
              WHERE (r.baseline_status = 'OPEN' OR r.baseline_status = 'RESTRICTED') \
-               AND (r.operational_status IS NULL OR r.operational_status = 'OPEN' OR r.valid_until < datetime()) \
+               AND NOT EXISTS { MATCH (h:Hazard {dataset: $dataset, segment_id: r.segment_id}) \
+                                WHERE h.active_key IS NOT NULL AND h.valid_from <= datetime() \
+                                     AND (h.valid_until IS NULL OR h.valid_until > datetime()) } \
              RETURN r.segment_id AS segment_id, \
                     a.id AS source, \
                     b.id AS target, \
@@ -252,11 +262,12 @@ impl StateManager {
         Ok(edges)
     }
 
-    /// Retrieve the complete directed topology along with the set of currently active hazard segment IDs.
-    pub async fn get_directed_topology_with_hazards(
+    /// Every directed baseline edge of a dataset, ignoring hazards (the
+    /// immutable baseline the graph snapshot is built from once, M4).
+    pub async fn get_directed_baseline_edges(
         &self,
         dataset: &str,
-    ) -> Result<(Vec<RoutingEdge>, std::collections::HashSet<String>), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Vec<RoutingEdge>, Box<dyn std::error::Error + Send + Sync>> {
         let q_edges = query(
             "MATCH (a:Junction {dataset: $dataset})-[r:CONNECTS_TO {dataset: $dataset}]->(b:Junction {dataset: $dataset}) \
              RETURN r.segment_id AS segment_id, \
@@ -311,12 +322,22 @@ impl StateManager {
             });
         }
 
+        Ok(edges)
+    }
+
+    /// Retrieve the complete directed topology along with the set of currently active hazard segment IDs.
+    pub async fn get_directed_topology_with_hazards(
+        &self,
+        dataset: &str,
+    ) -> Result<(Vec<RoutingEdge>, std::collections::HashSet<String>), Box<dyn std::error::Error + Send + Sync>> {
+        let edges = self.get_directed_baseline_edges(dataset).await?;
+
+        // Hazard records in force now (open-ended ones included: fail closed).
         let q_hazards = query(
-            "MATCH ()-[r:CONNECTS_TO {dataset: $dataset}]->() \
-             WHERE r.operational_status IS NOT NULL \
-               AND r.operational_status <> 'OPEN' \
-               AND (r.valid_until IS NULL OR r.valid_until >= datetime()) \
-             RETURN r.segment_id AS segment_id"
+            "MATCH (h:Hazard {dataset: $dataset}) \
+             WHERE h.active_key IS NOT NULL AND h.valid_from <= datetime() \
+               AND (h.valid_until IS NULL OR h.valid_until > datetime()) \
+             RETURN h.segment_id AS segment_id"
         )
         .param("dataset", dataset);
 
@@ -330,57 +351,66 @@ impl StateManager {
         Ok((edges, blocked_segments))
     }
 
-    /// Mutate a specific road segment with an operational hazard and bi-temporal expiration timestamp
+    /// Legacy console hazard change, recorded as a hazard record through T7
+    /// (version, audit and outbox included) under [`LEGACY_HAZARD_ACTOR`].
+    /// `Open` clears the segment's active hazard. Returns how many segments
+    /// changed (0 if the segment is unknown or nothing was active).
     pub async fn apply_segment_hazard(
         &self,
         segment_id: &str,
         status: RoadStatus,
         duration_hours: u32,
     ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
-        let status_str = match status {
-            RoadStatus::Open => "OPEN",
-            RoadStatus::Blocked => "BLOCKED",
-            RoadStatus::Flooded => "FLOODED",
-        };
-        let valid_until = (Utc::now() + Duration::hours(duration_hours as i64)).to_rfc3339();
         let q = query(
-            "MATCH ()-[r:CONNECTS_TO {segment_id: $segment_id}]->() \
-             SET r.operational_status = $status, \
-                 r.valid_until = datetime($valid_until) \
-             RETURN count(r) AS updated",
+            "MATCH ()-[r:CONNECTS_TO {segment_id: $segment_id}]->() RETURN r.dataset AS dataset LIMIT 1",
         )
-        .param("segment_id", segment_id)
-        .param("status", status_str)
-        .param("valid_until", valid_until);
-
+        .param("segment_id", segment_id);
         let mut result = self.neo4j.graph.execute(q).await?;
-        if let Some(row) = result.next().await? {
-            Ok(row.get("updated")?)
-        } else {
-            Ok(0)
-        }
+        let Some(row) = result.next().await? else { return Ok(0) };
+        let dataset: String = row.get("dataset")?;
+
+        let repo = OpsRepository::new(self.neo4j.clone());
+        let actor = legacy_hazard_actor();
+        let reason = "legacy console hazard update";
+        let outcome = match status {
+            RoadStatus::Open => repo.clear_hazard(&actor, &dataset, segment_id, reason).await?,
+            RoadStatus::Blocked | RoadStatus::Flooded => {
+                let command = HazardCommand {
+                    request_id: uuid::Uuid::new_v4().to_string(),
+                    dataset,
+                    segment_id: segment_id.to_string(),
+                    status: if status == RoadStatus::Flooded { HazardStatus::Flooded } else { HazardStatus::Blocked },
+                    valid_until: Some(Utc::now() + Duration::hours(duration_hours.max(1) as i64)),
+                    reason: reason.to_string(),
+                    source: HazardSource::LegacyConsole,
+                };
+                repo.apply_hazard(&actor, &command).await?
+            }
+        };
+        Ok(match outcome {
+            HazardOutcome::Applied { .. } | HazardOutcome::Cleared { .. } => 1,
+            HazardOutcome::Replayed { .. } | HazardOutcome::NothingToClear => 0,
+        })
     }
 
-    /// Clear all operational hazards for a dataset
+    /// End every active hazard of a dataset (each through T7). Returns how
+    /// many were cleared.
     pub async fn clear_operational_hazards(
         &self,
         dataset: &str,
     ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
-        let q = query(
-            "MATCH ()-[r:CONNECTS_TO {dataset: $dataset}]->() \
-             WHERE r.operational_status IS NOT NULL \
-             SET r.operational_status = NULL, \
-                 r.valid_until = NULL \
-             RETURN count(r) AS cleared",
-        )
-        .param("dataset", dataset);
-
-        let mut result = self.neo4j.graph.execute(q).await?;
-        if let Some(row) = result.next().await? {
-            Ok(row.get("cleared")?)
-        } else {
-            Ok(0)
+        let repo = OpsRepository::new(self.neo4j.clone());
+        let actor = legacy_hazard_actor();
+        let mut cleared = 0;
+        for hazard in repo.active_hazards(dataset).await? {
+            if let HazardOutcome::Cleared { .. } = repo
+                .clear_hazard(&actor, dataset, &hazard.segment_id, "legacy console cleared all hazards")
+                .await?
+            {
+                cleared += 1;
+            }
         }
+        Ok(cleared)
     }
 
     /// Spatial Snapper: Find the nearest junction to a given (latitude, longitude) within max_radius_m
@@ -616,8 +646,9 @@ impl StateManager {
                 OR (NOT $on_foot AND r.baseline_status = 'UNSUITABLE') \
                 OR ($require_hgv AND coalesce(r.hgv, false) = false) \
                 OR ($require_emergency AND coalesce(r.emergency, false) = false) \
-                OR (r.operational_status IS NOT NULL AND r.operational_status <> 'OPEN' \
-                    AND (r.valid_until IS NULL OR r.valid_until > datetime())) \
+                OR EXISTS { MATCH (h:Hazard {dataset: r.dataset, segment_id: seg_id}) \
+                            WHERE h.active_key IS NOT NULL AND h.valid_from <= datetime() \
+                              AND (h.valid_until IS NULL OR h.valid_until > datetime()) } \
              RETURN DISTINCT seg_id"
         )
         .param("ids", segment_ids.to_vec())
@@ -1040,12 +1071,13 @@ impl StateManager {
         dataset: &str,
     ) -> Result<Vec<ActiveHazardInfo>, Box<dyn std::error::Error + Send + Sync>> {
         let q = query(
-            "MATCH (a:Junction)-[r:CONNECTS_TO {dataset: $dataset}]->(b:Junction) \
-             WHERE (r.operational_status IS NOT NULL AND r.operational_status <> 'OPEN' AND r.valid_until > datetime()) \
-                OR r.baseline_status = 'FLOODED' \
+            "MATCH (h:Hazard {dataset: $dataset}) \
+             WHERE h.active_key IS NOT NULL AND h.valid_from <= datetime() \
+               AND (h.valid_until IS NULL OR h.valid_until > datetime()) \
+             MATCH (a:Junction)-[r:CONNECTS_TO {dataset: $dataset, segment_id: h.segment_id}]->(b:Junction) \
              RETURN r.segment_id AS segment_id, \
                     coalesce(r.road_name, 'Unnamed Road') AS road_name, \
-                    coalesce(r.operational_status, r.baseline_status) AS operational_status, \
+                    h.status AS operational_status, \
                     a.id AS from_id, a.lat AS from_lat, a.lon AS from_lon, \
                     b.id AS to_id, b.lat AS to_lat, b.lon AS to_lon \
              LIMIT 100"
@@ -1070,4 +1102,8 @@ impl StateManager {
 
         Ok(hazards)
     }
+}
+
+fn legacy_hazard_actor() -> ActorContext {
+    ActorContext::new(LEGACY_HAZARD_ACTOR, [ActorRole::HazardVerifier])
 }
