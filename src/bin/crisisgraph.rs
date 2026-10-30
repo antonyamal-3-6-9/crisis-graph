@@ -9,9 +9,12 @@
 //! schema, `/healthz`, `/readyz`, `/metrics`, heartbeat, graceful shutdown).
 //! Role work so far:
 //! - `api`: intake API (`POST /api/v1/reports`, `GET /api/v1/reports/{id}`)
+//!   and the hazard command (`/api/v1/hazards`, operator tokens)
 //! - `relay`: outbox relay (leader-elected) publishing to Redis Streams
 //! - `triage`: consumes `sos:extract`, extracts (llama.cpp/vLLM), applies the
 //!   minimal deduplication rules and creates or attaches incidents
+//! - `graph`: loads the baseline road graph once and keeps the hazard overlay
+//!   current (`HAZARDS_CHANGED` + periodic refresh); `/readyz` waits for it
 //!
 //! Other roles are added in later milestones. The legacy `server` binary is
 //! unaffected.
@@ -19,18 +22,20 @@
 use std::env;
 use std::error::Error;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tracing::{info, warn};
 
-use crisis_graph::api::{intake_routes, ApiState};
+use crisis_graph::api::{hazard_routes, intake_routes, ApiState, HazardApiState, OperatorTokens};
 use crisis_graph::config::Config;
 use crisis_graph::db::{ensure_ops_schema, Neo4jClient, OpsRepository, RedisClient, StateManager};
+use crisis_graph::graph::GraphSnapshot;
 use crisis_graph::ingestion::TriageExtractor;
 use crisis_graph::pipeline::PipelineStages;
 use crisis_graph::triage::{StageOneEngine, TriageWorker};
 use crisis_graph::relay::OutboxRelay;
-use crisis_graph::runtime::{self, instrument, ops_routes, OpsState, Role, Shutdown};
+use crisis_graph::runtime::{self, instrument, ops_routes, OpsState, ReadyGate, Role, Shutdown};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -112,14 +117,32 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let repo = OpsRepository::new(neo4j.clone());
     let repo_neo4j = neo4j.clone();
 
+    let snapshot_gate = ReadyGate::new("graph_snapshot");
+    let gates = if role == Role::Graph { vec![snapshot_gate.clone()] } else { Vec::new() };
     let mut routes = ops_routes(OpsState {
         role,
         neo4j,
         redis: redis.clone(),
         metrics,
+        gates,
     });
     if role == Role::Api {
-        routes = routes.merge(intake_routes(ApiState { repo: repo.clone() }));
+        let (operators, problems) = OperatorTokens::from_env();
+        for problem in &problems {
+            warn!("{problem}");
+        }
+        if operators.is_empty() {
+            warn!("No operator tokens configured; hazard commands will be refused (401)");
+        } else {
+            info!(operators = operators.len(), "Operator tokens loaded");
+        }
+        routes = routes
+            .merge(intake_routes(ApiState { repo: repo.clone() }))
+            .merge(hazard_routes(HazardApiState {
+                repo: repo.clone(),
+                operators: Arc::new(operators),
+                default_dataset: config.params.graph_dataset.clone(),
+            }));
     }
     let app = instrument(routes);
 
@@ -145,6 +168,37 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 consumer,
             );
             Some(tokio::spawn(worker.run(shutdown.clone())))
+        }
+        Role::Graph => {
+            let repo = repo.clone();
+            let state = StateManager::new(repo_neo4j.clone());
+            let redis = redis.clone();
+            let params = config.params.clone();
+            let shutdown = shutdown.clone();
+            Some(tokio::spawn(async move {
+                // Retry until the baseline loads; readiness stays false meanwhile.
+                let snapshot = loop {
+                    match GraphSnapshot::load(repo.clone(), &state, &params.graph_dataset).await {
+                        Ok(snapshot) => break Arc::new(snapshot),
+                        Err(error) => {
+                            warn!(%error, dataset = %params.graph_dataset, "Graph snapshot load failed; retrying");
+                            tokio::select! {
+                                _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                                _ = shutdown.wait() => return,
+                            }
+                        }
+                    }
+                };
+                snapshot_gate.set_ready();
+                snapshot
+                    .run_refresher(
+                        redis,
+                        params.events_stream.clone(),
+                        Duration::from_secs(params.overlay_refresh_secs),
+                        shutdown,
+                    )
+                    .await;
+            }))
         }
         _ => None,
     };

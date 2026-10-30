@@ -212,18 +212,47 @@ pub struct RouteResult {
     pub traversed_edges: Vec<RoutingEdge>,
 }
 
-/// Deterministic directed graph pathfinder.
-pub struct DeterministicPathfinder;
+/// A directed routing graph built once from baseline edges and then routed on
+/// many times (M4 shared snapshot). Immutable: closures are applied per query
+/// through `RoutingQuery::blocked_segments`, never by changing the graph.
+pub struct RoutingGraph {
+    graph: DiGraph<String, RoutingEdge>,
+    node_indices: HashMap<String, NodeIndex>,
+    edges: Vec<RoutingEdge>,
+}
 
-impl DeterministicPathfinder {
-    /// Primary multi-modal directed routing engine.
-    ///
-    /// Evaluates passable edges using a directed graph (`DiGraph`), enforcing one-way directionality,
-    /// vehicle-specific accessibility, active operational closures, and user-specified cost metrics.
-    pub fn find_directed_route(
-        edges: &[RoutingEdge],
-        query: &RoutingQuery,
-    ) -> Result<RouteResult, PathfinderError> {
+impl RoutingGraph {
+    pub fn from_edges(edges: &[RoutingEdge]) -> Self {
+        let mut graph = DiGraph::<String, RoutingEdge>::new();
+        let mut node_indices: HashMap<String, NodeIndex> = HashMap::new();
+        for edge in edges {
+            let u = *node_indices
+                .entry(edge.source.clone())
+                .or_insert_with(|| graph.add_node(edge.source.clone()));
+            let v = *node_indices
+                .entry(edge.target.clone())
+                .or_insert_with(|| graph.add_node(edge.target.clone()));
+            graph.add_edge(u, v, edge.clone());
+        }
+        Self { graph, node_indices, edges: edges.to_vec() }
+    }
+
+    /// The baseline edges the graph was built from.
+    pub fn edges(&self) -> &[RoutingEdge] {
+        &self.edges
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.graph.node_count()
+    }
+
+    pub fn edge_count(&self) -> usize {
+        self.graph.edge_count()
+    }
+
+    /// Shortest passable directed route; see
+    /// [`DeterministicPathfinder::find_directed_route`].
+    pub fn route(&self, query: &RoutingQuery) -> Result<RouteResult, PathfinderError> {
         if query.origin == query.destination {
             return Ok(RouteResult {
                 path: vec![query.origin.clone()],
@@ -235,46 +264,14 @@ impl DeterministicPathfinder {
                 traversed_edges: Vec::new(),
             });
         }
+        let graph = &self.graph;
 
-        // 1. Build Petgraph DiGraph (Directed Graph)
-        let mut graph = DiGraph::<String, RoutingEdge>::new();
-        let mut node_map_indices: HashMap<String, NodeIndex> = HashMap::new();
-        let mut index_to_node_name: HashMap<NodeIndex, String> = HashMap::new();
-
-        let get_or_create_node = |name: &str,
-                                  g: &mut DiGraph<String, RoutingEdge>,
-                                  map: &mut HashMap<String, NodeIndex>,
-                                  rev: &mut HashMap<NodeIndex, String>| {
-            if let Some(&idx) = map.get(name) {
-                idx
-            } else {
-                let idx = g.add_node(name.to_string());
-                map.insert(name.to_string(), idx);
-                rev.insert(idx, name.to_string());
-                idx
-            }
-        };
-
-        for edge in edges {
-            let u = get_or_create_node(
-                &edge.source,
-                &mut graph,
-                &mut node_map_indices,
-                &mut index_to_node_name,
-            );
-            let v = get_or_create_node(
-                &edge.target,
-                &mut graph,
-                &mut node_map_indices,
-                &mut index_to_node_name,
-            );
-            graph.add_edge(u, v, edge.clone());
-        }
-
-        let start_idx = *node_map_indices
+        let start_idx = *self
+            .node_indices
             .get(&query.origin)
             .ok_or_else(|| PathfinderError::OriginNotFound(query.origin.clone()))?;
-        let target_idx = *node_map_indices
+        let target_idx = *self
+            .node_indices
             .get(&query.destination)
             .ok_or_else(|| PathfinderError::DestinationNotFound(query.destination.clone()))?;
 
@@ -300,7 +297,7 @@ impl DeterministicPathfinder {
         };
 
         // 3. Execute Dijkstra's Algorithm
-        let distances = dijkstra(&graph, start_idx, Some(target_idx), cost_fn);
+        let distances = dijkstra(graph, start_idx, Some(target_idx), cost_fn);
 
         let _target_distance = distances
             .get(&target_idx)
@@ -363,7 +360,7 @@ impl DeterministicPathfinder {
 
         let path: Vec<String> = path_nodes
             .into_iter()
-            .map(|idx| index_to_node_name[&idx].clone())
+            .map(|idx| graph[idx].clone())
             .collect();
 
         let segment_path: Vec<String> = traversed_edges
@@ -396,6 +393,23 @@ impl DeterministicPathfinder {
             detour_reason,
             traversed_edges,
         })
+    }
+}
+
+/// Deterministic directed graph pathfinder.
+pub struct DeterministicPathfinder;
+
+impl DeterministicPathfinder {
+    /// Primary multi-modal directed routing engine.
+    ///
+    /// Evaluates passable edges using a directed graph (`DiGraph`), enforcing one-way directionality,
+    /// vehicle-specific accessibility, active operational closures, and user-specified cost metrics.
+    /// Builds the graph for this call; use [`RoutingGraph`] to build it once and route many times.
+    pub fn find_directed_route(
+        edges: &[RoutingEdge],
+        query: &RoutingQuery,
+    ) -> Result<RouteResult, PathfinderError> {
+        RoutingGraph::from_edges(edges).route(query)
     }
 
     /// Actionable Multi-Modal Routing & Cut-Edge Mitigation Solver.

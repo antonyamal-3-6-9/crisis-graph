@@ -4,7 +4,8 @@ use super::{new_id, parse_asset, parse_enum, OpsRepoError, OpsRepository, SYSTEM
 use crate::models::{AssetType, Task, TaskKind, TaskStatus};
 
 const TASK_FIELDS: &str = "t.task_id AS task_id, t.incident_id AS incident_id, t.kind AS kind, \
-     t.status AS status, t.required_asset AS required_asset, t.version AS version";
+     t.status AS status, t.required_asset AS required_asset, t.version AS version, \
+     t.overlay_version AS overlay_version, t.route_json AS route_json";
 
 impl OpsRepository {
     /// Create a task if it does not exist (keyed by `task_id`), so a repeated
@@ -95,6 +96,35 @@ impl OpsRepository {
     }
 }
 
+impl OpsRepository {
+    /// Record the route computed for a task and the hazard `overlay_version`
+    /// it was computed on (M4), guarded by the task's version. The route is
+    /// not certified by this: verification against live hazards happens
+    /// before dispatch.
+    pub async fn record_task_route(
+        &self,
+        task_id: &str,
+        expected_version: u64,
+        overlay_version: u64,
+        route_json: &str,
+    ) -> Result<Task, OpsRepoError> {
+        let q = query(&format!(
+            "MATCH (t:Task {{task_id: $task_id}}) WHERE t.version = $expected_version \
+             SET t.overlay_version = $overlay_version, t.route_json = $route_json, \
+                 t.routed_at = datetime(), t.version = t.version + 1, t.updated_at = datetime() \
+             RETURN {TASK_FIELDS}"
+        ))
+        .param("task_id", task_id)
+        .param("expected_version", expected_version as i64)
+        .param("overlay_version", overlay_version as i64)
+        .param("route_json", route_json);
+        match self.write_first_row(q).await? {
+            Some(row) => task_from_row(&row),
+            None => Err(OpsRepoError::NotAvailable(format!("task {task_id} is not at version {expected_version}"))),
+        }
+    }
+}
+
 fn task_from_row(row: &Row) -> Result<Task, OpsRepoError> {
     Ok(Task {
         task_id: row.get("task_id")?,
@@ -103,5 +133,7 @@ fn task_from_row(row: &Row) -> Result<Task, OpsRepoError> {
         status: parse_enum(&row.get::<String>("status")?, TaskStatus::parse, "task status")?,
         required_asset: parse_asset(&row.get::<String>("required_asset")?)?,
         version: row.get::<i64>("version")? as u64,
+        overlay_version: row.get::<Option<i64>>("overlay_version")?.map(|v| v as u64),
+        route_json: row.get("route_json")?,
     })
 }

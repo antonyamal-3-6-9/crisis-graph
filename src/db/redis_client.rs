@@ -170,6 +170,51 @@ impl RedisClient {
             .unwrap_or_default())
     }
 
+    /// Read messages after `last_id` without a consumer group (XREAD), so
+    /// every reader sees every message. `last_id = "$"` means only new ones.
+    pub async fn read_after(
+        &self,
+        stream_key: &str,
+        last_id: &str,
+        count: usize,
+        block_ms: usize,
+    ) -> Result<Vec<StreamMessage>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let reply: Option<StreamReadReply> = redis::cmd("XREAD")
+            .arg("COUNT")
+            .arg(count)
+            .arg("BLOCK")
+            .arg(block_ms)
+            .arg("STREAMS")
+            .arg(stream_key)
+            .arg(last_id)
+            .query_async(&mut conn)
+            .await?;
+        Ok(reply
+            .map(|r| {
+                r.keys
+                    .iter()
+                    .flat_map(|k| k.ids.iter().map(StreamMessage::from_stream_id))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// ID of the newest message in a stream, or `0-0` if it is empty, so a
+    /// reader can start after it without the race of `$`.
+    pub async fn last_stream_id(&self, stream_key: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let reply: redis::streams::StreamRangeReply = redis::cmd("XREVRANGE")
+            .arg(stream_key)
+            .arg("+")
+            .arg("-")
+            .arg("COUNT")
+            .arg(1)
+            .query_async(&mut conn)
+            .await?;
+        Ok(reply.ids.first().map(|e| e.id.clone()).unwrap_or_else(|| "0-0".to_string()))
+    }
+
     /// Take over messages another consumer claimed but has not acknowledged
     /// for at least `min_idle_ms` (e.g. it crashed). XAUTOCLAIM.
     pub async fn autoclaim(

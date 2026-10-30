@@ -3,6 +3,7 @@
 //! Cypher statement as the change itself, so they commit atomically.
 
 mod beds;
+mod hazards;
 mod incidents;
 mod outbox;
 mod reports;
@@ -10,6 +11,7 @@ mod reservations;
 mod tasks;
 mod vehicles;
 
+pub use hazards::OverlayRead;
 pub use reservations::HoldOutcome;
 pub use vehicles::{FleetCapacities, BASELINE_FLEET};
 
@@ -47,6 +49,9 @@ pub enum OpsRepoError {
     Fenced(String),
     #[error("not found: {0}")]
     NotFound(String),
+    /// The actor's roles do not allow this command.
+    #[error("forbidden: {0}")]
+    Forbidden(String),
     #[error("invalid data: {0}")]
     InvalidData(String),
     #[error("database error: {0}")]
@@ -120,6 +125,18 @@ impl OpsRepository {
             }
         }
     }
+}
+
+/// Execute inside a transaction and return the first row, draining the rest
+/// so the connection is ready for the next statement.
+pub(super) async fn txn_first_row(
+    txn: &mut neo4rs::Txn,
+    q: neo4rs::Query,
+) -> Result<Option<neo4rs::Row>, OpsRepoError> {
+    let mut stream = txn.execute(q).await?;
+    let first = stream.next(txn.handle()).await?;
+    while stream.next(txn.handle()).await?.is_some() {}
+    Ok(first)
 }
 
 /// 10–40 ms × attempt, randomised so competing writers spread out.

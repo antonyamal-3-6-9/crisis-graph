@@ -29,6 +29,10 @@ redis = { version = "0.26.0", features = ["tokio-comp", "connection-manager", "a
 
 # Deterministic Graph Routing Algorithms
 petgraph = "0.6.5"
+# Atomic swap of the in-memory hazard overlay (M4)
+arc-swap = "1.7.1"
+# Operator token hashes (M4 hazard command)
+sha2 = "0.10.8"
 
 # Logging and Instrumentation
 tracing = "0.1.40"

@@ -5,6 +5,7 @@ pub mod control_plane;
 pub mod waterfall;
 pub mod ops;
 pub mod victim;
+pub mod hazard;
 
 pub use triage::*;
 pub use dispatch::*;
@@ -13,3 +14,4 @@ pub use control_plane::*;
 pub use waterfall::*;
 pub use ops::*;
 pub use victim::*;
+pub use hazard::*;

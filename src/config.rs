@@ -82,6 +82,8 @@ pub struct PipelineParams {
 
     // Graph snapshot
     pub overlay_refresh_secs: u64,
+    /// Baseline dataset the graph role loads.
+    pub graph_dataset: String,
 
     // Runtime
     pub role_drain_timeout_secs: u64,
@@ -123,6 +125,7 @@ impl Default for PipelineParams {
             breaker_window_secs: 30,
             breaker_half_open_secs: 30,
             overlay_refresh_secs: 30,
+            graph_dataset: "aluva-periyar-pilot".to_string(),
             role_drain_timeout_secs: 10,
             extract_stream: "sos:extract".to_string(),
             events_stream: "ops:events".to_string(),
@@ -199,6 +202,7 @@ impl PipelineParams {
             breaker_window_secs: u64_or("BREAKER_WINDOW_SECS", d.breaker_window_secs),
             breaker_half_open_secs: u64_or("BREAKER_HALF_OPEN_SECS", d.breaker_half_open_secs),
             overlay_refresh_secs: u64_or("OVERLAY_REFRESH_SECS", d.overlay_refresh_secs),
+            graph_dataset: stream_or("GRAPH_DATASET", &d.graph_dataset),
             role_drain_timeout_secs: u64_or("ROLE_DRAIN_TIMEOUT_SECS", d.role_drain_timeout_secs),
             extract_stream: stream_or("EXTRACT_STREAM", &d.extract_stream),
             events_stream: stream_or("EVENTS_STREAM", &d.events_stream),

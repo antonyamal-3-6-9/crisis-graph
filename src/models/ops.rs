@@ -151,6 +151,10 @@ pub struct Task {
     pub status: TaskStatus,
     pub required_asset: AssetType,
     pub version: u64,
+    /// Hazard overlay version the task's route was computed on (M4).
+    pub overlay_version: Option<u64>,
+    /// The computed route (JSON), when one has been recorded.
+    pub route_json: Option<String>,
 }
 
 /// Incident statuses (new pipeline) that count as "open" for deduplication.
