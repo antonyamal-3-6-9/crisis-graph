@@ -384,3 +384,19 @@ test set, so batches 6–7 are written by zero-context agents too.
   batch 5 and batch 6 reviews was above the rules). On v3.1.0 the rules still
   never rate below gold; over-triaged cases go from 15 to 17. No CRITICAL
   training gold is below the v5 rule result.
+
+## 8. SFT-V4 training and evaluation (2026-10-28 → 30)
+
+- **Training:** Kaggle T4, commit mode, 2.8 h, no resume; epoch 1 selected by
+  validation loss (`qwen3-4b-qlora-sft-v4-training-receipt.md`).
+- **Result** (`qwen3-4b-qlora-sft-v4-evaluation.md`): on the blind v3.1.0 set
+  SFT-V4 has the best V2 exact (81 vs 56 SFT-V3 and 40 base), the fewest
+  invented-fact cases (31 vs 40 / 39), the lowest critical under-triage (7 vs
+  8 / 12) and the best UNCONSCIOUS recall (77% vs 69% / 62%), but **fails the
+  critical gates**, as every model does. It recovers the V2 regression (carry-over
+  106/120 exact and 61/68 review recall, gate passed). The sensitivity check
+  without the 28 near-neighbour test cases gives the same ordering.
+- **Lesson:** the remaining misses are shared with SFT-V3 and mostly Manglish
+  (unconsciousness, snakebite, "swept away", chest-deep water, terrace): more
+  of the same kind of data moved English and Malayalam a lot (Malayalam exact
+  9 → 24 of 32) and Manglish triage little.
