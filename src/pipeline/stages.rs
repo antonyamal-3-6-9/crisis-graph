@@ -1,6 +1,10 @@
 use crate::db::{RedisClient, StateManager, TraversalProfile};
+use crate::config::PipelineParams;
+use crate::ingestion::location_policy::{choose_location, DescribedFix, DeviceFix};
 use crate::ingestion::{SpatialResolver, TriageExtractor};
-use crate::models::{CrisisState, DispatchStatus, ReservationRole, TacticalBrief};
+use crate::models::{
+    CrisisState, DispatchStatus, LocationSource, ReservationRole, SosAlert, TacticalBrief, TriageReport,
+};
 use crate::solver::pathfinder::TransportMode;
 use crate::solver::{DeterministicPathfinder, RoutingQuery};
 use chrono::Utc;
@@ -12,7 +16,10 @@ pub struct PipelineStages {
     extractor: TriageExtractor,
     state_mgr: StateManager,
     redis: RedisClient,
+    on_scene_radius_m: f64,
 }
+
+const PILOT_DATASET: &str = "aluva-periyar-pilot";
 
 impl PipelineStages {
     pub fn new(extractor: TriageExtractor, state_mgr: StateManager, redis: RedisClient) -> Self {
@@ -20,6 +27,88 @@ impl PipelineStages {
             extractor,
             state_mgr,
             redis,
+            on_scene_radius_m: PipelineParams::default().on_scene_radius_m,
+        }
+    }
+
+    /// Distance within which a caller of unknown on-scene status counts as
+    /// on scene (finding F-1).
+    pub fn with_on_scene_radius_m(mut self, radius_m: f64) -> Self {
+        self.on_scene_radius_m = radius_m;
+        self
+    }
+
+    /// Finding F-1: set `resolved_junction_id` and `location_source` to the
+    /// victims' position. The caller's position is used only when the caller
+    /// is on scene (stated, or within the on-scene radius of the described
+    /// place). Returns a review reason when the position cannot be used for
+    /// automatic dispatch.
+    pub async fn locate_victims(&self, sos: &SosAlert, triage: &mut TriageReport) -> Option<String> {
+        let on_scene = triage.victim_profile.as_ref().and_then(|p| p.reporter_on_scene);
+        let described = self.described_fix(triage, sos).await;
+        let device = self.device_fix(sos, described.as_ref()).await;
+        let decision = choose_location(on_scene, described, device, self.on_scene_radius_m);
+        triage.resolved_junction_id = decision.junction_id;
+        triage.location_source = decision.source;
+        decision.review_reason
+    }
+
+    /// The place named in the message: the extractor's lexical match, a
+    /// landmark anywhere in the text, or coordinates written in the text.
+    async fn described_fix(&self, triage: &TriageReport, sos: &SosAlert) -> Option<DescribedFix> {
+        if let Some(junction_id) = triage.resolved_junction_id.clone() {
+            return Some(DescribedFix { junction_id, source: LocationSource::Described });
+        }
+        if let Some(junction_id) = SpatialResolver::new().resolve(&sos.raw_text) {
+            info!("Resolved SOS message landmark -> {}", junction_id);
+            return Some(DescribedFix { junction_id, source: LocationSource::Described });
+        }
+        let (lat, lon) = SpatialResolver::parse_coordinates(&sos.raw_text)?;
+        self.snap(lat, lon, 1000.0)
+            .await
+            .map(|junction_id| DescribedFix { junction_id, source: LocationSource::TextCoordinates })
+    }
+
+    /// The caller's device position snapped to a junction, with its distance
+    /// to the described place.
+    async fn device_fix(&self, sos: &SosAlert, described: Option<&DescribedFix>) -> Option<DeviceFix> {
+        let (lat, lon) = (sos.latitude?, sos.longitude?);
+        info!("Device telemetry coordinates ({lat}, {lon}, accuracy: {:?}m) provided with SOS.", sos.accuracy_m);
+        let junction_id = self.snap(lat, lon, sos.accuracy_m.unwrap_or(1000.0).max(50.0)).await?;
+        let distance_to_described_m = match described {
+            Some(described) => self
+                .state_mgr
+                .distance_to_junction(PILOT_DATASET, &described.junction_id, lat, lon)
+                .await
+                .unwrap_or_else(|e| {
+                    warn!("Distance to described junction failed: {e}");
+                    None
+                }),
+            None => None,
+        };
+        Some(DeviceFix {
+            junction_id,
+            // Unknown accuracy does not widen the on-scene radius.
+            accuracy_m: sos.accuracy_m.unwrap_or(0.0),
+            distance_to_described_m,
+        })
+    }
+
+    async fn snap(&self, lat: f64, lon: f64, radius_m: f64) -> Option<String> {
+        info!("Snapping coordinates ({lat}, {lon}, radius: {radius_m:.0}m) to nearest junction...");
+        match self.state_mgr.find_nearest_junction(PILOT_DATASET, lat, lon, radius_m).await {
+            Ok(Some((junction_id, dist))) => {
+                info!("Snapped coordinates ({lat}, {lon}) -> {junction_id} ({dist:.1} m away)");
+                Some(junction_id)
+            }
+            Ok(None) => {
+                warn!("No road junction found within {radius_m:.0}m of ({lat}, {lon})");
+                None
+            }
+            Err(e) => {
+                warn!("Spatial snapper query error: {e}");
+                None
+            }
         }
     }
 
@@ -31,52 +120,9 @@ impl PipelineStages {
             Ok(triage) => {
                 let mut triage = triage;
 
-                // Attempt GPS coordinate snapping or lexical landmark resolution if junction is not yet resolved
-                if triage.resolved_junction_id.is_none() {
-                    // 1. Check for structured device telemetry or embedded GPS coordinates
-                    let coords = match (state.sos.latitude, state.sos.longitude) {
-                        (Some(lat), Some(lon)) => {
-                            info!("Device telemetry coordinates ({lat}, {lon}, accuracy: {:?}m) provided with SOS.", state.sos.accuracy_m);
-                            Some((lat, lon, state.sos.accuracy_m.unwrap_or(1000.0).max(50.0)))
-                        }
-                        _ => SpatialResolver::parse_coordinates(&state.sos.raw_text)
-                            .map(|(lat, lon)| (lat, lon, 1000.0)),
-                    };
-
-                    if let Some((lat, lon, search_radius)) = coords {
-                        info!("Snapping coordinates ({lat}, {lon}, radius: {search_radius:.0}m) to nearest junction...");
-                        match self
-                            .state_mgr
-                            .find_nearest_junction("aluva-periyar-pilot", lat, lon, search_radius)
-                            .await
-                        {
-                            Ok(Some((junction_id, dist))) => {
-                                info!("Snapped coordinates ({lat}, {lon}) -> {junction_id} ({dist:.1} m away)");
-                                triage.resolved_junction_id = Some(junction_id);
-                            }
-                            Ok(None) => {
-                                warn!("No road junction found within {search_radius:.0}m of ({lat}, {lon})")
-                            }
-                            Err(e) => warn!("Spatial snapper query error: {e}"),
-                        }
-                    }
-
-                    // 2. Check for lexical landmark matching in raw location or message body
-                    if triage.resolved_junction_id.is_none() {
-                        let resolver = SpatialResolver::new();
-                        if let Some(location) = triage.victim_location_raw.as_deref() {
-                            if let Some(junction_id) = resolver.resolve(location) {
-                                info!("Resolved location '{}' -> {}", location, junction_id);
-                                triage.resolved_junction_id = Some(junction_id);
-                            }
-                        }
-                        if triage.resolved_junction_id.is_none() {
-                            if let Some(junction_id) = resolver.resolve(&state.sos.raw_text) {
-                                info!("Resolved SOS message landmark -> {}", junction_id);
-                                triage.resolved_junction_id = Some(junction_id);
-                            }
-                        }
-                    }
+                if let Some(reason) = self.locate_victims(&state.sos, &mut triage).await {
+                    warn!("Victim location needs review: {reason}");
+                    state.errors.push(format!("TriageRequiresHumanReview: {reason}"));
                 }
 
                 info!(
@@ -106,9 +152,10 @@ impl PipelineStages {
                     }
                     state.errors.push("TriageRequiresHumanReview: Victim location was not provided".to_string());
                 } else {
-                    // Location is known. If the only uncertainties are missing headcount or asset,
-                    // the Uncertainty Waterfall provides a safe, standard operational baseline.
-                    let non_blocking_reasons = ["Headcount was not provided", "Required asset was not specified"];
+                    // Location is known. A missing headcount is covered by the
+                    // waterfall's baseline unit; a missing asset is never guessed
+                    // (finding F-2), so it blocks automatic dispatch.
+                    let non_blocking_reasons = ["Headcount was not provided"];
                     let remaining_blocking_reasons: Vec<String> = triage
                         .uncertainty_reasons
                         .iter()
@@ -154,29 +201,26 @@ impl PipelineStages {
             }
         };
 
-        // Resolve headcount and required asset (using extracted values or Uncertainty Waterfall fallbacks)
-        let (headcount, required_asset) = if let Some(ref wf) = state.uncertainty_waterfall {
-            (wf.resolved_headcount, wf.resolved_asset.clone())
-        } else {
-            let hc = match triage.headcount {
-                Some(value) => value,
-                None => {
-                    state
-                        .errors
-                        .push("Cannot allocate assets: missing triage headcount".to_string());
-                    return state;
-                }
-            };
-            let asset = match triage.required_asset.as_ref() {
-                Some(value) => value.clone(),
-                None => {
-                    state
-                        .errors
-                        .push("Cannot allocate assets: missing required asset".to_string());
-                    return state;
-                }
-            };
-            (hc, asset)
+        // Headcount may fall back to the waterfall's baseline unit; the asset
+        // must come from the extraction (finding F-2: never guessed).
+        let headcount = match (&state.uncertainty_waterfall, triage.headcount) {
+            (Some(wf), _) => wf.resolved_headcount,
+            (None, Some(value)) => value,
+            (None, None) => {
+                state
+                    .errors
+                    .push("Cannot allocate assets: missing triage headcount".to_string());
+                return state;
+            }
+        };
+        let required_asset = match triage.required_asset.as_ref() {
+            Some(value) => value.clone(),
+            None => {
+                state
+                    .errors
+                    .push("Cannot allocate assets: missing required asset".to_string());
+                return state;
+            }
         };
 
         // Query candidate shelters
@@ -337,17 +381,13 @@ impl PipelineStages {
             }
         };
 
-        let required_asset = if let Some(ref wf) = state.uncertainty_waterfall {
-            wf.resolved_asset.clone()
-        } else {
-            match triage.required_asset.clone() {
-                Some(value) => value,
-                None => {
-                    state
-                        .errors
-                        .push("Missing required asset for path calculation".to_string());
-                    return state;
-                }
+        let required_asset = match triage.required_asset.clone() {
+            Some(value) => value,
+            None => {
+                state
+                    .errors
+                    .push("Missing required asset for path calculation".to_string());
+                return state;
             }
         };
 
@@ -542,10 +582,9 @@ impl PipelineStages {
             }
         } else if let Some(ref segment_ids) = state.segment_path {
             let route_asset = state
-                .uncertainty_waterfall
+                .triage
                 .as_ref()
-                .map(|wf| wf.resolved_asset.clone())
-                .or_else(|| state.triage.as_ref().and_then(|t| t.required_asset.clone()));
+                .and_then(|t| t.required_asset.clone());
             match route_asset {
                 Some(asset) => land_checks.push((
                     "Route".to_string(),
@@ -715,7 +754,7 @@ impl PipelineStages {
 
         let mut waterfall_text = String::new();
         if let Some(ref wf) = state.uncertainty_waterfall {
-            if wf.headcount_is_fallback || wf.asset_is_fallback {
+            if !wf.field_operational_directives.is_empty() {
                 waterfall_text.push_str("\nUNCERTAINTY WATERFALL DIRECTIVES:\n");
                 for d in &wf.field_operational_directives {
                     waterfall_text.push_str(&format!("  * {}\n", d));

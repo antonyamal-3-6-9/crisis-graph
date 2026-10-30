@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::victim::{UrgencyResult, VictimProfile};
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AssetType {
     #[serde(rename = "RESCUE_BOAT")]
@@ -116,4 +118,35 @@ pub struct TriageReport {
     #[serde(default)]
     pub uncertainty_reasons: Vec<String>,
     pub inference: TriageInferenceMetadata,
+    /// V3 victim profile (absent in V2 extractions and legacy records).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub victim_profile: Option<VictimProfile>,
+    /// Urgency derived in Rust from `victim_profile`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub urgency: Option<UrgencyResult>,
+    /// Which position `resolved_junction_id` came from (finding F-1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location_source: Option<LocationSource>,
+}
+
+/// Where the victim position used for routing came from.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum LocationSource {
+    /// The caller's device position: the caller is on scene.
+    DeviceGps,
+    /// A place named in the message (landmark or junction).
+    Described,
+    /// Coordinates written in the message text.
+    TextCoordinates,
+}
+
+impl LocationSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DeviceGps => "DEVICE_GPS",
+            Self::Described => "DESCRIBED",
+            Self::TextCoordinates => "TEXT_COORDINATES",
+        }
+    }
 }

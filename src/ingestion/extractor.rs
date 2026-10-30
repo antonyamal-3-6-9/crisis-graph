@@ -8,13 +8,18 @@ use tracing::info;
 use super::spatial_resolver::SpatialResolver;
 use crate::config::Config;
 use crate::models::{
-    AssetType, CandidateHazardReport, RoadStatus, SosAlert, TriageInferenceMetadata, TriageReport,
+    derive_urgency, AssetType, CandidateHazardReport, LocationSource, RoadStatus, SosAlert,
+    TriageInferenceMetadata, TriageReport, VictimProfile, VICTIM_PROFILE_FIELDS,
 };
 
-const TRIAGE_SCHEMA_VERSION: &str = "triage-extraction-v2";
-const TRIAGE_PROMPT_VERSION: &str = "triage-extraction-v2.1.1";
-const TRIAGE_JSON_SCHEMA: &str = include_str!("../../schemas/triage-extraction-v2.json");
-const TRIAGE_SYSTEM_PROMPT: &str = include_str!("../../ml/prompts/triage-extraction-v2.1.1.txt");
+// Schema V3 with prompt v3.2: the pair the SFT-V4 adapter was trained and
+// evaluated with (ml/reports/qwen3-4b-qlora-sft-v4-evaluation.md).
+const TRIAGE_SCHEMA_VERSION: &str = "triage-extraction-v3";
+const TRIAGE_PROMPT_VERSION: &str = "triage-extraction-v3.2";
+const TRIAGE_JSON_SCHEMA: &str = include_str!("../../schemas/triage-extraction-v3.json");
+const TRIAGE_SYSTEM_PROMPT: &str = include_str!("../../ml/prompts/triage-extraction-v3.2.txt");
+// V3 outputs are longer than V2; the evaluation used the same limit.
+const TRIAGE_MAX_TOKENS: u32 = 768;
 
 type ExtractResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -86,6 +91,7 @@ struct RawLlmExtraction {
     confidence_score: f32,
     needs_human_review: bool,
     uncertainty_reasons: Vec<String>,
+    victim_profile: VictimProfile,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -189,8 +195,11 @@ impl TriageExtractor {
                 if let Some(junction) = self.try_refine_landmark(&alert.raw_text, loc).await {
                     info!("Refinement loop mapped location '{}' -> {}", loc, junction);
                     report.resolved_junction_id = Some(junction);
-                    report.needs_human_review = false;
+                    report.location_source = Some(LocationSource::Described);
+                    // Clear only the location reason: review requested for
+                    // anything else still stands.
                     report.uncertainty_reasons.retain(|r| !r.contains("Victim location"));
+                    report.needs_human_review = !report.uncertainty_reasons.is_empty();
                 }
             }
         }
@@ -250,9 +259,19 @@ impl TriageExtractor {
             "confidence_score",
             "needs_human_review",
             "uncertainty_reasons",
+            "victim_profile",
         ] {
             if !object.contains_key(field) {
                 return Err(format!("Triage model output omitted required field '{field}'").into());
+            }
+        }
+        let profile = object
+            .get("victim_profile")
+            .and_then(Value::as_object)
+            .ok_or("victim_profile must be a JSON object")?;
+        for field in VICTIM_PROFILE_FIELDS {
+            if !profile.contains_key(field) {
+                return Err(format!("victim_profile omitted required field '{field}'").into());
             }
         }
         if let Some(hazards) = object.get("hazards").and_then(Value::as_array) {
@@ -283,7 +302,7 @@ impl TriageExtractor {
                 {"role": "user", "content": report}
             ],
             "temperature": 0.0,
-            "max_tokens": 512
+            "max_tokens": TRIAGE_MAX_TOKENS
         });
 
         match self.inference_backend.trim().to_ascii_lowercase().as_str() {
@@ -407,6 +426,10 @@ impl TriageExtractor {
             });
         }
 
+        let mut victim_profile = raw.victim_profile;
+        victim_profile.validate()?;
+        let urgency = derive_urgency(&victim_profile);
+
         let mut resolved_junction_id = victim_location
             .as_deref()
             .and_then(|location| self.spatial_resolver.resolve(location));
@@ -416,6 +439,8 @@ impl TriageExtractor {
                 resolved_junction_id = self.spatial_resolver.resolve(raw_loc);
             }
         }
+
+        let location_source = resolved_junction_id.as_ref().map(|_| LocationSource::Described);
 
         let display_location = raw
             .victim_location_raw
@@ -491,6 +516,9 @@ impl TriageExtractor {
                 prompt_eval_ms,
                 completion_tokens,
             },
+            victim_profile: Some(victim_profile),
+            urgency: Some(urgency),
+            location_source,
         })
     }
 
@@ -529,13 +557,14 @@ mod tests {
             confidence_score: 0.95,
             needs_human_review: false,
             uncertainty_reasons: Vec::new(),
+            victim_profile: VictimProfile::default(),
         }
     }
 
     #[test]
     fn triage_schema_is_valid_json() {
         let schema: Value = serde_json::from_str(TRIAGE_JSON_SCHEMA).unwrap();
-        assert_eq!(schema["title"], "CrisisGraph Triage Extraction V2");
+        assert_eq!(schema["title"], "CrisisGraph Triage Extraction V3");
     }
 
     #[test]
@@ -582,14 +611,17 @@ mod tests {
     #[test]
     fn omitted_nullable_field_is_rejected_but_explicit_null_is_accepted() {
         let explicit_null = r#"{
-            "schema_version":"triage-extraction-v2",
+            "schema_version":"triage-extraction-v3",
             "victim_location":"Bank Junction",
             "headcount":5,
             "required_asset":null,
             "hazards":[],
             "confidence_score":0.55,
             "needs_human_review":true,
-            "uncertainty_reasons":["Required asset was not specified"]
+            "uncertainty_reasons":["Required asset was not specified"],
+            "victim_profile":{"reporter_relation":"SELF","reporter_on_scene":true,
+                "medical_conditions":[],"other_conditions":[],"vulnerable_groups":[],
+                "water_level":null,"water_trend":null,"suggested_urgency":null}
         }"#;
         assert!(TriageExtractor::parse_model_content(explicit_null).is_ok());
 
@@ -598,6 +630,37 @@ mod tests {
         assert!(error
             .to_string()
             .contains("omitted required field 'required_asset'"));
+    }
+
+    #[test]
+    fn omitted_profile_field_is_rejected() {
+        let omitted = r#"{
+            "schema_version":"triage-extraction-v3","victim_location":"Bank Junction",
+            "headcount":5,"required_asset":"AMBULANCE","hazards":[],"confidence_score":0.9,
+            "needs_human_review":false,"uncertainty_reasons":[],
+            "victim_profile":{"reporter_relation":"SELF","reporter_on_scene":true,
+                "medical_conditions":[],"other_conditions":[],"vulnerable_groups":[],
+                "water_level":null,"suggested_urgency":null}
+        }"#;
+        let error = TriageExtractor::parse_model_content(omitted).unwrap_err();
+        assert!(error.to_string().contains("victim_profile omitted required field 'water_trend'"));
+        let mut without: Value = serde_json::from_str(omitted).unwrap();
+        without.as_object_mut().unwrap().remove("victim_profile");
+        let error = TriageExtractor::parse_model_content(&without.to_string()).unwrap_err();
+        assert!(error.to_string().contains("omitted required field 'victim_profile'"));
+    }
+
+    #[test]
+    fn profile_drives_urgency_and_invalid_profile_is_rejected() {
+        let mut raw = valid_raw();
+        raw.victim_profile.medical_conditions = vec![crate::models::MedicalCondition::Unconscious];
+        let report = extractor().build_triage_report(raw, 0, None, None, None).unwrap();
+        assert_eq!(report.urgency.unwrap().urgency, crate::models::Urgency::Critical);
+        assert_eq!(report.location_source, Some(LocationSource::Described));
+
+        let mut raw = valid_raw();
+        raw.victim_profile.suggested_urgency = Some(crate::models::Urgency::Unknown);
+        assert!(extractor().build_triage_report(raw, 0, None, None, None).is_err());
     }
 
     #[test]

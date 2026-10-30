@@ -432,6 +432,33 @@ impl StateManager {
         }
     }
 
+    /// Distance in metres from a point to a junction, or `None` if the
+    /// junction is unknown or has no coordinates.
+    pub async fn distance_to_junction(
+        &self,
+        dataset: &str,
+        junction_id: &str,
+        lat: f64,
+        lon: f64,
+    ) -> Result<Option<f64>, Box<dyn std::error::Error + Send + Sync>> {
+        let q = query(
+            "MATCH (j:Junction {dataset: $dataset, id: $id}) \
+             WHERE j.lat IS NOT NULL AND j.lon IS NOT NULL \
+             RETURN point.distance(point({latitude: j.lat, longitude: j.lon}), \
+                                   point({latitude: $lat, longitude: $lon})) AS dist \
+             LIMIT 1",
+        )
+        .param("dataset", dataset)
+        .param("id", junction_id)
+        .param("lat", lat)
+        .param("lon", lon);
+        let mut result = self.neo4j.graph.execute(q).await?;
+        match result.next().await? {
+            Some(row) => Ok(Some(row.get::<f64>("dist")?)),
+            None => Ok(None),
+        }
+    }
+
     /// Register missing Aluva pilot shelters without changing existing
     /// occupancy, fleet availability, or operational timestamps.
     pub async fn ensure_aluva_shelters(

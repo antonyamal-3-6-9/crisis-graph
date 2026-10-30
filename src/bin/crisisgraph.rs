@@ -133,7 +133,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 TriageExtractor::new(&config),
                 StateManager::new(repo_neo4j.clone()),
                 redis.clone(),
-            );
+            )
+            .with_on_scene_radius_m(config.params.on_scene_radius_m);
             let consumer = format!("triage-{}", &uuid::Uuid::new_v4().to_string()[..8]);
             let worker = TriageWorker::new(
                 repo.clone(),
