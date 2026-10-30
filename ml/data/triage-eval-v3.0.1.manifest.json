@@ -1,0 +1,75 @@
+{
+  "dataset": "CrisisGraph Triage Eval V3",
+  "version": "3.0.1",
+  "artifact": "triage-eval-v3.0.1.jsonl",
+  "sha256": "58a623a62960b877ccf9315afefcebc3afb34a1b30a971a1a59547fd72700993",
+  "record_count": 120,
+  "frozen_on": "2026-10-25",
+  "frozen_benchmark": true,
+  "supersedes": {
+    "version": "3.0.0",
+    "sha256": "56efbbfa8c8322b5bbd382c3bfd777b6c93626f42353eeb69a4de764c2e2c936",
+    "reason": "Re-frozen the same day, before any model run or prompt work: case v3-test-085 no longer infers water_level ROOF from people being on a roof (owner decision during the V2 carry-over review)"
+  },
+  "reviewer_status": "reviewed",
+  "review": "Drafted synthetically, then reviewed by the project owner in two comment rounds; every comment was resolved by a guideline rule or a label change (decisions below). Not certified by a medical or emergency-services domain expert.",
+  "owner_decisions": [
+    "reporter_relation UNDER_REVIEW when the text points to the reporter's family or home but leaves open whether the reporter is among the victims; resolved after extraction by comparing caller position with the described location (F-1)",
+    "Water-level bands are half-open (a boundary value belongs to the deeper level); ranges use their upper end; the unit the report uses is applied without conversion",
+    "'For N hours' is a hazard duration (V2 precedent); explicitly elapsed time ('since', 'ago') is not",
+    "CHRONIC_CARE covers known long-term conditions without an acute episode; an acute episode takes only the acute category",
+    "Hypothetical conditions are not labelled",
+    "Urgency rule: a low-mobility group with water at or above WAIST and RISING is CRITICAL",
+    "People on a roof with no stated flooding: water_level null (no inferred flood)",
+    "Gold urgency: a critical symptom resolved within 24 hours is URGENT; a resolved minor injury alone gives no urgency"
+  ],
+  "contract_revisions": [
+    "2026-10-25: triage-extraction-v3 property order changed so that victim_profile is generated last (dev experiment: fewer spurious review requests). Meaning and labels unchanged; data checksum unchanged."
+  ],
+  "contract_sha256": {
+    "schema": "c9b3ed10855da712c544ecc998db0f841e250313e31ff6cec953932b759a1051",
+    "urgency_result_schema": "9f8e2bd9373f53a7e19c0da5a99c5ecd9943d1f8b7275f6d4f05abecbc3a62a7",
+    "urgency_rules": "0d77492b2d776cf0c731f3f10ce59bbf83c6679172158f552aa79ce6ea965866",
+    "annotation_guidelines": "58f9017cfa65c6849c5af17b4a046e98e97140a02044f29d421f539b2bbf921a"
+  },
+  "dev_set_separation": "No input text or victim_location is shared with triage-eval-v3-dev-candidates. Some scenario types (e.g. snakebite, labour, insulin) appear in both sets with different wording and places.",
+  "counts": {
+    "category": {
+      "medical_critical": 30,
+      "buried_adversarial": 14,
+      "medical_other": 14,
+      "vulnerable_water": 20,
+      "reporter_location": 16,
+      "negation_temporal": 12,
+      "no_profile": 9,
+      "irrelevant": 5
+    },
+    "language": {
+      "en": 70,
+      "ml": 24,
+      "manglish": 26
+    },
+    "expected_urgency": {
+      "CRITICAL": 56,
+      "URGENT": 30,
+      "STABLE": 10,
+      "UNKNOWN": 24
+    }
+  },
+  "permitted_use": [
+    "final model evaluation",
+    "regression testing",
+    "cross-model comparison"
+  ],
+  "prohibited_use": [
+    "model training",
+    "fine-tuning",
+    "prompt tuning",
+    "training-example generation"
+  ],
+  "required_reporting": [
+    "overall",
+    "per category",
+    "per language"
+  ]
+}

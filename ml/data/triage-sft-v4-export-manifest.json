@@ -1,0 +1,96 @@
+{
+  "dataset": "CrisisGraph Triage SFT V4",
+  "purpose": "QLoRA on V3 targets for every field (data/triage-sft-v4-spec.md)",
+  "output_format": "JSONL with system (prompt v3.2), user and assistant messages",
+  "exporter": {
+    "path": "src/crisisgraph_ml/triage_sft_v4_export.py",
+    "sha256": "8baac373704a57e1c7ad071f194a186cc6315c741c66293cd741a23f4e3af5c4"
+  },
+  "prompt": {
+    "path": "prompts/triage-extraction-v3.2.txt",
+    "sha256": "9368283ce56be397fd14fda5f77495f493f99118f4812d4fe00d03c946789623"
+  },
+  "schema": {
+    "path": "../schemas/triage-extraction-v3.json",
+    "sha256": "c9b3ed10855da712c544ecc998db0f841e250313e31ff6cec953932b759a1051"
+  },
+  "urgency_rules": "urgency-rules-v5",
+  "source_hashes": {
+    "triage-sft-v4-converted-candidates.jsonl": "aa717192b0fbd6d0edf61e24efb17878730156821c6f1ce59a601edafa122c6e",
+    "triage-sft-v4-new-candidates.jsonl": "37a628c91c4246bac051dc37dca14c0fe29120f896e8309d6f3716a0989ea15e"
+  },
+  "leak_audit": {
+    "path": "data/triage-sft-v4-leak-audit.json",
+    "sha256": "1b4d575e6040ff8f2c8140f1dfbb808318053329d846a5e4c5c0f88d45a6ca71"
+  },
+  "exports": {
+    "train": {
+      "output": "data/generated/triage-sft-v4-train.jsonl",
+      "output_sha256": "64a0a46d6a9f62290c08e1e636ea95503fb5e59952325cdc27b216488847be29",
+      "longest_record_chars": 9970,
+      "records": 608,
+      "profile_rich": 306,
+      "language": {
+        "en": 320,
+        "ml": 147,
+        "manglish": 141
+      },
+      "expected_urgency": {
+        "UNKNOWN": 323,
+        "CRITICAL": 161,
+        "URGENT": 71,
+        "STABLE": 53
+      },
+      "medical_conditions": {
+        "CARDIAC": 27,
+        "INJURY": 41,
+        "CHRONIC_CARE": 7,
+        "UNCONSCIOUS": 27,
+        "BREATHING_DIFFICULTY": 26,
+        "BLEEDING": 27
+      },
+      "reporter_relation": {
+        "None": 341,
+        "SELF": 190,
+        "HOUSEHOLD": 36,
+        "THIRD_PARTY": 32,
+        "UNDER_REVIEW": 9
+      }
+    },
+    "validation": {
+      "output": "data/generated/triage-sft-v4-validation.jsonl",
+      "output_sha256": "72d7b3ef9b0c167af5ae944e718c0e64d45853b3e1cb08aeb49bf81e1bf087ea",
+      "longest_record_chars": 9848,
+      "records": 102,
+      "profile_rich": 31,
+      "language": {
+        "en": 51,
+        "ml": 26,
+        "manglish": 25
+      },
+      "expected_urgency": {
+        "UNKNOWN": 73,
+        "CRITICAL": 17,
+        "URGENT": 7,
+        "STABLE": 5
+      },
+      "medical_conditions": {
+        "CARDIAC": 3,
+        "BREATHING_DIFFICULTY": 3,
+        "UNCONSCIOUS": 3,
+        "BLEEDING": 3,
+        "INJURY": 4
+      },
+      "reporter_relation": {
+        "None": 74,
+        "SELF": 16,
+        "THIRD_PARTY": 4,
+        "HOUSEHOLD": 6,
+        "UNDER_REVIEW": 2
+      }
+    }
+  },
+  "dev_included": false,
+  "frozen_evaluation_included": false,
+  "text_authorship": "Converted records keep their SFT-V3 texts. New records: texts written by zero-context agents that never saw the evaluation sets (batches 1-5 rewritten from reviewed labels, batches 6-7 authored from the guidelines)."
+}
