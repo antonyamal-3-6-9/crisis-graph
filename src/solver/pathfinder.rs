@@ -277,23 +277,7 @@ impl RoutingGraph {
 
         // 2. Cost function evaluating vehicle access, closures, and weight metrics
         let cost_fn = |edge_ref: petgraph::graph::EdgeReference<RoutingEdge>| -> f64 {
-            let edge = edge_ref.weight();
-
-            // Check active hazard closures
-            if query.blocked_segments.contains(&edge.segment_id) {
-                return f64::INFINITY;
-            }
-
-            // Check vehicle accessibility
-            if !road_access_allowed(query.asset_type.as_ref(), edge) {
-                return f64::INFINITY;
-            }
-
-            // Calculate weight based on chosen cost metric
-            match query.cost_metric {
-                CostMetric::FastestTime => edge.travel_time_s.max(0.01),
-                CostMetric::ShortestDistance => (edge.length_m / 1_000.0).max(0.0001),
-            }
+            edge_cost(query, edge_ref.weight())
         };
 
         // 3. Execute Dijkstra's Algorithm
@@ -393,6 +377,40 @@ impl RoutingGraph {
             detour_reason,
             traversed_edges,
         })
+    }
+}
+
+impl RoutingGraph {
+    /// Cost from `query.origin` to every reachable junction (single-source
+    /// Dijkstra, no target; `query.destination` is ignored). Uses the same
+    /// edge costs as [`RoutingGraph::route`], so a cost here equals the
+    /// route's total for that destination. Unreachable junctions are absent.
+    pub fn costs_from(&self, query: &RoutingQuery) -> Result<HashMap<String, f64>, PathfinderError> {
+        let start_idx = *self
+            .node_indices
+            .get(&query.origin)
+            .ok_or_else(|| PathfinderError::OriginNotFound(query.origin.clone()))?;
+        let distances = dijkstra(&self.graph, start_idx, None, |edge_ref| edge_cost(query, edge_ref.weight()));
+        Ok(distances
+            .into_iter()
+            .filter(|(_, cost)| cost.is_finite())
+            .map(|(idx, cost)| (self.graph[idx].clone(), cost))
+            .collect())
+    }
+}
+
+/// Cost of one edge for a query: infinite when the segment is blocked or the
+/// asset may not use it, otherwise the chosen metric.
+fn edge_cost(query: &RoutingQuery, edge: &RoutingEdge) -> f64 {
+    if query.blocked_segments.contains(&edge.segment_id) {
+        return f64::INFINITY;
+    }
+    if !road_access_allowed(query.asset_type.as_ref(), edge) {
+        return f64::INFINITY;
+    }
+    match query.cost_metric {
+        CostMetric::FastestTime => edge.travel_time_s.max(0.01),
+        CostMetric::ShortestDistance => (edge.length_m / 1_000.0).max(0.0001),
     }
 }
 
@@ -1226,5 +1244,35 @@ mod tests {
         assert_eq!(plan.topology, MitigationTopology::IslandHazard);
         assert_eq!(plan.legs[2].mode, TransportMode::FootWading);
         assert_eq!(plan.landfall_junction, Some("C".to_string()));
+    }
+
+    #[test]
+    fn costs_from_matches_route_totals_and_respects_blocks_and_access() {
+        let edges = vec![
+            create_edge("seg_A_B", "A", "B", 1.0, true, true),
+            create_edge("seg_B_C_narrow", "B", "C", 1.0, false, true),
+            create_edge("seg_B_D_wide", "B", "D", 2.0, true, true),
+            create_edge("seg_D_C_wide", "D", "C", 2.0, true, true),
+        ];
+        let graph = RoutingGraph::from_edges(&edges);
+
+        let truck = RoutingQuery::new("A", "").with_asset_type(AssetType::EvacTruck);
+        let costs = graph.costs_from(&truck).unwrap();
+        let route = graph.route(&RoutingQuery::new("A", "C").with_asset_type(AssetType::EvacTruck)).unwrap();
+        assert!((costs["C"] - route.total_travel_time_s).abs() < 1e-6, "truck detours via D");
+        assert_eq!(costs["A"], 0.0);
+
+        let ambulance = RoutingQuery::new("A", "").with_asset_type(AssetType::Ambulance);
+        assert!((graph.costs_from(&ambulance).unwrap()["C"] - 120.0).abs() < 1e-6, "ambulance uses the alley");
+
+        let blocked = RoutingQuery::new("A", "")
+            .with_asset_type(AssetType::Ambulance)
+            .with_blocked_segments(HashSet::from(["seg_A_B".to_string()]));
+        let reach = graph.costs_from(&blocked).unwrap();
+        assert_eq!(reach.len(), 1, "only the origin is reachable");
+        assert!(matches!(
+            graph.costs_from(&RoutingQuery::new("Z", "")),
+            Err(PathfinderError::OriginNotFound(_))
+        ));
     }
 }

@@ -30,7 +30,8 @@ Candidate hazard / location resolution
               +--> operational hazard overlay in Neo4j
               |
               v
-Shelter and asset allocation (Redis lock + atomic Neo4j mutation)
+Shelter and asset allocation (matcher: batch assignment + constraint-backed Neo4j reservations;
+                              legacy server: Redis lock + atomic Neo4j mutation)
               |
               v
 Passable directed graph snapshot
@@ -49,9 +50,11 @@ Dispatcher / responder action or human escalation
 
 - **Rust 2021 + Tokio:** asynchronous application/runtime.
 - **Neo4j + neo4rs:** baseline road graph, shelters, resources, and dynamic operational state.
-- **Redis/Valkey + redis-rs:** distributed locks now; Redis Streams/consumer groups are a planned intake mechanism.
+- **Redis/Valkey + redis-rs:** Streams and consumer groups (`sos:extract`, `ops:events`), leader leases with fencing tokens, the matcher priority queue (`alloc:queue:{dataset}`); the legacy server still uses distributed locks.
 - **vLLM-compatible HTTP endpoint + reqwest:** SOS triage extraction. The default is localhost, but the endpoint is configurable and need not be local.
-- **Petgraph:** deterministic shortest-path logic. It currently uses an undirected prototype graph and must become directed before real-road routing.
+- **Petgraph:** deterministic shortest-path logic on a directed graph (one-way, access and hazard constraints); the baseline is loaded once per process into a shared snapshot (`arc-swap` hazard overlay).
+- **pathfinding + rayon:** Hungarian assignment per priority tier and parallel cost-table searches in the matcher.
+- **axum + metrics:** intake/hazard API, `/healthz` `/readyz` `/metrics` (Prometheus) on every role; `sha2` for operator token hashes.
 - **Serde/chrono/thiserror/tracing:** typed contracts, time, errors, and instrumentation.
 
 ## Repository layout
@@ -75,15 +78,20 @@ crisis-graph/
 │   │   ├── normalize_osm.rs           # normalizes raw OSM into directed graph GeoJSON
 │   │   ├── server.rs                  # legacy all-in-one dispatch server (:3000)
 │   │   ├── crisisgraph.rs             # new pipeline: one role per process (--role)
-│   │   └── migrate_ops.rs             # creates the operational data model (idempotent)
+│   │   ├── migrate_ops.rs             # creates the operational data model (idempotent)
+│   │   ├── load_baseline_graph.rs     # loads normalized junctions/segments into Neo4j
+│   │   └── bench_matcher.rs           # batch vs one-at-a-time allocation bench (read-only)
 │   ├── db/
 │   │   ├── ops_schema.rs              # operational constraints/indexes
-│   │   └── ops_repo/                  # vehicles, reservations, beds, reports, tasks, outbox
+│   │   └── ops_repo/                  # vehicles, reservations, beds, reports, tasks, incidents,
+│   │                                  # hazards (T7), allocation (T2 commit, escalations), outbox
 │   ├── geospatial/                    # OSM normalization, topology splitting, and validation
 │   ├── ingestion/
 │   ├── models/
 │   ├── pipeline/
-│   ├── api/                           # intake API (POST/GET /api/v1/reports)
+│   ├── api/                           # intake API (/api/v1/reports), hazard command (/api/v1/hazards), operator tokens
+│   ├── graph/                         # shared graph snapshot (baseline once + hazard overlay)
+│   ├── matcher/                       # matcher role: priority queue, tiered Hungarian assignment, T2/T3
 │   ├── relay.rs                       # outbox relay (leader lease + fencing)
 │   ├── runtime/                       # roles, lease, breaker, shutdown, /healthz /readyz /metrics
 │   ├── triage/                        # triage workers: extraction, minimal dedup, incidents
@@ -96,12 +104,16 @@ crisis-graph/
     ├── ops_model_tests.rs             # operational model: overbooking stress, idempotency
     ├── intake_relay_tests.rs          # intake API, relay crash recovery, fencing, failover
     ├── triage_worker_tests.rs         # checkpoint reuse, duplicates, D-2/D-3, breaker, dead letters
+    ├── graph_hazard_tests.rs          # hazard records/T7, snapshot swap, hazard API and roles
+    ├── matcher_tests.rs               # allocation: overbooking race, resume, fencing, failover, tiers
+    ├── neo4j_baseline_tests.rs        # directed baseline loader and hazard verification
+    ├── aluva_pipeline_tests.rs        # legacy end-to-end pipeline (needs llama.cpp on :8000)
     └── integration_tests.rs
 ```
 
-## Current pipeline
+## Legacy pipeline (`server` binary)
 
-The implementation passes a typed `CrisisState` (“clipboard”) through four stages:
+The legacy all-in-one path (still used by the console until M7) passes a typed `CrisisState` (“clipboard”) through four stages:
 
 1. **Triage extraction** — parse raw SOS text into location, headcount, asset type, and hazards.
 2. **Allocation** — find and atomically reserve eligible shelter capacity and an asset, guarded by a Redis lock.
@@ -192,9 +204,16 @@ curl localhost:3100/api/v1/reports/<report_id>
 cargo test --test ops_model_tests
 cargo test --test intake_relay_tests
 cargo test --test triage_worker_tests
+cargo test --test graph_hazard_tests
+cargo test --test matcher_tests
+
+# Batch-quality bench (read-only; real graph and fleet)
+cargo run --release --bin bench_matcher -- --sizes 10,25,40,60 --seeds 20 --seed 2026
 ```
 
 Triage workers (`--role triage`) consume `sos:extract` (consumer group `triage-workers`), save the extraction on the report before deduplicating (so a redelivery never calls the model twice), then in one transaction either attach a same-device follow-up (D-2) or create an `:OpsIncident` (`TRIAGE_APPROVED` + queued `ROAD_PICKUP` task, or `REVIEW_REQUIRED`). Nearby open incidents are flagged `POSSIBLE_DUPLICATE` (D-3), never merged. When extraction fails or the inference circuit breaker is open, the report still becomes a `REVIEW_REQUIRED` incident for manual triage.
+
+Since M5 the matcher role (`src/matcher/`) assigns vehicles: one leader per dataset (lease `matcher:{dataset}` + fencing token) runs a cycle every 2 s, or 250 ms after an event that changes tasks, vehicles or hazards. It takes the first tasks from the priority queue `alloc:queue:{dataset}` (tier + aging, rebuilt from Neo4j), builds a travel-time cost table on its own graph snapshot (one search per depot and asset type, in parallel), and assigns per strict tier with the Hungarian algorithm. Each pair runs T2: hold → route → live `verify_path_segments` → fenced commit with drop-off beds (nearest shelter with enough free beds; none → still dispatched with `DROPOFF_UNRESOLVED`). A failed check releases the hold, refreshes the overlay and retries; three failures, a headcount no vehicle can carry, or a wait past the tier threshold raise `TASK_ESCALATED` once. A hold left uncommitted by a crashed or fenced matcher is resumed with the same reservation. Run two matcher processes (`--port 9102`, `--port 9112`) for failover.
 
 Since M4 hazards are `:Hazard` records, never properties on road segments: every change is transaction T7 (record + `overlay_version` + 1 + audit + `HAZARDS_CHANGED`), allowed for `HAZARD_VERIFIER` / `EOC_ADMIN` through `POST /api/v1/hazards` and `/api/v1/hazards/clear` on the api role, authenticated with operator tokens (`OPERATOR_TOKENS`, SHA-256 hashes; none configured means 401). The graph role loads the baseline graph once (`src/graph/`, `GraphSnapshot`), swaps the hazard overlay atomically on `HAZARDS_CHANGED` (plus a periodic refresh), and `/readyz` waits for the snapshot. Routes carry the `overlay_version` they used; verification stays live. Run `cargo run --bin migrate_ops` once to move any old road-property hazards into records.
 
@@ -291,7 +310,7 @@ cargo run --bin load_baseline_graph -- \
 2. Fail closed: no confirmed route, invalid graph, unsafe segment, or incomplete allocation must escalate.
 3. Use strict typed structs for inter-stage contracts and validate external data.
 4. Keep all I/O asynchronous with Tokio.
-5. Guard resource mutation with a Redis ownership-checked lock and atomic Neo4j reservation.
+5. Guard resource mutation atomically: in the new pipeline, one fenced matcher decides and uniqueness constraints (`active_vehicle_key` / `active_task_key`) make overbooking impossible; the legacy server uses a Redis ownership-checked lock and an atomic Neo4j reservation.
 6. Treat citizen/LLM hazard extraction as a candidate event. Verified field/dispatcher events are the route-blocking authority.
 7. Before dispatch, independently verify every traversed segment against current operational state (`verify_path_segments`).
 8. Do not use the demo Neo4j seed graph together with the imported Aluva graph.
@@ -301,7 +320,14 @@ cargo run --bin load_baseline_graph -- \
 ## Verification baseline
 
 ```bash
-cargo test --test integration_tests
+cargo test --lib                       # unit tests (urgency vectors, solver, assignment, config)
+cargo test --test ops_model_tests      # live Neo4j/Redis suites below skip if unreachable
+cargo test --test intake_relay_tests
+cargo test --test triage_worker_tests
+cargo test --test graph_hazard_tests
+cargo test --test matcher_tests
+cargo test --test neo4j_baseline_tests
+cargo test --test aluva_pipeline_tests # legacy end to end; needs llama.cpp on :8000
 ```
 
-Existing tests cover basic lexical resolution and prototype pathfinding. Add integration tests with Neo4j/Redis, directed-road tests, closure/expiry tests, and concurrent allocation tests as the system matures.
+Live tests run on their own `TEST-<uuid>` datasets and clean up after themselves; a failed run can leave its test data behind, so check for `TEST-` nodes after a failure.

@@ -69,6 +69,12 @@ pub struct PipelineParams {
     pub escalate_stable_secs: u64,
     pub reserve_ahead_secs: u64,
     pub jit_margin_secs: u64,
+    /// Most queued tasks the matcher takes into one cycle.
+    pub matcher_batch_cap: usize,
+    /// How often the matcher rebuilds its queue from Neo4j.
+    pub matcher_rebuild_secs: u64,
+    /// Failed live route checks before a task is escalated.
+    pub matcher_max_verify_failures: u32,
 
     // Leases
     pub lease_ttl_ms: u64,
@@ -118,6 +124,9 @@ impl Default for PipelineParams {
             escalate_stable_secs: 30 * 60,
             reserve_ahead_secs: 10 * 60,
             jit_margin_secs: 2 * 60,
+            matcher_batch_cap: 200,
+            matcher_rebuild_secs: 30,
+            matcher_max_verify_failures: 3,
             lease_ttl_ms: 10_000,
             lease_renew_ms: 3_000,
             breaker_consecutive_failures: 5,
@@ -195,6 +204,9 @@ impl PipelineParams {
             escalate_stable_secs: u64_or("ESCALATE_STABLE_SECS", d.escalate_stable_secs),
             reserve_ahead_secs: u64_or("RESERVE_AHEAD_SECS", d.reserve_ahead_secs),
             jit_margin_secs: u64_or("JIT_MARGIN_SECS", d.jit_margin_secs),
+            matcher_batch_cap: usize_or("MATCHER_BATCH_CAP", d.matcher_batch_cap),
+            matcher_rebuild_secs: u64_or("MATCHER_REBUILD_SECS", d.matcher_rebuild_secs),
+            matcher_max_verify_failures: u32_or("MATCHER_MAX_VERIFY_FAILURES", d.matcher_max_verify_failures),
             lease_ttl_ms: u64_or("LEASE_TTL_MS", d.lease_ttl_ms),
             lease_renew_ms: u64_or("LEASE_RENEW_MS", d.lease_renew_ms),
             breaker_consecutive_failures: u32_or("BREAKER_CONSECUTIVE_FAILURES", d.breaker_consecutive_failures),
@@ -338,7 +350,11 @@ mod tests {
             ("BREAKER_ERROR_RATE", "0.25"),
             ("OUTBOX_BATCH_SIZE", "50"),
             ("EXTRACT_STREAM", "test:extract"),
+            ("MATCHER_BATCH_CAP", "50"),
+            ("MATCHER_MAX_VERIFY_FAILURES", "5"),
         ]));
+        assert_eq!(params.matcher_batch_cap, 50);
+        assert_eq!(params.matcher_max_verify_failures, 5);
         assert_eq!(params.extract_stream, "test:extract");
         assert_eq!(params.matcher_cycle_ms, 1500);
         assert_eq!(params.dedup_nearby_radius_m, 250.5);

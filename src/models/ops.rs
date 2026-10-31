@@ -157,6 +157,50 @@ pub struct Task {
     pub route_json: Option<String>,
 }
 
+/// A `QUEUED` task as the matcher sees it (M5): what it needs, where, how
+/// urgent, and how long it has waited.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueuedTask {
+    pub task_id: String,
+    pub incident_id: String,
+    pub version: u64,
+    pub required_asset: AssetType,
+    /// CRITICAL 2, URGENT/UNKNOWN 1, STABLE 0 (urgency-rules-v5).
+    pub priority_rank: u8,
+    pub queued_at: DateTime<Utc>,
+    pub headcount: Option<u32>,
+    /// The incident's junction in the matcher's dataset.
+    pub junction_id: String,
+    /// Failed live route checks so far.
+    pub verify_failures: u32,
+    /// Escalation reasons already raised (each is raised once).
+    pub escalations: Vec<String>,
+}
+
+impl QueuedTask {
+    /// People to carry: an unknown headcount counts as one.
+    pub fn persons(&self) -> u32 {
+        self.headcount.unwrap_or(1).max(1)
+    }
+}
+
+/// A `HELD` vehicle reservation whose commit never happened (the matcher
+/// stopped between hold and commit). The next cycle resumes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrphanedHold {
+    pub reservation_id: String,
+    pub task_id: String,
+    pub vehicle_id: String,
+}
+
+/// A shelter that can take drop-offs, with its free beds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropoffShelter {
+    pub shelter_id: String,
+    pub junction_id: String,
+    pub free_beds: u32,
+}
+
 /// Incident statuses (new pipeline) that count as "open" for deduplication.
 pub const OPEN_INCIDENT_STATUSES: &[&str] = &["REVIEW_REQUIRED", "TRIAGE_APPROVED", "ALLOCATING", "ASSIGNED"];
 

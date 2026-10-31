@@ -106,6 +106,23 @@ impl OpsRepository {
         }
         Ok(vehicles)
     }
+
+    /// `AVAILABLE` vehicles based at a shelter in `dataset` (the matcher's
+    /// candidates; other datasets' fleets are never offered).
+    pub async fn list_available_vehicles_in(&self, dataset: &str) -> Result<Vec<Vehicle>, OpsRepoError> {
+        let q = query(&format!(
+            "MATCH (v:Vehicle {{status: 'AVAILABLE'}})-[:BASED_AT]->(:Shelter {{dataset: $dataset}}) \
+             WHERE v.junction_id IS NOT NULL \
+             RETURN {VEHICLE_FIELDS} ORDER BY v.vehicle_id"
+        ))
+        .param("dataset", dataset);
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let mut vehicles = Vec::new();
+        while let Some(row) = result.next().await? {
+            vehicles.push(vehicle_from_row(&row)?);
+        }
+        Ok(vehicles)
+    }
 }
 
 fn vehicle_from_row(row: &Row) -> Result<Vehicle, OpsRepoError> {
