@@ -143,6 +143,19 @@ impl GraphSnapshot {
         Ok(SnapshotRoute { route, overlay_version: overlay.version })
     }
 
+    /// Travel cost from `query.origin` to every reachable junction, with the
+    /// hazards in force at `now` masked, and the overlay version used.
+    pub fn costs_from(
+        &self,
+        query: &RoutingQuery,
+        now: DateTime<Utc>,
+    ) -> Result<(HashMap<String, f64>, u64), PathfinderError> {
+        let overlay = self.overlay.load();
+        let mut query = query.clone();
+        query.blocked_segments.extend(overlay.blocked_at(now));
+        Ok((self.baseline.costs_from(&query)?, overlay.version))
+    }
+
     /// Reload the overlay if its version changed. Returns whether it was
     /// swapped. Never goes back to an older version.
     pub async fn refresh(&self) -> Result<bool, OpsRepoError> {

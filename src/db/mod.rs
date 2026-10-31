@@ -16,5 +16,7 @@ pub use state_manager::{
 };
 pub use seed::seed_database;
 pub use baseline_loader::{BaselineLoader, BaselineLoadReport};
-pub use ops_repo::{FleetCapacities, HoldOutcome, OpsRepoError, OpsRepository, OverlayRead, BASELINE_FLEET};
+pub use ops_repo::{
+    AssignmentCommit, AssignmentOutcome, ESCALATION_NO_ELIGIBLE_VEHICLE, ESCALATION_OVERDUE,
+    ESCALATION_ROUTE_VERIFICATION_FAILED, FleetCapacities, HoldOutcome, OpsRepoError, OpsRepository, OverlayRead, BASELINE_FLEET};
 pub use ops_schema::{ensure_ops_schema, OPS_CONSTRAINTS};

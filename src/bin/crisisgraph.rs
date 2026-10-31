@@ -15,6 +15,8 @@
 //!   minimal deduplication rules and creates or attaches incidents
 //! - `graph`: loads the baseline road graph once and keeps the hazard overlay
 //!   current (`HAZARDS_CHANGED` + periodic refresh); `/readyz` waits for it
+//! - `matcher`: leader-elected batch allocation (priority queue, cost table on
+//!   its own graph snapshot, Hungarian per tier, hold → verify → commit)
 //!
 //! Other roles are added in later milestones. The legacy `server` binary is
 //! unaffected.
@@ -32,6 +34,7 @@ use crisis_graph::config::Config;
 use crisis_graph::db::{ensure_ops_schema, Neo4jClient, OpsRepository, RedisClient, StateManager};
 use crisis_graph::graph::GraphSnapshot;
 use crisis_graph::ingestion::TriageExtractor;
+use crisis_graph::matcher::Matcher;
 use crisis_graph::pipeline::PipelineStages;
 use crisis_graph::triage::{StageOneEngine, TriageWorker};
 use crisis_graph::relay::OutboxRelay;
@@ -118,7 +121,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let repo_neo4j = neo4j.clone();
 
     let snapshot_gate = ReadyGate::new("graph_snapshot");
-    let gates = if role == Role::Graph { vec![snapshot_gate.clone()] } else { Vec::new() };
+    let gates = if matches!(role, Role::Graph | Role::Matcher) { vec![snapshot_gate.clone()] } else { Vec::new() };
     let mut routes = ops_routes(OpsState {
         role,
         neo4j,
@@ -175,21 +178,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let redis = redis.clone();
             let params = config.params.clone();
             let shutdown = shutdown.clone();
+            let gate = snapshot_gate.clone();
             Some(tokio::spawn(async move {
-                // Retry until the baseline loads; readiness stays false meanwhile.
-                let snapshot = loop {
-                    match GraphSnapshot::load(repo.clone(), &state, &params.graph_dataset).await {
-                        Ok(snapshot) => break Arc::new(snapshot),
-                        Err(error) => {
-                            warn!(%error, dataset = %params.graph_dataset, "Graph snapshot load failed; retrying");
-                            tokio::select! {
-                                _ = tokio::time::sleep(Duration::from_secs(5)) => {}
-                                _ = shutdown.wait() => return,
-                            }
-                        }
-                    }
+                let Some(snapshot) = load_snapshot(repo, &state, &params.graph_dataset, &shutdown).await else {
+                    return;
                 };
-                snapshot_gate.set_ready();
+                gate.set_ready();
                 snapshot
                     .run_refresher(
                         redis,
@@ -198,6 +192,29 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         shutdown,
                     )
                     .await;
+            }))
+        }
+        Role::Matcher => {
+            let repo = repo.clone();
+            let neo4j = repo_neo4j.clone();
+            let redis = redis.clone();
+            let params = config.params.clone();
+            let shutdown = shutdown.clone();
+            let gate = snapshot_gate.clone();
+            Some(tokio::spawn(async move {
+                let state = StateManager::new(neo4j.clone());
+                let Some(snapshot) = load_snapshot(repo.clone(), &state, &params.graph_dataset, &shutdown).await else {
+                    return;
+                };
+                gate.set_ready();
+                let refresher = tokio::spawn(snapshot.clone().run_refresher(
+                    redis.clone(),
+                    params.events_stream.clone(),
+                    Duration::from_secs(params.overlay_refresh_secs),
+                    shutdown.clone(),
+                ));
+                Matcher::new(repo, redis, StateManager::new(neo4j), snapshot, params).run(shutdown).await;
+                let _ = refresher.await;
             }))
         }
         _ => None,
@@ -249,4 +266,26 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         ),
     }
     Ok(())
+}
+
+/// Load the graph snapshot, retrying every 5 s until it loads (readiness
+/// stays false meanwhile). `None` if shutdown came first.
+async fn load_snapshot(
+    repo: OpsRepository,
+    state: &StateManager,
+    dataset: &str,
+    shutdown: &Shutdown,
+) -> Option<Arc<GraphSnapshot>> {
+    loop {
+        match GraphSnapshot::load(repo.clone(), state, dataset).await {
+            Ok(snapshot) => return Some(Arc::new(snapshot)),
+            Err(error) => {
+                warn!(%error, dataset, "Graph snapshot load failed; retrying");
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                    _ = shutdown.wait() => return None,
+                }
+            }
+        }
+    }
 }

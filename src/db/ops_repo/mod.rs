@@ -2,6 +2,7 @@
 //! must react to records its `:AuditEvent` and `:OutboxEvent` in the same
 //! Cypher statement as the change itself, so they commit atomically.
 
+mod allocation;
 mod beds;
 mod hazards;
 mod incidents;
@@ -11,6 +12,10 @@ mod reservations;
 mod tasks;
 mod vehicles;
 
+pub use allocation::{
+    AssignmentCommit, AssignmentOutcome, ESCALATION_NO_ELIGIBLE_VEHICLE, ESCALATION_OVERDUE,
+    ESCALATION_ROUTE_VERIFICATION_FAILED,
+};
 pub use hazards::OverlayRead;
 pub use reservations::HoldOutcome;
 pub use vehicles::{FleetCapacities, BASELINE_FLEET};

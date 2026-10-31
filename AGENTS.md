@@ -192,9 +192,16 @@ curl localhost:3100/api/v1/reports/<report_id>
 cargo test --test ops_model_tests
 cargo test --test intake_relay_tests
 cargo test --test triage_worker_tests
+cargo test --test graph_hazard_tests
+cargo test --test matcher_tests
+
+# Batch-quality bench (read-only; real graph and fleet)
+cargo run --release --bin bench_matcher -- --sizes 10,25,40,60 --seeds 20 --seed 2026
 ```
 
 Triage workers (`--role triage`) consume `sos:extract` (consumer group `triage-workers`), save the extraction on the report before deduplicating (so a redelivery never calls the model twice), then in one transaction either attach a same-device follow-up (D-2) or create an `:OpsIncident` (`TRIAGE_APPROVED` + queued `ROAD_PICKUP` task, or `REVIEW_REQUIRED`). Nearby open incidents are flagged `POSSIBLE_DUPLICATE` (D-3), never merged. When extraction fails or the inference circuit breaker is open, the report still becomes a `REVIEW_REQUIRED` incident for manual triage.
+
+Since M5 the matcher role (`src/matcher/`) assigns vehicles: one leader per dataset (lease `matcher:{dataset}` + fencing token) runs a cycle every 2 s, or 250 ms after an event that changes tasks, vehicles or hazards. It takes the first tasks from the priority queue `alloc:queue:{dataset}` (tier + aging, rebuilt from Neo4j), builds a travel-time cost table on its own graph snapshot (one search per depot and asset type, in parallel), and assigns per strict tier with the Hungarian algorithm. Each pair runs T2: hold → route → live `verify_path_segments` → fenced commit with drop-off beds (nearest shelter with enough free beds; none → still dispatched with `DROPOFF_UNRESOLVED`). A failed check releases the hold, refreshes the overlay and retries; three failures, a headcount no vehicle can carry, or a wait past the tier threshold raise `TASK_ESCALATED` once. A hold left uncommitted by a crashed or fenced matcher is resumed with the same reservation. Run two matcher processes (`--port 9102`, `--port 9112`) for failover.
 
 Since M4 hazards are `:Hazard` records, never properties on road segments: every change is transaction T7 (record + `overlay_version` + 1 + audit + `HAZARDS_CHANGED`), allowed for `HAZARD_VERIFIER` / `EOC_ADMIN` through `POST /api/v1/hazards` and `/api/v1/hazards/clear` on the api role, authenticated with operator tokens (`OPERATOR_TOKENS`, SHA-256 hashes; none configured means 401). The graph role loads the baseline graph once (`src/graph/`, `GraphSnapshot`), swaps the hazard overlay atomically on `HAZARDS_CHANGED` (plus a periodic refresh), and `/readyz` waits for the snapshot. Routes carry the `overlay_version` they used; verification stays live. Run `cargo run --bin migrate_ops` once to move any old road-property hazards into records.
 
