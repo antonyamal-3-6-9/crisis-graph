@@ -204,12 +204,13 @@ pub struct DropoffShelter {
 /// Incident statuses (new pipeline) that count as "open" for deduplication.
 pub const OPEN_INCIDENT_STATUSES: &[&str] = &["REVIEW_REQUIRED", "TRIAGE_APPROVED", "ALLOCATING", "ASSIGNED"];
 
-/// What the console shows for an incident (M7): its review state, or else
-/// the state of its tasks. Merge (`MERGED`) arrives with M6.
+/// What the console shows for an incident (M7): its review or merge
+/// state, or else the state of its tasks.
 pub fn display_status(incident_status: &str, task_statuses: &[String]) -> &'static str {
     match incident_status {
         "REVIEW_REQUIRED" => return "REVIEW_REQUIRED",
         "REJECTED" => return "REJECTED",
+        "MERGED" => return "MERGED",
         _ => {}
     }
     let live: Vec<&str> = task_statuses.iter().map(String::as_str).filter(|s| *s != "CANCELLED").collect();
@@ -221,6 +222,37 @@ pub fn display_status(incident_status: &str, task_statuses: &[String]) -> &'stat
         "COMPLETED"
     } else {
         "QUEUED"
+    }
+}
+
+/// The active task of an incident in a merge: assigned beats queued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveTask {
+    None,
+    Queued,
+    Assigned,
+}
+
+/// What a merge does with the two incidents' tasks (owner decision
+/// 2026-11-01): exactly one vehicle stays sent, and one already sent is
+/// never recalled in favour of one that is only queued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergePlan {
+    /// The survivor keeps its task; the absorbed incident's tasks are
+    /// cancelled and its vehicle (if any) released.
+    KeepSurvivor,
+    /// The absorbed incident's task moves to the survivor; the survivor's
+    /// queued task (if any) is cancelled.
+    MoveAbsorbed,
+}
+
+pub fn merge_plan(survivor: ActiveTask, absorbed: ActiveTask) -> MergePlan {
+    match (survivor, absorbed) {
+        (ActiveTask::Assigned, _) => MergePlan::KeepSurvivor,
+        (_, ActiveTask::Assigned) => MergePlan::MoveAbsorbed,
+        (ActiveTask::Queued, _) => MergePlan::KeepSurvivor,
+        (ActiveTask::None, ActiveTask::Queued) => MergePlan::MoveAbsorbed,
+        (ActiveTask::None, ActiveTask::None) => MergePlan::KeepSurvivor,
     }
 }
 
@@ -343,5 +375,18 @@ mod tests {
         assert_eq!(display_status("COMPLETED", &tasks(&["COMPLETED", "CANCELLED"])), "COMPLETED");
         assert_eq!(display_status("TRIAGE_APPROVED", &tasks(&["COMPLETED", "QUEUED"])), "QUEUED");
         assert_eq!(display_status("TRIAGE_APPROVED", &tasks(&["CANCELLED"])), "NEEDS_TASK");
+    }
+
+    #[test]
+    fn merge_keeps_exactly_one_vehicle() {
+        use ActiveTask::*;
+        assert_eq!(merge_plan(Assigned, Assigned), MergePlan::KeepSurvivor, "absorbed vehicle released");
+        assert_eq!(merge_plan(Assigned, Queued), MergePlan::KeepSurvivor);
+        assert_eq!(merge_plan(Queued, Assigned), MergePlan::MoveAbsorbed, "a sent vehicle is never recalled");
+        assert_eq!(merge_plan(None, Assigned), MergePlan::MoveAbsorbed);
+        assert_eq!(merge_plan(Queued, Queued), MergePlan::KeepSurvivor);
+        assert_eq!(merge_plan(None, Queued), MergePlan::MoveAbsorbed);
+        assert_eq!(merge_plan(None, None), MergePlan::KeepSurvivor);
+        assert_eq!(display_status("MERGED", &["ASSIGNED".to_string()]), "MERGED");
     }
 }

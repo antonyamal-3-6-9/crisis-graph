@@ -21,10 +21,12 @@ pub enum Role {
     Matcher,
     Graph,
     Relay,
+    /// Simulated responders for demos: completes assigned tasks (M6a).
+    Driver,
 }
 
 impl Role {
-    pub const ALL: [Role; 5] = [Role::Api, Role::Triage, Role::Matcher, Role::Graph, Role::Relay];
+    pub const ALL: [Role; 6] = [Role::Api, Role::Triage, Role::Matcher, Role::Graph, Role::Relay, Role::Driver];
 
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -33,6 +35,7 @@ impl Role {
             Role::Matcher => "matcher",
             Role::Graph => "graph",
             Role::Relay => "relay",
+            Role::Driver => "driver",
         }
     }
 
@@ -49,6 +52,7 @@ impl Role {
             Role::Matcher => 9102,
             Role::Graph => 9103,
             Role::Relay => 9104,
+            Role::Driver => 9105,
         }
     }
 }

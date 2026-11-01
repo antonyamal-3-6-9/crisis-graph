@@ -19,6 +19,8 @@
 //!   current (`HAZARDS_CHANGED` + periodic refresh); `/readyz` waits for it
 //! - `matcher`: leader-elected batch allocation (priority queue, cost table on
 //!   its own graph snapshot, Hungarian per tier, hold → verify → commit)
+//! - `driver`: simulated responders for demos only; completes assigned tasks
+//!   after a simulated mission time through the task-complete command
 //!
 //! Other roles are added in later milestones. The legacy `server` binary is
 //! unaffected.
@@ -40,6 +42,7 @@ use crisis_graph::db::{ensure_ops_schema, Neo4jClient, OpsRepository, RedisClien
 use crisis_graph::graph::GraphSnapshot;
 use crisis_graph::ingestion::TriageExtractor;
 use crisis_graph::matcher::Matcher;
+use crisis_graph::sim::SimDriver;
 use crisis_graph::pipeline::PipelineStages;
 use crisis_graph::triage::{StageOneEngine, TriageWorker};
 use crisis_graph::relay::OutboxRelay;
@@ -255,6 +258,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .await;
                 let _ = refresher.await;
             }))
+        }
+        Role::Driver => {
+            let driver = SimDriver::new(repo.clone(), redis.clone(), config.params.clone());
+            Some(tokio::spawn(driver.run(shutdown.clone())))
         }
         Role::Api => {
             let hub = event_hub.expect("api role builds the event hub");

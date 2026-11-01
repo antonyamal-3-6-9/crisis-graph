@@ -339,3 +339,10 @@ textarea:focus, input:focus, select:focus { border-color: #629a81; box-shadow: 0
 
 @media (max-width: 1180px) { .alerts-grid { grid-template-columns: 1fr; } .steps { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 600px) { .steps { grid-template-columns: 1fr 1fr; } .task-row dl { grid-template-columns: 1fr 1fr; } }
+
+/* M6a: merge, split, vehicle service */
+.report-actions { margin-top: 10px; display: flex; justify-content: flex-end; }
+.inline-confirm td { background: #fffaf0; }
+.inline-form { display: flex; gap: 8px; align-items: center; }
+.inline-form span { font-size: 11px; color: var(--ink); white-space: nowrap; }
+.inline-form input { flex: 1; padding: 7px 9px; }
