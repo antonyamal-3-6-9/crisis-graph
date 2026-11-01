@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="/style.css?v=7">
+  <link rel="stylesheet" href="/style.css?v=8">
 </head>
 <body>
   <div class="shell">
@@ -27,6 +27,7 @@
         <div class="connection"><i id="feed-dot"></i><span id="feed-label">Connecting live feed</span></div>
         <div class="connection"><i id="relay-dot"></i><span id="relay-label">Relay: checking</span></div>
         <div class="connection"><i id="matcher-dot"></i><span id="matcher-label">Matcher: checking</span></div>
+        <div class="connection"><i id="driver-dot"></i><span id="driver-label">Simulated driver: checking</span></div>
         <form class="token-box" id="token-form" autocomplete="off">
           <label for="token-input">Operator token</label>
           <div class="token-row">
@@ -110,6 +111,7 @@
                 <option value="ASSIGNED">Assigned</option>
                 <option value="COMPLETED">Completed</option>
                 <option value="REJECTED">Rejected</option>
+                <option value="MERGED">Merged</option>
                 <option value="DUPLICATES">Possible duplicates</option>
               </select>
             </div>
@@ -138,8 +140,8 @@
           <div class="table-wrap"><table><thead><tr><th>Tier</th><th>Task</th><th>Asset</th><th>People</th><th>Waiting</th><th>Checks failed</th><th>Escalations</th></tr></thead><tbody id="queue-table"><tr><td colspan="7" class="muted-cell">Loading queue…</td></tr></tbody></table></div>
         </article>
         <article class="panel table-panel">
-          <div class="panel-head"><div><p class="kicker">Individual vehicle records</p><h2>Fleet</h2></div><select id="vehicle-filter" class="compact-select"><option value="ALL">All</option><option value="AVAILABLE">Available</option><option value="ASSIGNED">Assigned</option><option value="HELD">Held</option></select></div>
-          <div class="table-wrap"><table><thead><tr><th>Vehicle</th><th>Type</th><th>Status</th><th>Seats</th><th>Home</th><th>Position</th><th>Task</th></tr></thead><tbody id="vehicle-table"><tr><td colspan="7" class="muted-cell">Loading fleet…</td></tr></tbody></table></div>
+          <div class="panel-head"><div><p class="kicker">Individual vehicle records</p><h2>Fleet</h2></div><select id="vehicle-filter" class="compact-select"><option value="ALL">All</option><option value="AVAILABLE">Available</option><option value="ASSIGNED">Assigned</option><option value="HELD">Held</option><option value="OUT_OF_SERVICE">Out of service</option></select></div>
+          <div class="table-wrap"><table><thead><tr><th>Vehicle</th><th>Type</th><th>Status</th><th>Seats</th><th>Home</th><th>Position</th><th>Task</th><th>Service</th></tr></thead><tbody id="vehicle-table"><tr><td colspan="8" class="muted-cell">Loading fleet…</td></tr></tbody></table></div>
         </article>
       </section>
 
@@ -156,6 +158,6 @@
   </div>
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script src="/app.js?v=7"></script>
+  <script src="/app.js?v=8"></script>
 </body>
 </html>

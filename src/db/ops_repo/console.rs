@@ -19,6 +19,7 @@ const INCIDENT_FIELDS: &str = "{ incident_id: i.incident_id, status: i.status, v
      caller_location: CASE WHEN i.caller_location IS NULL THEN null \
          ELSE {lat: i.caller_location.latitude, lon: i.caller_location.longitude} END, \
      report_count: coalesce(i.report_count, 1), callback_required: coalesce(i.callback_required, false), \
+     merged_into: i.merged_into, split_from: i.split_from, \
      created_at: toString(i.created_at), updated_at: toString(i.updated_at) }";
 
 const TASK_FIELDS: &str = "{ task_id: t.task_id, kind: t.kind, status: t.status, version: t.version, \
@@ -38,7 +39,7 @@ impl OpsRepository {
              OPTIONAL MATCH (i)-[:HAS_TASK]->(t:Task) \
              WITH i, collect(t.status) AS task_statuses, \
                   [x IN collect(t) WHERE x.status = 'ASSIGNED' | x.assigned_vehicle_id] AS vehicles \
-             OPTIONAL MATCH (i)-[d:POSSIBLE_DUPLICATE]-(:OpsIncident) \
+             OPTIONAL MATCH (i)-[d:POSSIBLE_DUPLICATE]-(:OpsIncident) WHERE d.resolution IS NULL \
              WITH i, task_statuses, vehicles, count(d) AS duplicates \
              RETURN {INCIDENT_FIELDS} AS incident, task_statuses, vehicles, duplicates \
              ORDER BY i.created_at DESC"
@@ -95,7 +96,8 @@ impl OpsRepository {
              CALL {{ WITH i \
                  OPTIONAL MATCH (i)-[d:POSSIBLE_DUPLICATE]-(o:OpsIncident) \
                  RETURN collect(CASE WHEN o IS NULL THEN null ELSE {{ incident_id: o.incident_id, \
-                     status: o.status, distance_m: d.distance_m }} END) AS duplicates }} \
+                     status: o.status, version: o.version, distance_m: d.distance_m, \
+                     resolution: d.resolution }} END) AS duplicates }} \
              CALL {{ WITH i \
                  OPTIONAL MATCH (i)-[:HAS_TASK]->(tt:Task) \
                  WITH i, collect(tt.task_id) AS task_ids \

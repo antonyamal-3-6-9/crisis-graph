@@ -25,7 +25,8 @@ use super::auth::{authorize, OperatorTokens};
 use super::{error_status, validate, ReportRequest};
 use crate::config::PipelineParams;
 use crate::db::{
-    CompleteTaskCommand, OpsRepoError, OpsRepository, RedisClient, ReviewCommand, ReviewVerdict, StateManager,
+    CompleteTaskCommand, MergeCommand, OpsRepoError, OpsRepository, RedisClient, ReviewCommand, ReviewVerdict,
+    SplitCommand, StateManager, VehicleStatusCommand,
 };
 use crate::matcher::{effective_tier, lease_name, Tier};
 use crate::models::{AssetType, Permission, Urgency};
@@ -58,7 +59,10 @@ pub fn console_routes(state: ConsoleApiState) -> Router {
         .route("/api/v1/incidents/{incident_id}", get(get_incident))
         .route("/api/v1/incidents/{incident_id}/route", get(get_route))
         .route("/api/v1/incidents/{incident_id}/review", post(review))
+        .route("/api/v1/incidents/{incident_id}/merge", post(merge))
+        .route("/api/v1/incidents/{incident_id}/split", post(split))
         .route("/api/v1/tasks/{task_id}/complete", post(complete))
+        .route("/api/v1/vehicles/{vehicle_id}/status", post(vehicle_status))
         .route("/api/v1/vehicles", get(vehicles))
         .route("/api/v1/shelters", get(shelters))
         .route("/api/v1/queue", get(queue))
@@ -271,6 +275,7 @@ async fn system(State(state): State<ConsoleApiState>) -> Response {
     let relay_ttl = lease(RELAY_LEASE.to_string()).await;
     let matcher_ttl = lease(lease_name(&dataset)).await;
     let queue_len: i64 = conn.zcard(format!("alloc:queue:{dataset}")).await.unwrap_or(0);
+    let driver: bool = conn.exists(crate::sim::heartbeat_key(&dataset)).await.unwrap_or(false);
     let overlay_version = state.repo.overlay_version(&dataset).await.ok();
     Json(json!({
         "dataset": dataset,
@@ -278,6 +283,7 @@ async fn system(State(state): State<ConsoleApiState>) -> Response {
         "matcher_leader": matcher_ttl > 0,
         "overlay_version": overlay_version,
         "queue_length": queue_len,
+        "simulated_driver": driver,
         "checked_at": Utc::now().to_rfc3339(),
     }))
     .into_response()
@@ -395,6 +401,115 @@ async fn complete(
             .complete_task(&actor, &CompleteTaskCommand { request_id, task_id, expected_version, note })
             .await,
     )
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct MergeRequest {
+    pub request_id: Option<String>,
+    pub absorbed_id: Option<String>,
+    pub survivor_version: Option<u64>,
+    pub absorbed_version: Option<u64>,
+    pub reason: Option<String>,
+}
+
+/// Merge `absorbed_id` into the incident in the path (T4).
+async fn merge(
+    State(state): State<ConsoleApiState>,
+    Path(survivor_id): Path<String>,
+    headers: HeaderMap,
+    body: Option<Json<MergeRequest>>,
+) -> Response {
+    let actor = match authorize(&state.operators, &headers, &[Permission::ReviewIncident]) {
+        Ok(actor) => actor,
+        Err(refused) => return refused.into_response(),
+    };
+    let Some(Json(request)) = body else {
+        return unprocessable("request body must be JSON");
+    };
+    let (Some(request_id), Some(absorbed_id), Some(survivor_version), Some(absorbed_version)) =
+        (request.request_id, request.absorbed_id, request.survivor_version, request.absorbed_version)
+    else {
+        return unprocessable("request_id, absorbed_id, survivor_version and absorbed_version are required");
+    };
+    let command = MergeCommand {
+        request_id,
+        survivor_id,
+        survivor_version,
+        absorbed_id,
+        absorbed_version,
+        reason: request.reason.unwrap_or_default(),
+    };
+    command_response(state.repo.merge_incidents(&actor, &command).await)
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct SplitRequest {
+    pub request_id: Option<String>,
+    pub report_id: Option<String>,
+    pub expected_version: Option<u64>,
+    pub reason: Option<String>,
+}
+
+/// Split a follow-up or merged report off the incident in the path.
+async fn split(
+    State(state): State<ConsoleApiState>,
+    Path(incident_id): Path<String>,
+    headers: HeaderMap,
+    body: Option<Json<SplitRequest>>,
+) -> Response {
+    let actor = match authorize(&state.operators, &headers, &[Permission::ReviewIncident]) {
+        Ok(actor) => actor,
+        Err(refused) => return refused.into_response(),
+    };
+    let Some(Json(request)) = body else {
+        return unprocessable("request body must be JSON");
+    };
+    let (Some(request_id), Some(report_id), Some(expected_version)) = (request.request_id, request.report_id, request.expected_version)
+    else {
+        return unprocessable("request_id, report_id and expected_version are required");
+    };
+    let command = SplitCommand { request_id, incident_id, expected_version, report_id, reason: request.reason.unwrap_or_default() };
+    command_response(state.repo.split_report(&actor, &command).await)
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct VehicleStatusRequest {
+    pub request_id: Option<String>,
+    /// `OUT_OF_SERVICE` or `AVAILABLE`.
+    pub status: Option<String>,
+    pub expected_version: Option<u64>,
+    pub reason: Option<String>,
+}
+
+async fn vehicle_status(
+    State(state): State<ConsoleApiState>,
+    Path(vehicle_id): Path<String>,
+    headers: HeaderMap,
+    body: Option<Json<VehicleStatusRequest>>,
+) -> Response {
+    let actor = match authorize(&state.operators, &headers, &[Permission::AssignDispatch, Permission::UpdateResponderStatus]) {
+        Ok(actor) => actor,
+        Err(refused) => return refused.into_response(),
+    };
+    let Some(Json(request)) = body else {
+        return unprocessable("request body must be JSON");
+    };
+    let out_of_service = match request.status.as_deref().map(str::to_ascii_uppercase).as_deref() {
+        Some("OUT_OF_SERVICE") => true,
+        Some("AVAILABLE") => false,
+        _ => return unprocessable("status must be OUT_OF_SERVICE or AVAILABLE"),
+    };
+    let (Some(request_id), Some(expected_version)) = (request.request_id, request.expected_version) else {
+        return unprocessable("request_id and expected_version are required");
+    };
+    let command = VehicleStatusCommand {
+        request_id,
+        vehicle_id,
+        expected_version,
+        out_of_service,
+        reason: request.reason.unwrap_or_default(),
+    };
+    command_response(state.repo.set_vehicle_status(&actor, &command).await)
 }
 
 fn command_response(result: Result<crate::db::CommandOutcome, OpsRepoError>) -> Response {

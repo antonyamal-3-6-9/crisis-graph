@@ -96,6 +96,12 @@ pub struct PipelineParams {
     /// Longest `POST /api/v1/dispatch` waits for an outcome (M7).
     pub dispatch_wait_secs: u64,
 
+    // Simulated driver (demo only, M6a)
+    /// Mission time multiplier: 0.1 runs missions ten times faster.
+    pub sim_time_scale: f64,
+    /// Simulated time on scene before leaving with the victims.
+    pub sim_on_scene_secs: u64,
+
     // Streams
     /// Stream the outbox relay feeds with new reports (extraction queue).
     pub extract_stream: String,
@@ -139,6 +145,8 @@ impl Default for PipelineParams {
             graph_dataset: "aluva-periyar-pilot".to_string(),
             role_drain_timeout_secs: 10,
             dispatch_wait_secs: 180,
+            sim_time_scale: 0.1,
+            sim_on_scene_secs: 300,
             extract_stream: "sos:extract".to_string(),
             events_stream: "ops:events".to_string(),
         }
@@ -220,6 +228,8 @@ impl PipelineParams {
             graph_dataset: stream_or("GRAPH_DATASET", &d.graph_dataset),
             role_drain_timeout_secs: u64_or("ROLE_DRAIN_TIMEOUT_SECS", d.role_drain_timeout_secs),
             dispatch_wait_secs: u64_or("DISPATCH_WAIT_SECS", d.dispatch_wait_secs),
+            sim_time_scale: f64_or("SIM_TIME_SCALE", d.sim_time_scale, 10.0),
+            sim_on_scene_secs: u64_or("SIM_ON_SCENE_SECS", d.sim_on_scene_secs),
             extract_stream: stream_or("EXTRACT_STREAM", &d.extract_stream),
             events_stream: stream_or("EVENTS_STREAM", &d.events_stream),
         };
@@ -358,6 +368,10 @@ mod tests {
             ("MATCHER_MAX_VERIFY_FAILURES", "5"),
         ]));
         assert_eq!(params.matcher_batch_cap, 50);
+        let sim = PipelineParams::from_lookup(lookup(&[("SIM_TIME_SCALE", "0.05"), ("SIM_ON_SCENE_SECS", "60")]));
+        assert_eq!((sim.sim_time_scale, sim.sim_on_scene_secs), (0.05, 60));
+        let bad = PipelineParams::from_lookup(lookup(&[("SIM_TIME_SCALE", "0")]));
+        assert_eq!(bad.sim_time_scale, PipelineParams::default().sim_time_scale);
         assert_eq!(params.matcher_max_verify_failures, 5);
         assert_eq!(params.extract_stream, "test:extract");
         assert_eq!(params.matcher_cycle_ms, 1500);

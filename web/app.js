@@ -43,6 +43,10 @@ const EVENT_EFFECTS = {
   BEDS_RESERVED: ["shelters"],
   DROPOFF_UNRESOLVED: ["alerts", "selected"],
   HAZARDS_CHANGED: ["hazards", "system"],
+  INCIDENT_MERGED: ["incidents", "selected", "queue", "tracked"],
+  INCIDENT_SPLIT: ["incidents", "selected"],
+  TASK_CANCELLED: ["incidents", "queue", "selected", "vehicles", "routes"],
+  VEHICLE_STATUS_CHANGED: ["vehicles", "queue", "selected"],
 };
 
 const scenarios = {
@@ -204,9 +208,11 @@ async function loadSystem() {
     state.system = data;
     dot("relay", data.relay_leader, data.relay_leader ? "Relay: leader running" : "Relay: no leader (events delayed)");
     dot("matcher", data.matcher_leader, data.matcher_leader ? `Matcher: leader · queue ${data.queue_length}` : "Matcher: no leader (no assignment)");
+    dot("driver", data.simulated_driver ? null : false, data.simulated_driver ? "Simulated driver: completing missions (demo)" : "Simulated driver: off");
   } catch (error) {
     dot("relay", false, "Relay: API unreachable");
     dot("matcher", false, "Matcher: API unreachable");
+    dot("driver", false, "Simulated driver: unknown");
   }
 }
 
@@ -419,7 +425,7 @@ function renderRoutesOnOverview() {
 // ------------------------------------------------------------ overview
 
 function renderKpis() {
-  const open = state.incidents.filter((i) => !["COMPLETED", "REJECTED"].includes(i.display_status));
+  const open = state.incidents.filter((i) => !["COMPLETED", "REJECTED", "MERGED"].includes(i.display_status));
   setText("kpi-open", number(open.length));
   setText("kpi-review", number(state.incidents.filter((i) => i.display_status === "REVIEW_REQUIRED").length));
   if (state.queue) {
@@ -487,7 +493,7 @@ async function submitReport(event) {
 }
 
 async function pollTracked() {
-  const active = state.tracked.filter((t) => !["COMPLETED", "REJECTED"].includes(t.incident?.display_status));
+  const active = state.tracked.filter((t) => !["COMPLETED", "REJECTED", "MERGED"].includes(t.incident?.display_status));
   if (!active.length) { renderTracked(); return; }
   await Promise.allSettled(active.map(async (t) => {
     const { data } = await api(`/reports/${encodeURIComponent(t.report_id)}`);
@@ -593,6 +599,8 @@ function renderDetail(i) {
   const reviewing = i.display_status === "REVIEW_REQUIRED";
   target.innerHTML = `
     <div class="detail-title"><div><code>${escapeHtml(i.incident_id)}</code><p>Created ${formatTime(i.created_at)} · updated ${relativeTime(i.updated_at)} · version ${i.version}</p></div><div class="badge-row">${urgencyBadge(i.urgency)}${statusBadge(i.display_status)}</div></div>
+    ${i.merged_into ? `<div class="notice" style="margin-top:14px"><b>Merged</b><span>This incident was merged into <a class="link" href="#" data-open-incident="${escapeHtml(i.merged_into)}">${escapeHtml(shortId(i.merged_into))}</a>. Its reports and any vehicle moved there.</span></div>` : ""}
+    ${i.split_from ? `<div class="notice warning" style="margin-top:14px"><b>Split</b><span>Split off <a class="link" href="#" data-open-incident="${escapeHtml(i.split_from)}">${escapeHtml(shortId(i.split_from))}</a> by a dispatcher.</span></div>` : ""}
     ${(i.urgency_flags || []).length ? `<div class="badge-row" style="margin-top:10px">${i.urgency_flags.map((f) => `<span class="flag">${escapeHtml(f)}</span>`).join("")}</div>` : ""}
     <div class="facts" style="margin-top:14px">
       ${fact("People", i.headcount)}${fact("Required asset", i.required_asset)}${fact("Suggested asset (F-2)", i.suggested_asset)}
@@ -603,11 +611,13 @@ function renderDetail(i) {
     ${reviewing ? reviewFormHtml(i) : ""}
     <h3 class="section-title">Tasks</h3>${(i.tasks || []).length ? i.tasks.map(taskHtml).join("") : '<p class="supporting small">No task yet.</p>'}
     <div class="route-record" id="detail-route" hidden><div class="route-record-head"><h3>Route (verified live before commit)</h3><span class="tag" id="detail-route-meta"></span></div><div class="incident-route-map" id="detail-route-map"></div></div>
-    ${(i.duplicates || []).length ? `<h3 class="section-title">Possible duplicates (rule D-3)</h3>${i.duplicates.map((d) => `<div class="compact-row"><b><a class="link" href="#" data-open-incident="${escapeHtml(d.incident_id)}">${escapeHtml(shortId(d.incident_id))}</a> · ${escapeHtml(d.status)}</b><small>${d.distance_m != null ? Math.round(d.distance_m) + " m apart" : "distance unknown"}</small></div>`).join("")}<div class="duplicate-note">Flagged for a person, never merged automatically. One-tap merge/split arrives in M6.</div>` : ""}
-    <h3 class="section-title">Reports (${reports.length})</h3>${reports.map(reportHtml).join("")}
+    ${(i.duplicates || []).length ? `<h3 class="section-title">Possible duplicates (rule D-3)</h3>${i.duplicates.map((d) => duplicateHtml(i, d)).join("")}<div class="duplicate-note">Flagged for a person, never merged automatically. Merging keeps exactly one vehicle sent: the survivor's own, or the absorbed one's if only it has one.</div><div id="merge-form-slot"></div>` : ""}
+    <h3 class="section-title">Reports (${reports.length})</h3>${reports.map((r) => reportHtml(r, i)).join("")}
     ${(i.reservations || []).length ? `<h3 class="section-title">Reservations</h3><div class="table-wrap"><table><thead><tr><th>Kind</th><th>Resource</th><th>Status</th><th>Created</th><th>Released</th></tr></thead><tbody>${i.reservations.map((r) => `<tr><td>${escapeHtml(r.kind)}</td><td><code>${escapeHtml(r.vehicle_id || `${r.shelter_id} · ${r.beds} beds`)}</code></td><td>${escapeHtml(r.status)}</td><td>${formatTime(r.created_at)}</td><td>${r.released_at ? formatTime(r.released_at) + " · " + escapeHtml(r.release_reason || "") : "—"}</td></tr>`).join("")}</tbody></table></div>` : ""}
     <div class="timeline"><h3>Audit trail</h3>${(i.audit || []).slice().sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at))).map((a) => `<div class="timeline-row"><b>${escapeHtml(a.action)}</b><p>${escapeHtml(a.reason || "")}${a.from_state ? ` (${escapeHtml(a.from_state)} → ${escapeHtml(a.to_state || "")})` : ""}</p><small>${escapeHtml(a.actor_id || "")} · ${formatTime(a.occurred_at)}</small></div>`).join("") || '<p class="supporting small">No audit events.</p>'}</div>`;
   if (reviewing) bindReviewForm(i);
+  target.querySelectorAll("[data-merge]").forEach((button) => button.addEventListener("click", () => openMergeForm(i, button.dataset.merge)));
+  target.querySelectorAll("[data-split]").forEach((button) => button.addEventListener("click", () => openSplitForm(i, button.dataset.split)));
   target.querySelectorAll("[data-complete-task]").forEach((button) => button.addEventListener("click", () => completeTask(button.dataset.completeTask, Number(button.dataset.version))));
   if ((i.tasks || []).some((t) => t.status === "ASSIGNED" || t.status === "COMPLETED")) showDetailRoute(i.incident_id);
 }
@@ -622,7 +632,7 @@ function taskHtml(t) {
     </div>${action}</div>`;
 }
 
-function reportHtml(r) {
+function reportHtml(r, incident) {
   let extraction = null;
   try { extraction = r.extraction_json ? JSON.parse(r.extraction_json) : null; } catch (_) { /* unreadable */ }
   const triage = extraction?.triage;
@@ -632,11 +642,13 @@ function reportHtml(r) {
     ["On scene", profile.reporter_on_scene], ["Relation", profile.reporter_relation], ["Water", [profile.water_level, profile.water_trend].filter(Boolean).join(" · ")],
     ["Medical", (profile.medical_conditions || []).join(", ")], ["Vulnerable", (profile.vulnerable_groups || []).join(", ")], ["Model urgency (raise only)", profile.suggested_urgency],
   ] : [];
+  const splittable = incident && ["FOLLOW_UP", "MERGED"].includes(r.kind) && !["MERGED", "REJECTED"].includes(incident.display_status);
+  const split = splittable ? `<div class="report-actions"><button class="button ghost compact" data-split="${escapeHtml(r.report_id)}" ${token() ? "" : 'disabled title="Paste an operator token to act"'}>Split into new incident</button></div><div id="split-slot-${escapeHtml(r.report_id)}"></div>` : "";
   return `<div class="report-card"><div class="report-meta"><span>${escapeHtml(r.kind || "")}</span><span>${escapeHtml(r.rule || "")}</span><span>${escapeHtml(r.device_id || "")}</span><span>${escapeHtml(r.channel || "")}</span><span>${formatTime(r.received_at)}</span><span>extraction ${escapeHtml(r.extraction_status || "")}</span></div>
     <div class="raw-message">${escapeHtml(r.raw_text)}</div>
     ${extraction?.error ? `<div class="notice warning"><b>Extraction failed</b><span>${escapeHtml(extraction.error)}</span></div>` : ""}
     ${facts.length ? `<div class="facts">${facts.map(([k, v]) => fact(k, v === true ? "yes" : v === false ? "no" : v)).join("")}</div>` : ""}
-    ${triage?.inference ? `<p class="route-proof">Model ${escapeHtml(triage.inference.model)}${triage.inference.adapter_id ? " + " + escapeHtml(triage.inference.adapter_id) : ""} · ${escapeHtml(triage.inference.schema_version)} · ${number(triage.inference.latency_ms)} ms</p>` : ""}</div>`;
+    ${triage?.inference ? `<p class="route-proof">Model ${escapeHtml(triage.inference.model)}${triage.inference.adapter_id ? " + " + escapeHtml(triage.inference.adapter_id) : ""} · ${escapeHtml(triage.inference.schema_version)} · ${number(triage.inference.latency_ms)} ms</p>` : ""}${split}</div>`;
 }
 
 async function showDetailRoute(incidentId) {
@@ -708,6 +720,92 @@ function bindReviewForm(i) {
   };
   document.getElementById("rv-approve").addEventListener("click", () => send("APPROVE"));
   document.getElementById("rv-reject").addEventListener("click", () => send("REJECT"));
+}
+
+function duplicateHtml(incident, d) {
+  const open = !d.resolution && !["MERGED", "REJECTED", "COMPLETED"].includes(d.status) && !["MERGED", "REJECTED", "COMPLETED"].includes(incident.display_status);
+  const action = d.resolution ? `<span class="flag">${escapeHtml(d.resolution)}</span>`
+    : open ? `<button class="button ghost compact" data-merge="${escapeHtml(d.incident_id)}" ${token() ? "" : 'disabled title="Paste an operator token to act"'}>Merge…</button>` : "";
+  return `<div class="compact-row hazard-row"><div><b><a class="link" href="#" data-open-incident="${escapeHtml(d.incident_id)}">${escapeHtml(shortId(d.incident_id))}</a> · ${escapeHtml(d.status)}</b><small>${d.distance_m != null ? Math.round(d.distance_m) + " m apart" : "distance unknown"}</small></div>${action}</div>`;
+}
+
+/** Rank for choosing the survivor: an incident further along keeps its vehicle. */
+function progressRank(status) {
+  return { ASSIGNED: 3, QUEUED: 2, NEEDS_TASK: 1, TRIAGE_APPROVED: 1, REVIEW_REQUIRED: 0 }[status] ?? 1;
+}
+
+async function openMergeForm(incident, otherId) {
+  const slot = document.getElementById("merge-form-slot");
+  slot.innerHTML = '<div class="skeleton">Loading the other incident…</div>';
+  let other;
+  try { other = (await api(`/incidents/${encodeURIComponent(otherId)}`)).data; } catch (error) { slot.innerHTML = ""; showToast("Cannot merge", error.message, true); return; }
+  const pair = [incident, other].sort((a, b) => progressRank(b.display_status) - progressRank(a.display_status));
+  let survivor = pair[0], absorbed = pair[1];
+  const effect = () => {
+    const s = survivor.display_status, a = absorbed.display_status;
+    if (s === "ASSIGNED" && a === "ASSIGNED") return `${shortId(absorbed.incident_id)}'s vehicle is released; ${shortId(survivor.incident_id)} keeps its own.`;
+    if (a === "ASSIGNED") return `${shortId(absorbed.incident_id)}'s vehicle moves to ${shortId(survivor.incident_id)} (already on its way, never recalled).`;
+    if (s === "QUEUED") return `${shortId(absorbed.incident_id)}'s queued task is cancelled; one task remains.`;
+    if (a === "QUEUED") return `${shortId(absorbed.incident_id)}'s queued task moves to ${shortId(survivor.incident_id)}.`;
+    return "No vehicle or task is affected.";
+  };
+  const render = () => {
+    slot.innerHTML = `<form class="review-form" id="merge-form"><h3>Merge duplicates (D-4)</h3>
+      <div class="facts">${fact("Keeps (survivor)", `${shortId(survivor.incident_id)} · ${survivor.display_status}`)}${fact("Absorbed", `${shortId(absorbed.incident_id)} · ${absorbed.display_status}`)}${fact("People after merge", Math.max(survivor.headcount || 0, absorbed.headcount || 0) || "?")}</div>
+      <p class="supporting small"><b>Vehicle:</b> ${escapeHtml(effect())} Urgency only goes up; all reports are kept.</p>
+      <label for="mg-reason">Reason (audited)</label><textarea id="mg-reason" rows="2" maxlength="500" placeholder="e.g. Same family: called back, both numbers belong to the Varghese household"></textarea>
+      <div class="review-actions"><button type="button" class="button primary" id="mg-go">Merge</button><button type="button" class="button ghost" id="mg-swap">Swap survivor</button><button type="button" class="button ghost" id="mg-cancel">Cancel</button></div></form>`;
+    document.getElementById("mg-swap").addEventListener("click", () => { [survivor, absorbed] = [absorbed, survivor]; render(); });
+    document.getElementById("mg-cancel").addEventListener("click", () => { slot.innerHTML = ""; });
+    document.getElementById("mg-go").addEventListener("click", async () => {
+      const reason = document.getElementById("mg-reason").value.trim();
+      if (!reason) { showToast("Reason required", "Every merge records why.", true); return; }
+      try {
+        const { data } = await api(`/incidents/${encodeURIComponent(survivor.incident_id)}/merge`, { method: "POST", auth: true,
+          body: { request_id: uuid(), absorbed_id: absorbed.incident_id, survivor_version: survivor.version, absorbed_version: absorbed.version, reason } });
+        showToast("Merged", `${shortId(absorbed.incident_id)} → ${shortId(survivor.incident_id)} · ${data.released_vehicles.length ? "vehicle released" : data.moved_tasks.length ? "task moved" : "tasks combined"}`);
+        state.detail = null;
+        selectIncident(survivor.incident_id);
+        queueRefresh("incidents", "vehicles", "queue");
+      } catch (error) {
+        showToast("Not merged", commandError(error), true);
+      }
+    });
+  };
+  render();
+}
+
+function openSplitForm(incident, reportId) {
+  const slot = document.getElementById(`split-slot-${reportId}`);
+  slot.innerHTML = `<form class="review-form"><h3>Split this report off</h3><p class="supporting small">It becomes its own incident for review (nothing is dispatched until a dispatcher approves). This incident keeps its other reports; its headcount is recalculated, its urgency is not lowered.</p>
+    <label>Reason (audited)</label><textarea class="sp-reason" rows="2" maxlength="500" placeholder="e.g. Shared phone at the relief camp: a different family"></textarea>
+    <div class="review-actions"><button type="button" class="button warning sp-go">Split</button><button type="button" class="button ghost sp-cancel">Cancel</button></div></form>`;
+  slot.querySelector(".sp-cancel").addEventListener("click", () => { slot.innerHTML = ""; });
+  slot.querySelector(".sp-go").addEventListener("click", async () => {
+    const reason = slot.querySelector(".sp-reason").value.trim();
+    if (!reason) { showToast("Reason required", "Every split records why.", true); return; }
+    try {
+      const { data } = await api(`/incidents/${encodeURIComponent(incident.incident_id)}/split`, { method: "POST", auth: true,
+        body: { request_id: uuid(), report_id: reportId, expected_version: incident.version, reason } });
+      showToast("Split", `New review incident ${shortId(data.new_incident_id)}.`);
+      state.detail = null;
+      selectIncident(data.new_incident_id);
+      queueRefresh("incidents");
+    } catch (error) {
+      showToast("Not split", commandError(error), true);
+    }
+  });
+}
+
+async function setVehicleStatus(vehicleId, status, version, reason) {
+  try {
+    const { data } = await api(`/vehicles/${encodeURIComponent(vehicleId)}/status`, { method: "POST", auth: true,
+      body: { request_id: uuid(), status, expected_version: version, reason } });
+    showToast(status === "AVAILABLE" ? "Back in service" : "Out of service", data.requeued_task ? `Its task ${shortId(data.requeued_task)} is back in the queue; another vehicle will be sent.` : vehicleId);
+  } catch (error) {
+    showToast("Status not changed", commandError(error), true);
+  }
+  queueRefresh("vehicles", "queue", "incidents");
 }
 
 async function completeTask(taskId, version) {
@@ -824,8 +922,30 @@ function renderVehicleTable() {
   const target = document.getElementById("vehicle-table");
   const filter = document.getElementById("vehicle-filter").value;
   const rows = state.vehicles.filter((v) => filter === "ALL" || v.status === filter);
-  target.innerHTML = rows.length ? rows.map((v) => `<tr><td><code>${escapeHtml(v.vehicle_id)}</code></td><td>${escapeHtml(v.asset_type)}</td><td>${vehicleStatus(v.status)}</td><td>${v.capacity_persons}</td><td><code>${escapeHtml(v.home_shelter_id || "")}</code></td><td>${v.position ? `${v.position.lat.toFixed(4)}, ${v.position.lon.toFixed(4)}` : "—"}</td><td>${v.incident_id ? `<a class="link" href="#" data-open-incident="${escapeHtml(v.incident_id)}">${escapeHtml(shortId(v.task_id))}</a>` : "—"}</td></tr>`).join("")
-    : '<tr><td colspan="7" class="muted-cell">No vehicles match.</td></tr>';
+  const disabled = token() ? "" : 'disabled title="Paste an operator token to act"';
+  target.innerHTML = rows.length ? rows.map((v) => {
+    const action = v.status === "OUT_OF_SERVICE"
+      ? `<button class="button ghost compact" data-vehicle-status="AVAILABLE" data-vehicle="${escapeHtml(v.vehicle_id)}" data-version="${v.version}" ${disabled}>Return to service</button>`
+      : `<button class="button ghost compact" data-vehicle-status="OUT_OF_SERVICE" data-vehicle="${escapeHtml(v.vehicle_id)}" data-version="${v.version}" data-busy="${v.task_id ? "1" : ""}" ${disabled}>Out of service</button>`;
+    return `<tr><td><code>${escapeHtml(v.vehicle_id)}</code></td><td>${escapeHtml(v.asset_type)}</td><td>${vehicleStatus(v.status)}</td><td>${v.capacity_persons}</td><td><code>${escapeHtml(v.home_shelter_id || "")}</code></td><td>${v.position ? `${v.position.lat.toFixed(4)}, ${v.position.lon.toFixed(4)}` : "—"}</td><td>${v.incident_id ? `<a class="link" href="#" data-open-incident="${escapeHtml(v.incident_id)}">${escapeHtml(shortId(v.task_id))}</a>` : "—"}</td><td>${action}</td></tr>`;
+  }).join("") : '<tr><td colspan="8" class="muted-cell">No vehicles match.</td></tr>';
+  target.querySelectorAll("[data-vehicle-status]").forEach((button) => button.addEventListener("click", () => {
+    const row = button.closest("tr");
+    const next = row.nextElementSibling;
+    if (next?.classList.contains("inline-confirm")) { next.remove(); return; }
+    const busy = button.dataset.busy === "1";
+    const status = button.dataset.vehicleStatus;
+    const confirmRow = document.createElement("tr");
+    confirmRow.className = "inline-confirm";
+    confirmRow.innerHTML = `<td colspan="8"><div class="inline-form"><span>${status === "AVAILABLE" ? "Return to service" : busy ? "<b>Breakdown:</b> its task goes back to the queue and another vehicle is sent." : "Take out of service"}</span><input placeholder="Reason (audited)" maxlength="500"><button class="button ${busy ? "danger" : "primary"} compact">Confirm</button></div></td>`;
+    row.after(confirmRow);
+    const input = confirmRow.querySelector("input");
+    input.focus();
+    confirmRow.querySelector("button").addEventListener("click", () => {
+      if (!input.value.trim()) { showToast("Reason required", "Write why the status changes.", true); return; }
+      setVehicleStatus(button.dataset.vehicle, status, Number(button.dataset.version), input.value.trim());
+    });
+  }));
 }
 
 // ------------------------------------------------------------ alerts
@@ -873,11 +993,11 @@ function badge(id, count) {
 // ------------------------------------------------------------ helpers
 
 function statusBadge(status) {
-  const cls = { REVIEW_REQUIRED: "review", QUEUED: "queued", NEEDS_TASK: "needs_task", ASSIGNED: "assigned", COMPLETED: "completed", REJECTED: "rejected" }[status] || "progress";
+  const cls = { REVIEW_REQUIRED: "review", QUEUED: "queued", NEEDS_TASK: "needs_task", ASSIGNED: "assigned", COMPLETED: "completed", REJECTED: "rejected", MERGED: "rejected", CANCELLED: "rejected" }[status] || "progress";
   return `<span class="status ${cls}">${escapeHtml(String(status || "").replace(/_/g, " "))}</span>`;
 }
 function urgencyBadge(urgency) { return urgency ? `<span class="urgency ${escapeHtml(urgency)}">${escapeHtml(urgency)}</span>` : ""; }
-function vehicleStatus(status) { const cls = { AVAILABLE: "completed", ASSIGNED: "assigned", HELD: "queued" }[status] || "rejected"; return `<span class="status ${cls}">${escapeHtml(status)}</span>`; }
+function vehicleStatus(status) { const cls = { AVAILABLE: "completed", ASSIGNED: "assigned", HELD: "queued", OUT_OF_SERVICE: "review" }[status] || "rejected"; return `<span class="status ${cls}">${escapeHtml(status.replace(/_/g, " "))}</span>`; }
 function shortAsset(type) { return { AMBULANCE: "amb", EVAC_TRUCK: "truck", RESCUE_BOAT: "boat" }[type] || type; }
 function shortId(id) { const s = String(id || ""); const tail = s.split("/").pop(); return tail.length > 13 ? tail.slice(0, 8) + "…" : tail; }
 function fact(label, content) { return `<div class="fact"><span>${escapeHtml(label)}</span><b>${value(content)}</b></div>`; }

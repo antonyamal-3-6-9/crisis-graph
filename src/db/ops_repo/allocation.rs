@@ -89,6 +89,30 @@ impl OpsRepository {
         Ok(capacities)
     }
 
+    /// `ASSIGNED` tasks in `dataset`: `(task_id, version, assigned_at,
+    /// eta_s)`. Read by the simulated driver.
+    pub async fn assigned_tasks(&self, dataset: &str) -> Result<Vec<(String, u64, DateTime<Utc>, f64)>, OpsRepoError> {
+        let q = query(
+            "MATCH (i:OpsIncident)-[:HAS_TASK]->(t:Task {status: 'ASSIGNED'}), \
+                   (i)-[:LOCATED_AT]->(:Junction {dataset: $dataset}) \
+             WHERE t.assigned_at IS NOT NULL \
+             RETURN t.task_id AS task_id, t.version AS version, toString(t.assigned_at) AS assigned_at, \
+                    coalesce(t.eta_s, 0.0) AS eta_s ORDER BY t.assigned_at",
+        )
+        .param("dataset", dataset);
+        let mut result = self.neo4j.graph.execute(q).await?;
+        let mut tasks = Vec::new();
+        while let Some(row) = result.next().await? {
+            tasks.push((
+                row.get("task_id")?,
+                row.get::<i64>("version")? as u64,
+                parse_time(&row.get::<String>("assigned_at")?)?,
+                row.get::<f64>("eta_s")?,
+            ));
+        }
+        Ok(tasks)
+    }
+
     /// Shelters in `dataset` with at least one free bed.
     pub async fn dropoff_shelters(&self, dataset: &str) -> Result<Vec<DropoffShelter>, OpsRepoError> {
         let q = query(

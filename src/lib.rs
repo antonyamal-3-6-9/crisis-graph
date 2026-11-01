@@ -11,6 +11,7 @@ pub mod api;
 pub mod triage;
 pub mod graph;
 pub mod matcher;
+pub mod sim;
 
 pub use config::{Config, PipelineParams};
 pub use models::*;

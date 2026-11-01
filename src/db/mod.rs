@@ -17,7 +17,8 @@ pub use state_manager::{
 pub use seed::seed_database;
 pub use baseline_loader::{BaselineLoader, BaselineLoadReport};
 pub use ops_repo::{
-    validate_review, CommandOutcome, CompleteTaskCommand, ReviewCommand, ReviewVerdict, MAX_HEADCOUNT,
+    validate_review, CommandOutcome, CompleteTaskCommand, MergeCommand, ReviewCommand, ReviewVerdict, SplitCommand,
+    VehicleStatusCommand, MAX_HEADCOUNT,
     AssignmentCommit, AssignmentOutcome, ESCALATION_NO_ELIGIBLE_VEHICLE, ESCALATION_OVERDUE,
     ESCALATION_ROUTE_VERIFICATION_FAILED, FleetCapacities, HoldOutcome, OpsRepoError, OpsRepository, OverlayRead, BASELINE_FLEET};
 pub use ops_schema::{ensure_ops_schema, OPS_CONSTRAINTS};
