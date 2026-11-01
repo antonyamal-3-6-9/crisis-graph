@@ -204,6 +204,26 @@ pub struct DropoffShelter {
 /// Incident statuses (new pipeline) that count as "open" for deduplication.
 pub const OPEN_INCIDENT_STATUSES: &[&str] = &["REVIEW_REQUIRED", "TRIAGE_APPROVED", "ALLOCATING", "ASSIGNED"];
 
+/// What the console shows for an incident (M7): its review state, or else
+/// the state of its tasks. Merge (`MERGED`) arrives with M6.
+pub fn display_status(incident_status: &str, task_statuses: &[String]) -> &'static str {
+    match incident_status {
+        "REVIEW_REQUIRED" => return "REVIEW_REQUIRED",
+        "REJECTED" => return "REJECTED",
+        _ => {}
+    }
+    let live: Vec<&str> = task_statuses.iter().map(String::as_str).filter(|s| *s != "CANCELLED").collect();
+    if live.is_empty() {
+        "NEEDS_TASK"
+    } else if live.contains(&"ASSIGNED") {
+        "ASSIGNED"
+    } else if live.iter().all(|s| *s == "COMPLETED") {
+        "COMPLETED"
+    } else {
+        "QUEUED"
+    }
+}
+
 /// What the triage worker saves on a report after extraction (checkpoint).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtractionRecord {
@@ -310,5 +330,18 @@ mod tests {
             active_task_key("T-1", ResourceKind::Vehicle),
             active_task_key("T-1", ResourceKind::Beds)
         );
+    }
+
+    #[test]
+    fn display_status_follows_review_then_tasks() {
+        let tasks = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(display_status("REVIEW_REQUIRED", &tasks(&["QUEUED"])), "REVIEW_REQUIRED");
+        assert_eq!(display_status("REJECTED", &[]), "REJECTED");
+        assert_eq!(display_status("TRIAGE_APPROVED", &[]), "NEEDS_TASK");
+        assert_eq!(display_status("TRIAGE_APPROVED", &tasks(&["QUEUED"])), "QUEUED");
+        assert_eq!(display_status("ASSIGNED", &tasks(&["COMPLETED", "ASSIGNED"])), "ASSIGNED");
+        assert_eq!(display_status("COMPLETED", &tasks(&["COMPLETED", "CANCELLED"])), "COMPLETED");
+        assert_eq!(display_status("TRIAGE_APPROVED", &tasks(&["COMPLETED", "QUEUED"])), "QUEUED");
+        assert_eq!(display_status("TRIAGE_APPROVED", &tasks(&["CANCELLED"])), "NEEDS_TASK");
     }
 }

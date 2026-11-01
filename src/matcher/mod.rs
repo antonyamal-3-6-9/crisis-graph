@@ -90,6 +90,8 @@ impl CycleReport {
 pub struct Matcher {
     repo: OpsRepository,
     redis: RedisClient,
+    /// Connection for the blocking events read (see `RedisClient::dedicated`).
+    events: RedisClient,
     state: StateManager,
     snapshot: Arc<GraphSnapshot>,
     queue: AllocQueue,
@@ -107,7 +109,14 @@ impl Matcher {
     ) -> Self {
         let queue = AllocQueue::new(redis.clone(), snapshot.dataset(), params.aging_stable_to_urgent_secs);
         let lease_name = lease_name(snapshot.dataset());
-        Self { repo, redis, state, snapshot, queue, params, lease_name }
+        Self { repo, events: redis.clone(), redis, state, snapshot, queue, params, lease_name }
+    }
+
+    /// Read the events stream on its own connection, so the blocking read
+    /// never delays the queue and lease commands.
+    pub fn with_event_reader(mut self, events: RedisClient) -> Self {
+        self.events = events;
+        self
     }
 
     pub fn lease(&self) -> Lease {
@@ -416,7 +425,7 @@ impl Matcher {
             let wait = next_cycle.saturating_duration_since(Instant::now()).min(renew_every / 2);
             let block_ms = (wait.as_millis() as usize).max(1);
             let read = tokio::select! {
-                read = self.redis.read_after(&events_stream, &last_id, 100, block_ms) => read,
+                read = self.events.read_after(&events_stream, &last_id, 100, block_ms) => read,
                 _ = shutdown.wait() => break,
             };
             match read {

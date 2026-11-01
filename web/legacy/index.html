@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="CrisisGraph Aluva–Periyar emergency-routing demonstration console">
+  <title>CrisisGraph Operations Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="/style.css?v=2">
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <a class="brand" href="/"><span class="brand-mark"><i></i><i></i><i></i></span><span><b>CrisisGraph</b><small>Aluva EOC pilot</small></span></a>
+      <nav class="nav" aria-label="Primary navigation">
+        <a href="/" data-route="/"><span>01</span>Overview</a>
+        <a href="/dispatch" data-route="/dispatch"><span>02</span>Dispatch lab</a>
+        <a href="/incidents" data-route="/incidents"><span>03</span>Incidents</a>
+        <a href="/hazards" data-route="/hazards"><span>04</span>Hazards</a>
+        <a href="/resources" data-route="/resources"><span>05</span>Resources</a>
+      </nav>
+      <div class="rail-foot">
+        <div class="connection"><i id="stream-dot"></i><span id="stream-label">Connecting live feed</span></div>
+        <div class="connection"><i id="api-dot"></i><span id="api-label">Checking engine</span></div>
+        <p>AI extracts candidate facts.<br>Deterministic code routes and verifies.</p>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div><p class="eyebrow" id="page-eyebrow">Emergency operations</p><h1 id="page-title">Operational overview</h1></div>
+        <div class="top-actions"><span class="clock" id="clock">--:--:-- IST</span><a class="button primary compact" href="/dispatch">New SOS intake</a></div>
+      </header>
+
+      <section class="view" id="view-overview" data-view="/">
+        <div class="metric-grid">
+          <article class="metric"><span>Road graph</span><strong id="metric-junctions">—</strong><small>junctions</small></article>
+          <article class="metric"><span>Directed network</span><strong id="metric-segments">—</strong><small>segments</small></article>
+          <article class="metric warning"><span>Requires review</span><strong id="metric-review">—</strong><small>persisted incidents</small></article>
+          <article class="metric danger"><span>Active hazards</span><strong id="metric-hazards">—</strong><small>route-blocking overlays</small></article>
+          <article class="metric success"><span>Reserved assets</span><strong id="metric-reservations">—</strong><small>incident-owned</small></article>
+        </div>
+        <div class="overview-grid">
+          <article class="panel map-panel">
+            <div class="panel-head"><div><p class="kicker">Live operational picture</p><h2>Aluva–Periyar pilot</h2></div><div class="map-legend"><span class="green">Verified route</span><span class="red">Hazard</span><span class="blue">Relief hub</span></div></div>
+            <div class="map" id="overview-map"></div>
+          </article>
+          <div class="stack">
+            <article class="panel"><div class="panel-head"><div><p class="kicker">Control plane</p><h2>Recent incidents</h2></div><a href="/incidents">View all</a></div><div id="overview-incidents" class="incident-feed"><div class="skeleton">Loading persisted incidents…</div></div></article>
+            <article class="panel architecture-card"><p class="kicker">Safety boundary</p><h2>Candidate intelligence, deterministic action</h2><div class="pipeline-mini"><span>Language intake</span><b>→</b><span>Typed extraction</span><b>→</b><span>Graph solver</span><b>→</b><span>100% segment verification</span></div><p>The model never invents, calculates, or certifies a route. Any unresolved critical fact stops the pipeline.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-dispatch" data-view="/dispatch">
+        <div class="dispatch-grid">
+          <div class="stack">
+            <article class="panel intake-card">
+              <div class="panel-head"><div><p class="kicker">Multilingual triage</p><h2>Submit an SOS report</h2></div><span class="tag">Qwen3-4B + guard</span></div>
+              <form id="dispatch-form">
+                <label for="sos-text">Original report</label><textarea id="sos-text" rows="6" maxlength="4000" required placeholder="Describe the location, number of people, and explicitly requested vehicle…"></textarea>
+                <div class="form-row"><div><label for="channel-select">Source channel</label><select id="channel-select"><option value="web_demo_console">Web demonstration console</option><option value="field_radio_transcript">Field radio transcript</option><option value="call_centre_transcript">Call-centre transcript</option><option value="field_team_report">Field team report</option></select></div><div><label>Processing mode</label><div class="locked-field">Synchronous · persisted</div></div></div>
+                <div class="form-row" style="margin-top: 8px;">
+                  <div><label for="gps-lat">Latitude (optional telemetry)</label><input type="number" id="gps-lat" step="any" placeholder="e.g. 10.10816" /></div>
+                  <div><label for="gps-lon">Longitude (optional telemetry)</label><input type="number" id="gps-lon" step="any" placeholder="e.g. 76.35651" /></div>
+                </div>
+                <button class="button primary full" id="dispatch-btn" type="submit" style="margin-top: 12px;"><span>Run triage, allocation and routing</span></button>
+              </form>
+            </article>
+            <article class="panel"><div class="panel-head"><div><p class="kicker">Demonstration scripts</p><h2>Real-world scenarios</h2></div></div><div class="scenario-grid">
+              <button class="scenario" data-scenario="verified"><b>Verified ambulance route</b><span>Complete English report</span></button>
+              <button class="scenario" data-scenario="malayalam"><b>Malayalam boat rescue</b><span>Multilingual extraction</span></button>
+              <button class="scenario warning" data-scenario="ambiguous"><b>Ambiguous Manglish</b><span>Must stop for review</span></button>
+              <button class="scenario danger" data-scenario="truck"><b>Restricted heavy vehicle</b><span>Fail-closed route</span></button>
+            </div></article>
+          </div>
+          <div class="stack">
+            <article class="panel map-panel dispatch-map-panel"><div class="panel-head"><div><p class="kicker">Deterministic output</p><h2>Verified route</h2></div><span id="dispatch-map-state" class="tag muted">Awaiting report</span></div><div class="map" id="dispatch-map"></div></article>
+            <article class="panel result-panel" id="dispatch-result"><div class="empty-state"><div class="empty-icon">◎</div><h3>No incident processed</h3><p>Select a scenario or submit an SOS report. The result will show every automation boundary.</p></div></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-incidents" data-view="/incidents">
+        <div class="incident-layout">
+          <article class="panel incident-browser"><div class="panel-head"><div><p class="kicker">Persisted control plane</p><h2>Incident registry</h2></div><button class="icon-button" id="refresh-incidents" title="Refresh">↻</button></div><div class="filters"><input id="incident-search" type="search" placeholder="Search ID, message, location…"><select id="incident-filter"><option value="ALL">All states</option><option value="REVIEW_REQUIRED">Review required</option><option value="ROUTE_VERIFIED">Route verified</option><option value="RECEIVED">Received</option></select></div><div id="incident-list" class="incident-list"><div class="skeleton">Loading incidents…</div></div></article>
+          <article class="panel incident-detail" id="incident-detail"><div class="empty-state"><div class="empty-icon">⌁</div><h3>Select an incident</h3><p>Inspect its original message, immutable extraction revision, status, and audit timeline.</p></div></article>
+        </div>
+      </section>
+
+      <section class="view" id="view-hazards" data-view="/hazards">
+        <div class="hazard-layout">
+          <article class="panel map-panel"><div class="panel-head"><div><p class="kicker">Operational overlay</p><h2>Active route restrictions</h2></div><span class="tag danger" id="hazard-count">0 active</span></div><div class="map" id="hazard-map"></div></article>
+          <div class="stack"><article class="panel"><p class="kicker">Simulation controls</p><h2>Inject a known flood condition</h2><p class="supporting">Marks the configured UC College approach segment as flooded for four hours. Baseline OSM geography remains unchanged.</p><button class="button danger full" id="simulate-flood">Apply demonstration flood</button><button class="button ghost full" id="clear-hazards">Clear operational hazards</button></article><article class="panel"><div class="panel-head"><div><p class="kicker">Current evidence</p><h2>Hazard segments</h2></div></div><div id="hazard-list" class="compact-list"><div class="skeleton">Loading overlay…</div></div></article></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-resources" data-view="/resources">
+        <div id="resource-cards" class="resource-grid"><div class="skeleton">Loading relief hubs…</div></div>
+        <article class="panel table-panel" id="waiting-queue-panel" style="margin-bottom: 16px;">
+          <div class="panel-head">
+            <div>
+              <p class="kicker">Dynamic Logistics Queue</p>
+              <h2>FIFO Waiting Incidents (Depleted Fleet)</h2>
+            </div>
+            <span class="tag" id="queue-count-badge">0 in queue</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Queue Pos</th>
+                  <th>Incident ID</th>
+                  <th>Status</th>
+                  <th>Requested Asset</th>
+                  <th>Headcount</th>
+                  <th>Victim Location</th>
+                </tr>
+              </thead>
+              <tbody id="waiting-queue-table">
+                <tr><td colspan="6" class="muted-cell">No incidents currently waiting in queue.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel table-panel"><div class="panel-head"><div><p class="kicker">Reservation ledger</p><h2>Incident-owned allocations</h2></div><button class="button ghost compact" id="reset-resources">Reset demo resources</button></div><div class="table-wrap"><table><thead><tr><th>Incident</th><th>Relief hub</th><th>Asset</th><th>People</th><th>Status</th><th>Reserved</th><th>Disposition</th></tr></thead><tbody id="reservation-table"><tr><td colspan="7" class="muted-cell">Loading reservation history…</td></tr></tbody></table></div></article>
+      </section>
+    </main>
+  </div>
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="/app.js?v=5"></script>
+</body>
+</html>

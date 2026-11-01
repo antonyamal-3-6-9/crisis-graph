@@ -29,13 +29,22 @@ impl StreamMessage {
 #[derive(Clone)]
 pub struct RedisClient {
     pub manager: ConnectionManager,
+    client: redis::Client,
 }
 
 impl RedisClient {
     pub async fn connect(config: &Config) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let client = redis::Client::open(config.redis_url())?;
-        let manager = ConnectionManager::new(client).await?;
-        Ok(Self { manager })
+        let manager = ConnectionManager::new(client.clone()).await?;
+        Ok(Self { manager, client })
+    }
+
+    /// A client on its own connection. Blocking reads (`XREAD BLOCK`) must
+    /// use one: on the shared multiplexed connection they would hold up
+    /// every other command of the process until they return.
+    pub async fn dedicated(&self) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let manager = ConnectionManager::new(self.client.clone()).await?;
+        Ok(Self { manager, client: self.client.clone() })
     }
 
     /// Attempts to acquire a distributed lock on a resource (e.g. shelter/asset)
@@ -198,6 +207,44 @@ impl RedisClient {
                     .collect()
             })
             .unwrap_or_default())
+    }
+
+    /// Messages after `after_id` (exclusive), oldest first, without
+    /// blocking (XRANGE). Used to replay what a reconnecting reader missed.
+    pub async fn range_after(
+        &self,
+        stream_key: &str,
+        after_id: &str,
+        count: usize,
+    ) -> Result<Vec<StreamMessage>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let reply: redis::streams::StreamRangeReply = redis::cmd("XRANGE")
+            .arg(stream_key)
+            .arg(format!("({after_id}"))
+            .arg("+")
+            .arg("COUNT")
+            .arg(count)
+            .query_async(&mut conn)
+            .await?;
+        Ok(reply.ids.iter().map(StreamMessage::from_stream_id).collect())
+    }
+
+    /// The newest `count` messages, newest first (XREVRANGE).
+    pub async fn latest(
+        &self,
+        stream_key: &str,
+        count: usize,
+    ) -> Result<Vec<StreamMessage>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut conn = self.manager.clone();
+        let reply: redis::streams::StreamRangeReply = redis::cmd("XREVRANGE")
+            .arg(stream_key)
+            .arg("+")
+            .arg("-")
+            .arg("COUNT")
+            .arg(count)
+            .query_async(&mut conn)
+            .await?;
+        Ok(reply.ids.iter().map(StreamMessage::from_stream_id).collect())
     }
 
     /// ID of the newest message in a stream, or `0-0` if it is empty, so a

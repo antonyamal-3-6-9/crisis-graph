@@ -316,13 +316,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/api/v1/sos/simulate_spike", post(simulate_spike))
         // Read-only local demonstration console routes. These deliberately
         // share one dependency-free frontend application.
-        .route_service("/", ServeFile::new("web/index.html"))
-        .route_service("/dispatch", ServeFile::new("web/index.html"))
-        .route_service("/incidents", ServeFile::new("web/index.html"))
-        .route_service("/hazards", ServeFile::new("web/index.html"))
-        .route_service("/resources", ServeFile::new("web/index.html"))
-        // Serve Web Assets from `web/` folder
-        .fallback_service(ServeDir::new("web"))
+        .route_service("/", ServeFile::new("web/legacy/index.html"))
+        .route_service("/dispatch", ServeFile::new("web/legacy/index.html"))
+        .route_service("/incidents", ServeFile::new("web/legacy/index.html"))
+        .route_service("/hazards", ServeFile::new("web/legacy/index.html"))
+        .route_service("/resources", ServeFile::new("web/legacy/index.html"))
+        // Legacy console assets (`web/legacy/`; the new console is on the api role)
+        .fallback_service(ServeDir::new("web/legacy"))
         .layer(from_fn(http_request_logger))
         .layer(CorsLayer::permissive())
         .with_state(app_state);

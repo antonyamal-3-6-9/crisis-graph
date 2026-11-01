@@ -139,6 +139,8 @@ pub enum LocationSource {
     Described,
     /// Coordinates written in the message text.
     TextCoordinates,
+    /// Set by a dispatcher when approving a review incident (M7).
+    Dispatcher,
 }
 
 impl LocationSource {
@@ -147,6 +149,7 @@ impl LocationSource {
             Self::DeviceGps => "DEVICE_GPS",
             Self::Described => "DESCRIBED",
             Self::TextCoordinates => "TEXT_COORDINATES",
+            Self::Dispatcher => "DISPATCHER",
         }
     }
 }

@@ -8,8 +8,10 @@
 //! Every role starts the shared runtime (config, Neo4j/Redis, operational
 //! schema, `/healthz`, `/readyz`, `/metrics`, heartbeat, graceful shutdown).
 //! Role work so far:
-//! - `api`: intake API (`POST /api/v1/reports`, `GET /api/v1/reports/{id}`)
-//!   and the hazard command (`/api/v1/hazards`, operator tokens)
+//! - `api`: intake API (`POST /api/v1/reports`, `GET /api/v1/reports/{id}`),
+//!   the hazard command (`/api/v1/hazards`, operator tokens), the console API
+//!   (reads, review and task-complete commands, `/api/v1/dispatch`), live
+//!   events (`/api/v1/events`, SSE) and the operations console (`web/`)
 //! - `relay`: outbox relay (leader-elected) publishing to Redis Streams
 //! - `triage`: consumes `sos:extract`, extracts (llama.cpp/vLLM), applies the
 //!   minimal deduplication rules and creates or attaches incidents
@@ -29,7 +31,10 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
-use crisis_graph::api::{hazard_routes, intake_routes, ApiState, HazardApiState, OperatorTokens};
+use crisis_graph::api::{
+    console_routes, event_routes, hazard_routes, intake_routes, ApiState, ConsoleApiState, EventHub, HazardApiState,
+    OperatorTokens,
+};
 use crisis_graph::config::Config;
 use crisis_graph::db::{ensure_ops_schema, Neo4jClient, OpsRepository, RedisClient, StateManager};
 use crisis_graph::graph::GraphSnapshot;
@@ -129,6 +134,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         metrics,
         gates,
     });
+    let mut event_hub = None;
     if role == Role::Api {
         let (operators, problems) = OperatorTokens::from_env();
         for problem in &problems {
@@ -139,13 +145,25 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         } else {
             info!(operators = operators.len(), "Operator tokens loaded");
         }
+        let operators = Arc::new(operators);
+        let hub = EventHub::new(redis.clone(), config.params.events_stream.clone());
+        event_hub = Some(hub.clone());
         routes = routes
             .merge(intake_routes(ApiState { repo: repo.clone() }))
             .merge(hazard_routes(HazardApiState {
                 repo: repo.clone(),
-                operators: Arc::new(operators),
+                operators: operators.clone(),
                 default_dataset: config.params.graph_dataset.clone(),
-            }));
+            }))
+            .merge(console_routes(ConsoleApiState {
+                repo: repo.clone(),
+                state: StateManager::new(repo_neo4j.clone()),
+                redis: redis.clone(),
+                operators,
+                params: config.params.clone(),
+            }))
+            .merge(event_routes(hub))
+            .merge(console_files());
     }
     let app = instrument(routes);
 
@@ -184,9 +202,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     return;
                 };
                 gate.set_ready();
+                let reader = match redis.dedicated().await {
+                    Ok(reader) => reader,
+                    Err(error) => {
+                        warn!(%error, "No dedicated Redis connection for the refresher; sharing the main one");
+                        redis.clone()
+                    }
+                };
                 snapshot
                     .run_refresher(
-                        redis,
+                        reader,
                         params.events_stream.clone(),
                         Duration::from_secs(params.overlay_refresh_secs),
                         shutdown,
@@ -207,17 +232,35 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     return;
                 };
                 gate.set_ready();
+                let dedicated = || async {
+                    match redis.dedicated().await {
+                        Ok(reader) => reader,
+                        Err(error) => {
+                            warn!(%error, "No dedicated Redis connection; sharing the main one");
+                            redis.clone()
+                        }
+                    }
+                };
+                let refresher_reader = dedicated().await;
+                let matcher_reader = dedicated().await;
                 let refresher = tokio::spawn(snapshot.clone().run_refresher(
-                    redis.clone(),
+                    refresher_reader,
                     params.events_stream.clone(),
                     Duration::from_secs(params.overlay_refresh_secs),
                     shutdown.clone(),
                 ));
-                Matcher::new(repo, redis, StateManager::new(neo4j), snapshot, params).run(shutdown).await;
+                Matcher::new(repo, redis.clone(), StateManager::new(neo4j), snapshot, params)
+                    .with_event_reader(matcher_reader)
+                    .run(shutdown)
+                    .await;
                 let _ = refresher.await;
             }))
         }
-        _ => None,
+        Role::Api => {
+            let hub = event_hub.expect("api role builds the event hub");
+            let reader = redis.dedicated().await?;
+            Some(tokio::spawn(hub.run(reader, shutdown.clone())))
+        }
     };
     let listener = tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], args.port))).await?;
     info!(role = role.as_str(), addr = %listener.local_addr()?, "Ops endpoints listening");
@@ -288,4 +331,15 @@ async fn load_snapshot(
             }
         }
     }
+}
+
+/// The operations console (`web/`): each view's path serves the single-page
+/// app; everything else is a static file.
+fn console_files() -> axum::Router {
+    use tower_http::services::{ServeDir, ServeFile};
+    let mut router = axum::Router::new();
+    for path in ["/", "/intake", "/incidents", "/hazards", "/fleet", "/alerts"] {
+        router = router.route_service(path, ServeFile::new("web/index.html"));
+    }
+    router.fallback_service(ServeDir::new("web"))
 }
