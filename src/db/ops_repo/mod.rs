@@ -4,6 +4,8 @@
 
 mod allocation;
 mod beds;
+mod commands;
+mod console;
 mod hazards;
 mod incidents;
 mod outbox;
@@ -16,6 +18,7 @@ pub use allocation::{
     AssignmentCommit, AssignmentOutcome, ESCALATION_NO_ELIGIBLE_VEHICLE, ESCALATION_OVERDUE,
     ESCALATION_ROUTE_VERIFICATION_FAILED,
 };
+pub use commands::{validate_review, CommandOutcome, CompleteTaskCommand, ReviewCommand, ReviewVerdict, MAX_HEADCOUNT};
 pub use hazards::OverlayRead;
 pub use reservations::HoldOutcome;
 pub use vehicles::{FleetCapacities, BASELINE_FLEET};

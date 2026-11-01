@@ -21,7 +21,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::auth::OperatorTokens;
+use super::auth::{authorize, OperatorTokens, Refused};
 use super::error_status;
 use crate::db::{OpsRepoError, OpsRepository};
 use crate::models::{ActorContext, HazardCommand, HazardOutcome, HazardRecord, HazardSource, HazardStatus, Permission};
@@ -102,25 +102,9 @@ fn non_empty(value: Option<String>, name: &str) -> Result<String, String> {
         .ok_or_else(|| format!("{name} is required"))
 }
 
-/// Why a request was refused before reaching the command.
-struct Refused(StatusCode, &'static str);
-
-impl IntoResponse for Refused {
-    fn into_response(self) -> Response {
-        (self.0, Json(json!({ "error": self.1 }))).into_response()
-    }
-}
-
 /// The authenticated operator, or a 401/403 refusal.
 fn operator(state: &HazardApiState, headers: &HeaderMap, permission: Permission) -> Result<ActorContext, Refused> {
-    let actor = state
-        .operators
-        .authenticate(headers)
-        .ok_or(Refused(StatusCode::UNAUTHORIZED, "operator token required"))?;
-    if !actor.can(permission) {
-        return Err(Refused(StatusCode::FORBIDDEN, "role not allowed"));
-    }
-    Ok(actor)
+    authorize(&state.operators, headers, &[permission])
 }
 
 async fn apply(State(state): State<HazardApiState>, headers: HeaderMap, body: Option<Json<ApplyRequest>>) -> Response {

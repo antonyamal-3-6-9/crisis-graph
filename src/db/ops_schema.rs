@@ -24,6 +24,7 @@ pub const OPS_CONSTRAINTS: &[&str] = &[
     "ops_overlay_state_dataset_unique",
     "ops_lease_fence_name_unique",
     "ops_incident_id_unique",
+    "ops_command_request_id_unique",
 ];
 
 const STATEMENTS: &[&str] = &[
@@ -75,6 +76,9 @@ const STATEMENTS: &[&str] = &[
      FOR (h:Hazard) REQUIRE h.active_key IS UNIQUE",
     "CREATE INDEX ops_hazard_segment IF NOT EXISTS \
      FOR (h:Hazard) ON (h.dataset, h.segment_id)",
+    // Dispatcher commands (M7): a repeated request_id replays the outcome
+    "CREATE CONSTRAINT ops_command_request_id_unique IF NOT EXISTS \
+     FOR (c:Command) REQUIRE c.request_id IS UNIQUE",
     // Fencing tokens for leader-only writes (outbox relay, matcher)
     "CREATE CONSTRAINT ops_lease_fence_name_unique IF NOT EXISTS \
      FOR (f:LeaseFence) REQUIRE f.name IS UNIQUE",
@@ -94,6 +98,15 @@ const STATEMENTS: &[&str] = &[
      FOR (e:OutboxEvent) ON (e.published, e.created_at)",
     "CREATE INDEX ops_audit_aggregate IF NOT EXISTS \
      FOR (e:AuditEvent) ON (e.aggregate_id)",
+    // Console read model (M7)
+    "CREATE INDEX ops_reservation_incident IF NOT EXISTS \
+     FOR (r:Reservation) ON (r.incident_id)",
+    "CREATE INDEX ops_reservation_task IF NOT EXISTS \
+     FOR (r:Reservation) ON (r.task_id)",
+    "CREATE INDEX ops_incident_created IF NOT EXISTS \
+     FOR (i:OpsIncident) ON (i.created_at)",
+    "CREATE INDEX ops_outbox_type_created IF NOT EXISTS \
+     FOR (e:OutboxEvent) ON (e.type, e.created_at)",
 ];
 
 /// Create every operational constraint and index if missing.

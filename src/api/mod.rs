@@ -16,9 +16,13 @@ use serde_json::json;
 use tracing::warn;
 
 mod auth;
+mod console;
+mod events;
 mod hazards;
 
 pub use auth::{token_hash_hex, OperatorTokens};
+pub use console::{console_routes, ConsoleApiState};
+pub use events::{event_body, event_routes, EventHub};
 pub use hazards::{hazard_routes, validate_apply, HazardApiState};
 
 use crate::db::{OpsRepoError, OpsRepository};
@@ -181,7 +185,15 @@ async fn create_report(State(state): State<ApiState>, body: Option<Json<ReportRe
 
 async fn get_report(State(state): State<ApiState>, Path(report_id): Path<String>) -> Response {
     match state.repo.get_report(&report_id).await {
-        Ok(Some(report)) => (StatusCode::OK, Json(report_body(&report))).into_response(),
+        Ok(Some(report)) => {
+            let mut body = report_body(&report);
+            // Once triage has linked it: the incident and its display status.
+            if let Ok(Some((incident_id, status))) = state.repo.report_incident(&report_id).await {
+                body["incident_id"] = json!(incident_id);
+                body["incident_status"] = json!(status);
+            }
+            (StatusCode::OK, Json(body)).into_response()
+        }
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({ "error": "report not found" }))).into_response(),
         Err(error) => error_response(&error),
     }

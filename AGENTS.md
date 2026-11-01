@@ -68,6 +68,7 @@ crisis-graph/
 │   ├── boundaries/
 │   │   └── aluva-periyar-pilot.geojson
 │   └── raw/                          # ignored; downloaded/generated source datasets
+├── web/                              # operations console (new pipeline); web/legacy/ = old console for `server`
 ├── docs/
 │   ├── asynchronous-multimodal-pipelined-relay.md
 │   └── geospatial-data-engineering.md
@@ -89,7 +90,7 @@ crisis-graph/
 │   ├── ingestion/
 │   ├── models/
 │   ├── pipeline/
-│   ├── api/                           # intake API (/api/v1/reports), hazard command (/api/v1/hazards), operator tokens
+│   ├── api/                           # intake, hazard command, console API + commands, SSE events, operator tokens
 │   ├── graph/                         # shared graph snapshot (baseline once + hazard overlay)
 │   ├── matcher/                       # matcher role: priority queue, tiered Hungarian assignment, T2/T3
 │   ├── relay.rs                       # outbox relay (leader lease + fencing)
@@ -106,6 +107,7 @@ crisis-graph/
     ├── triage_worker_tests.rs         # checkpoint reuse, duplicates, D-2/D-3, breaker, dead letters
     ├── graph_hazard_tests.rs          # hazard records/T7, snapshot swap, hazard API and roles
     ├── matcher_tests.rs               # allocation: overbooking race, resume, fencing, failover, tiers
+    ├── console_api_tests.rs           # console API, review/complete commands, SSE replay, end-to-end dispatch
     ├── neo4j_baseline_tests.rs        # directed baseline loader and hazard verification
     ├── aluva_pipeline_tests.rs        # legacy end-to-end pipeline (needs llama.cpp on :8000)
     └── integration_tests.rs
@@ -113,7 +115,7 @@ crisis-graph/
 
 ## Legacy pipeline (`server` binary)
 
-The legacy all-in-one path (still used by the console until M7) passes a typed `CrisisState` (“clipboard”) through four stages:
+The legacy all-in-one path (its console is `web/legacy/` on :3000; the main console moved to the new pipeline in M7) passes a typed `CrisisState` (“clipboard”) through four stages:
 
 1. **Triage extraction** — parse raw SOS text into location, headcount, asset type, and hazards.
 2. **Allocation** — find and atomically reserve eligible shelter capacity and an asset, guarded by a Redis lock.
@@ -187,7 +189,7 @@ Configure `.env` from `.env.example` (`INFERENCE_BACKEND=llama-cpp`). CPU infere
 cargo run --bin migrate_ops
 
 # Run one role per process (endpoints: /healthz, /readyz, /metrics)
-cargo run --bin crisisgraph -- --role api        # :3100
+cargo run --bin crisisgraph -- --role api        # :3100 (also serves the operations console: http://localhost:3100)
 cargo run --bin crisisgraph -- --role triage     # :9101
 cargo run --bin crisisgraph -- --role matcher    # :9102
 cargo run --bin crisisgraph -- --role graph      # :9103
@@ -206,12 +208,15 @@ cargo test --test intake_relay_tests
 cargo test --test triage_worker_tests
 cargo test --test graph_hazard_tests
 cargo test --test matcher_tests
+cargo test --test console_api_tests
 
 # Batch-quality bench (read-only; real graph and fleet)
 cargo run --release --bin bench_matcher -- --sizes 10,25,40,60 --seeds 20 --seed 2026
 ```
 
 Triage workers (`--role triage`) consume `sos:extract` (consumer group `triage-workers`), save the extraction on the report before deduplicating (so a redelivery never calls the model twice), then in one transaction either attach a same-device follow-up (D-2) or create an `:OpsIncident` (`TRIAGE_APPROVED` + queued `ROAD_PICKUP` task, or `REVIEW_REQUIRED`). Nearby open incidents are flagged `POSSIBLE_DUPLICATE` (D-3), never merged. When extraction fails or the inference circuit breaker is open, the report still becomes a `REVIEW_REQUIRED` incident for manual triage.
+
+Since M7 the operations console runs on the new pipeline: the api role serves `web/` at `http://localhost:3100` (Overview, Intake, Incidents, Hazards, Fleet & beds, Alerts). Its API (`src/api/console.rs`) has open reads (`/api/v1/incidents`, `/incidents/{id}`, `/incidents/{id}/route`, `/vehicles`, `/shelters`, `/queue`, `/alerts`, `/hazards/active`, `/segments/near`, `/system`), two token-protected dispatcher commands pulled forward from M6 (`POST /api/v1/incidents/{id}/review`: approve with corrected facts and a location, creating the queued task, or reject; `POST /api/v1/tasks/{id}/complete`: T5, the vehicle becomes available at the drop-off), and `POST /api/v1/dispatch` (submit and wait up to `DISPATCH_WAIT_SECS`). Commands are version-checked, role-checked and replay-safe by `request_id` (`:Command` records). Live updates are server-sent events (`GET /api/v1/events`, `src/api/events.rs`) read from `ops:events` on a dedicated Redis connection, with `Last-Event-ID` replay; the console drops duplicates by `event_id` and ignores stale versions. Paste an operator token in the console's side rail to enable actions. The legacy console moved to `web/legacy/` and is still served by `server` on :3000. Merge/split of duplicates arrives in M6.
 
 Since M5 the matcher role (`src/matcher/`) assigns vehicles: one leader per dataset (lease `matcher:{dataset}` + fencing token) runs a cycle every 2 s, or 250 ms after an event that changes tasks, vehicles or hazards. It takes the first tasks from the priority queue `alloc:queue:{dataset}` (tier + aging, rebuilt from Neo4j), builds a travel-time cost table on its own graph snapshot (one search per depot and asset type, in parallel), and assigns per strict tier with the Hungarian algorithm. Each pair runs T2: hold → route → live `verify_path_segments` → fenced commit with drop-off beds (nearest shelter with enough free beds; none → still dispatched with `DROPOFF_UNRESOLVED`). A failed check releases the hold, refreshes the overlay and retries; three failures, a headcount no vehicle can carry, or a wait past the tier threshold raise `TASK_ESCALATED` once. A hold left uncommitted by a crashed or fenced matcher is resumed with the same reservation. Run two matcher processes (`--port 9102`, `--port 9112`) for failover.
 
@@ -326,6 +331,7 @@ cargo test --test intake_relay_tests
 cargo test --test triage_worker_tests
 cargo test --test graph_hazard_tests
 cargo test --test matcher_tests
+cargo test --test console_api_tests
 cargo test --test neo4j_baseline_tests
 cargo test --test aluva_pipeline_tests # legacy end to end; needs llama.cpp on :8000
 ```

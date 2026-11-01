@@ -93,6 +93,8 @@ pub struct PipelineParams {
 
     // Runtime
     pub role_drain_timeout_secs: u64,
+    /// Longest `POST /api/v1/dispatch` waits for an outcome (M7).
+    pub dispatch_wait_secs: u64,
 
     // Streams
     /// Stream the outbox relay feeds with new reports (extraction queue).
@@ -136,6 +138,7 @@ impl Default for PipelineParams {
             overlay_refresh_secs: 30,
             graph_dataset: "aluva-periyar-pilot".to_string(),
             role_drain_timeout_secs: 10,
+            dispatch_wait_secs: 180,
             extract_stream: "sos:extract".to_string(),
             events_stream: "ops:events".to_string(),
         }
@@ -216,6 +219,7 @@ impl PipelineParams {
             overlay_refresh_secs: u64_or("OVERLAY_REFRESH_SECS", d.overlay_refresh_secs),
             graph_dataset: stream_or("GRAPH_DATASET", &d.graph_dataset),
             role_drain_timeout_secs: u64_or("ROLE_DRAIN_TIMEOUT_SECS", d.role_drain_timeout_secs),
+            dispatch_wait_secs: u64_or("DISPATCH_WAIT_SECS", d.dispatch_wait_secs),
             extract_stream: stream_or("EXTRACT_STREAM", &d.extract_stream),
             events_stream: stream_or("EVENTS_STREAM", &d.events_stream),
         };

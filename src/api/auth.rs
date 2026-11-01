@@ -7,10 +7,15 @@
 //! With no valid entry configured nothing authenticates (fail closed).
 //! `SYSTEM_SERVICE` cannot be given to an operator.
 
-use axum::http::{header, HeaderMap};
+use axum::{
+    http::{header, HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use crate::models::{ActorContext, ActorRole};
+use crate::models::{ActorContext, ActorRole, Permission};
 
 #[derive(Clone, Default)]
 pub struct OperatorTokens {
@@ -103,6 +108,27 @@ fn parse_entry(entry: &str) -> Result<([u8; 32], ActorContext), String> {
         *byte = u8::from_str_radix(&hash[i * 2..i * 2 + 2], 16).map_err(|_| "hash is not hex".to_string())?;
     }
     Ok((bytes, ActorContext::new(*actor_id, parsed_roles)))
+}
+
+/// Why a request was refused before reaching the command.
+pub(super) struct Refused(pub StatusCode, pub &'static str);
+
+impl IntoResponse for Refused {
+    fn into_response(self) -> Response {
+        (self.0, Json(json!({ "error": self.1 }))).into_response()
+    }
+}
+
+/// The operator behind the bearer token, if they hold any of `any_of`;
+/// otherwise 401 (no or unknown token) or 403 (role not allowed).
+pub(super) fn authorize(tokens: &OperatorTokens, headers: &HeaderMap, any_of: &[Permission]) -> Result<ActorContext, Refused> {
+    let actor = tokens
+        .authenticate(headers)
+        .ok_or(Refused(StatusCode::UNAUTHORIZED, "operator token required"))?;
+    if !any_of.iter().any(|p| actor.can(*p)) {
+        return Err(Refused(StatusCode::FORBIDDEN, "role not allowed"));
+    }
+    Ok(actor)
 }
 
 #[cfg(test)]
