@@ -21,3 +21,10 @@ scrape_configs:
         labels: { role: relay }
       - targets: ["localhost:9105"]
         labels: { role: driver }
+
+  # Extra triage workers for scaled-out runs (e.g. the M8 surge test). A
+  # separate job, so RoleDown does not fire when only one worker runs.
+  - job_name: crisisgraph-scaleout
+    static_configs:
+      - targets: ["localhost:9111", "localhost:9121", "localhost:9131"]
+        labels: { role: triage }

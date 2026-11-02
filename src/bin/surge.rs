@@ -181,6 +181,8 @@ async fn run(config: &Config, args: RunArgs) -> AnyResult<()> {
     let before = scrape_all(&args.metrics).await;
     let started = Instant::now();
     let started_at = Utc::now();
+    // The code under test: recorded at the start, not when results are written.
+    let commit = git_commit();
 
     // Queue sampling every 2 s until the run is drained.
     let samples = Arc::new(Mutex::new(Vec::<Sample>::new()));
@@ -284,7 +286,7 @@ async fn run(config: &Config, args: RunArgs) -> AnyResult<()> {
     let intake = intake.lock().await.clone();
     let results = results(&neo4j, &redis, config, &scenario, &prefix, posted_secs, drained, &samples, &intake, &before, &after, flooded).await?;
     let results = json!({
-        "scenario": scenario, "started_at": started_at.to_rfc3339(), "git_commit": git_commit(),
+        "scenario": scenario, "started_at": started_at.to_rfc3339(), "git_commit": commit,
         "machine": machine(), "dataset": dataset, "results": results, "samples": samples,
     });
     std::fs::create_dir_all(&args.out_dir)?;
