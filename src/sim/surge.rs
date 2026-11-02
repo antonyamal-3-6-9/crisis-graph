@@ -196,6 +196,19 @@ fn victim(rng: &mut Rng, place: &Place) -> (&'static str, SimTruth, String) {
         };
         ("UNKNOWN", profile, AssetType::Ambulance, words)
     };
+    // Like a real caller: say they are with the victims (so the phone's GPS
+    // locates them, finding F-1) and which vehicle they need (never
+    // guessed, finding F-2). Without these a real model rightly sends every
+    // report to review.
+    let ask = match (lang, &asset) {
+        (0, AssetType::EvacTruck) => "I am here with them. Please send a truck to take us out.",
+        (0, _) => "I am here with them. Please send an ambulance.",
+        (1, AssetType::EvacTruck) => "Njan ivide und. Truck ayakkoo.",
+        (1, _) => "Njan ivide und. Ambulance ayakkoo.",
+        (_, AssetType::EvacTruck) => "ഞാൻ ഇവിടെയുണ്ട്. ട്രക്ക് അയക്കൂ.",
+        (_, _) => "ഞാൻ ഇവിടെയുണ്ട്. ആംബുലൻസ് അയക്കൂ.",
+    };
+    let words = format!("{words} {ask}");
     let truth = SimTruth { headcount: Some(people), asset: Some(asset), junction: Some(place.junction_id.clone()), profile };
     (intended, truth, words)
 }
