@@ -24,7 +24,7 @@ pub const ESCALATION_ROUTE_VERIFICATION_FAILED: &str = "ROUTE_VERIFICATION_FAILE
 
 const QUEUED_TASK_FIELDS: &str = "t.task_id AS task_id, t.incident_id AS incident_id, t.version AS version, \
      t.required_asset AS required_asset, coalesce(t.priority_rank, 1) AS priority_rank, \
-     toString(coalesce(t.queued_at, t.created_at)) AS queued_at, i.headcount AS headcount, \
+     toString(coalesce(t.queued_at, t.created_at)) AS queued_at, coalesce(t.persons, i.headcount) AS headcount, \
      coalesce(t.target_junction_id, j.id) AS junction_id, j.id AS incident_junction_id, t.kind AS kind, \
      coalesce(t.water_eta_s, 0.0) AS water_eta_s, coalesce(i.boat_plan_declined, false) AS declined, \
      coalesce(t.verify_failures, 0) AS verify_failures, coalesce(t.escalations, []) AS escalations, \
@@ -318,7 +318,7 @@ async fn commit_in(txn: &mut Txn, commit: &AssignmentCommit) -> Result<Assignmen
                  reason: 'matcher assigned vehicle ' + $vehicle_id, occurred_at: datetime(), \
                  details_json: '{\"overlay_version\":' + toString($overlay_version) + '}' }) \
              RETURN t.incident_id AS incident_id, \
-                    [(rep:Report)-[:REPORTS]->(i) | toString(rep.received_at)] AS received",
+                    [(rep:Report)-[:REPORTS]->(i) WHERE rep.received_at IS NOT NULL | toString(rep.received_at)] AS received",
         )
         .param("reservation_id", commit.reservation_id.clone())
         .param("vehicle_id", commit.vehicle_id.clone())

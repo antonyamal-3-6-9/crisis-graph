@@ -6,6 +6,7 @@ mod allocation;
 mod beds;
 mod commands;
 mod console;
+mod groups;
 mod hazards;
 mod incidents;
 mod missions;
@@ -23,6 +24,7 @@ pub use commands::{
     validate_review, CommandOutcome, CompleteTaskCommand, MergeCommand, ReviewCommand, ReviewVerdict, SplitCommand,
     VehicleStatusCommand, MAX_HEADCOUNT, CancelMissionCommand, TriggerCommand,
 };
+pub use groups::CoverageGap;
 pub use hazards::OverlayRead;
 pub use missions::{MissionConversion, ESCALATION_NO_SURFACE_ROUTE};
 pub use reservations::HoldOutcome;

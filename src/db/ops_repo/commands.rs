@@ -787,7 +787,8 @@ async fn merge_in(txn: &mut Txn, actor: &ActorContext, command: &MergeCommand) -
                        (s:OpsIncident {incident_id: $survivor}) \
                  DELETE rel \
                  CREATE (s)-[:HAS_TASK {seq: 1, moved_from: $absorbed}]->(t) \
-                 SET t.incident_id = $survivor, t.version = t.version + 1, t.updated_at = datetime() \
+                 SET t.incident_id = $survivor, t.version = t.version + 1, t.updated_at = datetime(), \
+                     t.persons = coalesce(t.persons, a.headcount) \
                  WITH t \
                  OPTIONAL MATCH (r:Reservation {task_id: t.task_id}) \
                  SET r.incident_id = $survivor \

@@ -20,5 +20,5 @@ pub use ops_repo::{
     validate_review, CommandOutcome, CompleteTaskCommand, MergeCommand, ReviewCommand, ReviewVerdict, SplitCommand,
     VehicleStatusCommand, MAX_HEADCOUNT, CancelMissionCommand, TriggerCommand,
     AssignmentCommit, AssignmentOutcome, ESCALATION_NO_ELIGIBLE_VEHICLE, ESCALATION_OVERDUE,
-    ESCALATION_ROUTE_VERIFICATION_FAILED, FleetCapacities, MissionConversion, ESCALATION_NO_SURFACE_ROUTE, HoldOutcome, OpsRepoError, OpsRepository, OverlayRead, BASELINE_FLEET};
+    ESCALATION_ROUTE_VERIFICATION_FAILED, CoverageGap, FleetCapacities, MissionConversion, ESCALATION_NO_SURFACE_ROUTE, HoldOutcome, OpsRepoError, OpsRepository, OverlayRead, BASELINE_FLEET};
 pub use ops_schema::{ensure_ops_schema, OPS_CONSTRAINTS};

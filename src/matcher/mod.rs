@@ -17,6 +17,7 @@
 //! is checked segment by segment against live Neo4j state before commit.
 
 pub mod assign;
+mod groups;
 mod mission;
 pub mod queue;
 
@@ -79,6 +80,8 @@ pub struct CycleReport {
     /// Tasks in the window that no vehicle in the fleet could carry (they
     /// do not count against `matcher_batch_cap`).
     pub unservable: usize,
+    /// Road pickups re-planned or topped up by a group plan (T8).
+    pub grouped: usize,
 }
 
 impl CycleReport {
@@ -89,6 +92,7 @@ impl CycleReport {
             && self.conflicts == 0
             && self.verify_failures == 0
             && self.escalated == 0
+            && self.grouped == 0
             && self.converted == 0
     }
 }
@@ -104,6 +108,8 @@ pub struct Matcher {
     queue: AllocQueue,
     params: PipelineParams,
     lease_name: String,
+    /// Junctions each road type can reach, per overlay version (T8).
+    reach_cache: groups::ReachCache,
 }
 
 impl Matcher {
@@ -116,7 +122,7 @@ impl Matcher {
     ) -> Self {
         let queue = AllocQueue::new(redis.clone(), snapshot.dataset(), params.aging_stable_to_urgent_secs);
         let lease_name = lease_name(snapshot.dataset());
-        Self { repo, events: redis.clone(), redis, state, snapshot, queue, params, lease_name }
+        Self { repo, events: redis.clone(), redis, state, snapshot, queue, params, lease_name, reach_cache: Default::default() }
     }
 
     /// Read the events stream on its own connection, so the blocking read
@@ -177,9 +183,30 @@ impl Matcher {
 
         let now = Utc::now();
         let fleet = self.repo.fleet_max_capacity(&dataset).await?;
-        let tasks = self.window(&dataset, &fleet, &mut report).await?;
-        metrics::gauge!("crisisgraph_matcher_unservable_tasks").set(report.unservable as f64);
+        let mut tasks = self.window(&dataset, &fleet, &mut report).await?;
         let vehicles = self.repo.list_available_vehicles_in(&dataset).await?;
+        let mut costs = build_cost_table(&self.snapshot, &tasks, &vehicles, now).await?;
+
+        // T8: road pickups that cannot be served as requested (too big for
+        // one vehicle, or no available vehicle reaches them this cycle and
+        // maybe none of their type ever can) get a group plan; planned
+        // incidents whose headcount rose get more vehicles.
+        let candidates: Vec<QueuedTask> = tasks
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| {
+                let too_big = fleet.get(&t.required_asset.to_string()).is_none_or(|c| *c < t.persons());
+                too_big || (0..costs.vehicles()).all(|v| costs.get(*i, v).is_none())
+            })
+            .map(|(_, t)| t.clone())
+            .collect();
+        if self.plan_groups(&candidates, &fleet, now, &mut report).await? > 0 {
+            self.sync_queue().await?;
+            report.unservable = 0;
+            tasks = self.window(&dataset, &fleet, &mut report).await?;
+            costs = build_cost_table(&self.snapshot, &tasks, &vehicles, now).await?;
+        }
+        metrics::gauge!("crisisgraph_matcher_unservable_tasks").set(report.unservable as f64);
         report.tasks = tasks.len();
         report.vehicles = vehicles.len();
 
@@ -187,7 +214,6 @@ impl Matcher {
             .iter()
             .map(|t| effective_tier(t.priority_rank, t.queued_at, now, self.params.aging_stable_to_urgent_secs))
             .collect();
-        let costs = build_cost_table(&self.snapshot, &tasks, &vehicles, now).await?;
         // Road pickups no vehicle can serve may be cut off by water (M6b).
         let unserved: Vec<&QueuedTask> = tasks
             .iter()
@@ -268,7 +294,11 @@ impl Matcher {
                     }
                     continue;
                 }
-                if !escalated(&task, ESCALATION_NO_ELIGIBLE_VEHICLE) {
+                // A road pickup for a road vehicle type gets a group plan
+                // (T8) instead; other tasks go to a person.
+                let plannable = task.kind == TaskKind::RoadPickup
+                    && matches!(task.required_asset, AssetType::Ambulance | AssetType::EvacTruck);
+                if !plannable && !escalated(&task, ESCALATION_NO_ELIGIBLE_VEHICLE) {
                     let details = json!({ "required_asset": task.required_asset.to_string(), "persons": task.persons(),
                                           "largest_capacity": capacity });
                     if self.repo.escalate_task(&task.task_id, ESCALATION_NO_ELIGIBLE_VEHICLE, details).await? {

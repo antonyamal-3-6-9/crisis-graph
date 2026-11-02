@@ -229,6 +229,18 @@ cargo run --release --bin bench_matcher -- --sizes 10,25,40,60 --seeds 20 --seed
 
 Triage workers (`--role triage`) consume `sos:extract` (consumer group `triage-workers`), save the extraction on the report before deduplicating (so a redelivery never calls the model twice), then in one transaction either attach a same-device follow-up (D-2) or create an `:OpsIncident` (`TRIAGE_APPROVED` + queued `ROAD_PICKUP` task, or `REVIEW_REQUIRED`). Nearby open incidents are flagged `POSSIBLE_DUPLICATE` (D-3), never merged. When extraction fails or the inference circuit breaker is open, the report still becomes a `REVIEW_REQUIRED` incident for manual triage.
 
+Since M8 the matcher also applies **group plans** (T8, `src/matcher/groups.rs`, `src/db/ops_repo/groups.rs`). A queued road pickup that cannot be served as requested is fixed automatically and the dispatcher is alerted. Two cases count:
+
+- **No route:** no vehicle of the requested type can reach the victims from any depot, e.g. trucks on `hgv=no` lanes.
+- **Too big:** the group is larger than one vehicle of that type.
+
+The choice is `models::group_plan`, decided on graph reachability only, never by the LLM:
+
+- ambulances for a medical need, else one truck, else ambulances;
+- as many vehicles as the group needs.
+
+Each task carries its own `persons`, used for seats and drop-off beds. The alerts are `ASSET_SWITCHED` and `GROUP_SPLIT`. If a planned incident's headcount later rises, vehicles are added. A pickup that no road type can reach still goes to the boat-then-road check. Tasks no vehicle could ever carry never take a slot in the matcher's window.
+
 Since M8 the pipeline is **observable and load-tested**. Every role exports metrics from pipeline doc §4.11, including:
 
 - stream length, pending count, oldest pending age and dead letters (`src/runtime/streams.rs`);
