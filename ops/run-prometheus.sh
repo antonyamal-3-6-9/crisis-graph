@@ -3,6 +3,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$ROOT/.ops-data/prometheus"
+# Packaged builds (e.g. Arch) read the web UI from web/ui/ relative to the
+# working directory, as their own service does; every path below is absolute.
+cd "${PROMETHEUS_HOME:-/usr/share/prometheus}"
 exec prometheus \
   --config.file="$ROOT/ops/prometheus/prometheus.yml" \
   --storage.tsdb.path="$ROOT/.ops-data/prometheus" \
