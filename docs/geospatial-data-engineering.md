@@ -160,6 +160,12 @@ Hazards are `:Hazard` records; nothing is written on `CONNECTS_TO` road segments
 - Confidence and a separate verification step (low-confidence reports) are not implemented: every recorded hazard comes from an authorised operator and blocks routing.
 - Routing (`GraphSnapshot`) and verification (`verify_path_segments`) both read the records; expiry needs no new version because both compare `valid_until` with the current time.
 
+### Water legs (M6b, 2026-11-02)
+
+- Flooded segments are also the water network. The multi-modal planner (`RoutingGraph::multimodal`, run on the shared snapshot by `GraphSnapshot::plan_mission`) treats hazards in force as water and finds the path with the fewest flooded crossings. The staging point is the last dry junction before the water.
+- Water legs follow road geometry (there is no separate water network) and are timed at an assumed boat speed, `BOAT_SPEED_KMH` (default 8 km/h). They are always recorded as **unverified estimates** for the crew to confirm. The road legs before and after are verified live as usual.
+- Baseline geography is still never changed: a mission only reads the overlay.
+
 ## Import pipeline
 
 1. Define and version a polygon boundary for the pilot area (`data/boundaries/aluva-periyar-pilot.geojson`).

@@ -47,6 +47,8 @@ const EVENT_EFFECTS = {
   INCIDENT_SPLIT: ["incidents", "selected"],
   TASK_CANCELLED: ["incidents", "queue", "selected", "vehicles", "routes"],
   VEHICLE_STATUS_CHANGED: ["vehicles", "queue", "selected"],
+  MISSION_CONVERTED: ["incidents", "selected", "queue", "alerts", "routes"],
+  MISSION_CANCELLED: ["incidents", "selected", "queue", "vehicles", "routes"],
 };
 
 const scenarios = {
@@ -322,6 +324,7 @@ function onEvent(type, message) {
   if (state.seen.size > 5000) state.seen = new Set([...state.seen].slice(-2500));
   queueRefresh(...EVENT_EFFECTS[type], "system");
   if (type === "INCIDENT_CRITICAL") showToast("CRITICAL incident", "A critical incident was created or raised.", true);
+  if (type === "MISSION_CONVERTED") showToast("Boat-then-road mission", "Victims are cut off by water: a boat goes to the staging point, the road leg waits for 'victim aboard'.", true);
   if (type === "DROPOFF_UNRESOLVED") showToast("Drop-off unresolved", "A vehicle was dispatched without free beds; choose a drop-off.", true);
   if (type === "TASK_ESCALATED") showToast("Task escalated", event.payload?.reason ? `Reason: ${event.payload.reason}` : "A task needs a person.", true);
 }
@@ -406,12 +409,19 @@ function renderHazardsOnMaps() {
 }
 
 function drawRoute(layer, geojson) {
+  const pointColor = { pickup: "#a73b35", staging: "#a86612", dropoff: "#245c7c" };
+  const pointLabel = { pickup: "Victims", staging: "Staging point (boat ↔ road hand-over)", dropoff: "Drop-off shelter" };
   return L.geoJSON(geojson, {
-    style: { color: "#1f6f54", weight: 5, opacity: .85 },
+    style: (feature) => feature.properties.kind === "water"
+      ? { color: "#2f6fb0", weight: 5, opacity: .9, dashArray: "6 7" }
+      : { color: feature.properties.task_kind === "WATER_EXTRACTION" ? "#8a6a2f" : "#1f6f54", weight: 5, opacity: .85 },
+    onEachFeature: (feature, l) => {
+      if (feature.properties.kind === "water") l.bindTooltip(`Water leg (${escapeHtml(feature.properties.mode || "")}): unverified estimate, ${duration(feature.properties.travel_time_s)}`);
+      else if (feature.properties.kind === "route") l.bindTooltip(`${escapeHtml(feature.properties.task_kind || "Road")} · ${duration(feature.properties.travel_time_s)} · verified live`);
+    },
     pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-      radius: 7, weight: 2, color: "#fff",
-      fillColor: feature.properties.kind === "pickup" ? "#a73b35" : "#245c7c", fillOpacity: 1,
-    }).bindTooltip(feature.properties.kind === "pickup" ? "Pickup (victims)" : "Drop-off shelter"),
+      radius: 7, weight: 2, color: "#fff", fillColor: pointColor[feature.properties.kind] || "#245c7c", fillOpacity: 1,
+    }).bindTooltip(pointLabel[feature.properties.kind] || feature.properties.kind),
   }).addTo(layer);
 }
 
@@ -609,6 +619,7 @@ function renderDetail(i) {
     </div>
     ${(i.review_reasons || []).length ? `<div class="notice warning" style="margin-top:14px"><b>Review reasons</b><span>${i.review_reasons.map(escapeHtml).join(" · ")}</span></div>` : ""}
     ${reviewing ? reviewFormHtml(i) : ""}
+    ${missionHtml(i)}
     <h3 class="section-title">Tasks</h3>${(i.tasks || []).length ? i.tasks.map(taskHtml).join("") : '<p class="supporting small">No task yet.</p>'}
     <div class="route-record" id="detail-route" hidden><div class="route-record-head"><h3>Route (verified live before commit)</h3><span class="tag" id="detail-route-meta"></span></div><div class="incident-route-map" id="detail-route-map"></div></div>
     ${(i.duplicates || []).length ? `<h3 class="section-title">Possible duplicates (rule D-3)</h3>${i.duplicates.map((d) => duplicateHtml(i, d)).join("")}<div class="duplicate-note">Flagged for a person, never merged automatically. Merging keeps exactly one vehicle sent: the survivor's own, or the absorbed one's if only it has one.</div><div id="merge-form-slot"></div>` : ""}
@@ -616,10 +627,67 @@ function renderDetail(i) {
     ${(i.reservations || []).length ? `<h3 class="section-title">Reservations</h3><div class="table-wrap"><table><thead><tr><th>Kind</th><th>Resource</th><th>Status</th><th>Created</th><th>Released</th></tr></thead><tbody>${i.reservations.map((r) => `<tr><td>${escapeHtml(r.kind)}</td><td><code>${escapeHtml(r.vehicle_id || `${r.shelter_id} · ${r.beds} beds`)}</code></td><td>${escapeHtml(r.status)}</td><td>${formatTime(r.created_at)}</td><td>${r.released_at ? formatTime(r.released_at) + " · " + escapeHtml(r.release_reason || "") : "—"}</td></tr>`).join("")}</tbody></table></div>` : ""}
     <div class="timeline"><h3>Audit trail</h3>${(i.audit || []).slice().sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at))).map((a) => `<div class="timeline-row"><b>${escapeHtml(a.action)}</b><p>${escapeHtml(a.reason || "")}${a.from_state ? ` (${escapeHtml(a.from_state)} → ${escapeHtml(a.to_state || "")})` : ""}</p><small>${escapeHtml(a.actor_id || "")} · ${formatTime(a.occurred_at)}</small></div>`).join("") || '<p class="supporting small">No audit events.</p>'}</div>`;
   if (reviewing) bindReviewForm(i);
+  target.querySelectorAll("[data-trigger]").forEach((button) => button.addEventListener("click", () => triggerRoadLeg(button.dataset.trigger, Number(button.dataset.version), button.dataset.reason)));
+  document.getElementById("cancel-mission")?.addEventListener("click", () => openCancelMission(i));
   target.querySelectorAll("[data-merge]").forEach((button) => button.addEventListener("click", () => openMergeForm(i, button.dataset.merge)));
   target.querySelectorAll("[data-split]").forEach((button) => button.addEventListener("click", () => openSplitForm(i, button.dataset.split)));
   target.querySelectorAll("[data-complete-task]").forEach((button) => button.addEventListener("click", () => completeTask(button.dataset.completeTask, Number(button.dataset.version))));
-  if ((i.tasks || []).some((t) => t.status === "ASSIGNED" || t.status === "COMPLETED")) showDetailRoute(i.incident_id);
+  if ((i.tasks || []).some((t) => t.status === "ASSIGNED" || t.status === "COMPLETED") || i.mission) showDetailRoute(i.incident_id);
+}
+
+function missionHtml(i) {
+  if (!i.mission) return "";
+  const tasks = i.tasks || [];
+  const boat = tasks.find((t) => t.kind === "WATER_EXTRACTION" && t.status !== "CANCELLED");
+  const road = tasks.find((t) => t.kind === "ROAD_EVACUATION" && t.status !== "CANCELLED");
+  const disabled = token() ? "" : 'disabled title="Paste an operator token to act"';
+  if (i.mission !== "BOAT_THEN_ROAD") {
+    return `<div class="notice" style="margin-top:14px"><b>Boat plan cancelled</b><span>A dispatcher cancelled the boat-then-road plan; the road pickup waits for the water to recede and is not converted again.</span></div>`;
+  }
+  const pending = road?.status === "PENDING_TRIGGER";
+  const actions = [];
+  if (boat && pending && ["QUEUED", "ASSIGNED"].includes(boat.status)) actions.push(`<button class="button primary compact" data-trigger="${escapeHtml(boat.task_id)}" data-version="${boat.version}" data-reason="VICTIM_ABOARD" ${disabled}>Victim aboard: send road vehicle</button>`);
+  if (road && pending) actions.push(`<button class="button ghost compact" data-trigger="${escapeHtml(road.task_id)}" data-version="${road.version}" data-reason="EARLY" ${disabled}>Send road vehicle now</button>`);
+  if (boat && boat.status !== "COMPLETED") actions.push(`<button class="button ghost compact" id="cancel-mission" ${disabled}>Cancel boat plan</button>`);
+  const leg = (title, t, note) => `<div class="mission-leg ${t ? t.status.toLowerCase() : ""}"><b>${escapeHtml(title)}</b><span>${t ? statusBadge(t.status) : ""} ${t?.assigned_vehicle_id ? escapeHtml(t.assigned_vehicle_id) : ""}</span><small>${note}</small></div>`;
+  return `<div class="mission-panel"><div class="panel-head"><div><p class="kicker">Cut off by flood water</p><h3>Boat-then-road mission</h3></div><span class="tag">staging ${escapeHtml(shortId(i.staging_junction_id || ""))}</span></div>
+    <div class="mission-legs">
+      ${leg("1 · Boat by road to staging", boat, boat?.eta_s != null ? `ETA ${duration(boat.eta_s)} incl. water` : "towed on a trailer, road verified live")}
+      ${leg("2 · Water to the victims", boat, `unverified estimate ${duration(boat?.water_eta_s)}: crew confirms depth and current`)}
+      ${leg("3 · Road from staging", road, road?.status === "PENDING_TRIGGER" ? "waits for 'victim aboard'" : road?.trigger ? `sent: ${escapeHtml(road.trigger)}` : "to the drop-off shelter")}
+    </div>
+    ${actions.length ? `<div class="review-actions" style="margin-top:10px">${actions.join("")}</div>` : ""}<div id="cancel-mission-slot"></div></div>`;
+}
+
+async function triggerRoadLeg(taskId, version, reason) {
+  try {
+    await api(`/tasks/${encodeURIComponent(taskId)}/trigger`, { method: "POST", auth: true, body: { request_id: uuid(), expected_version: version, reason } });
+    showToast("Road leg queued", "The matcher sends a road vehicle to the staging point.");
+  } catch (error) {
+    showToast("Not sent", commandError(error), true);
+  }
+  state.detail = null;
+  refresh(["selected", "incidents", "queue"]);
+}
+
+function openCancelMission(i) {
+  const slot = document.getElementById("cancel-mission-slot");
+  slot.innerHTML = `<form class="review-form"><h3>Cancel the boat plan</h3><p class="supporting small">The boat is released and the incident goes back to a road pickup, which waits for the water to recede (it is not converted again).</p>
+    <label>Reason (audited)</label><textarea class="cm-reason" rows="2" maxlength="500" placeholder="e.g. Current too strong for the boat; fire service helicopter requested"></textarea>
+    <div class="review-actions"><button type="button" class="button danger cm-go">Cancel boat plan</button><button type="button" class="button ghost cm-back">Keep the plan</button></div></form>`;
+  slot.querySelector(".cm-back").addEventListener("click", () => { slot.innerHTML = ""; });
+  slot.querySelector(".cm-go").addEventListener("click", async () => {
+    const reason = slot.querySelector(".cm-reason").value.trim();
+    if (!reason) { showToast("Reason required", "Write why the plan is cancelled.", true); return; }
+    try {
+      await api(`/incidents/${encodeURIComponent(i.incident_id)}/mission/cancel`, { method: "POST", auth: true, body: { request_id: uuid(), expected_version: i.version, reason } });
+      showToast("Boat plan cancelled", "The boat is free; the road pickup waits.");
+    } catch (error) {
+      showToast("Not cancelled", commandError(error), true);
+    }
+    state.detail = null;
+    refresh(["selected", "incidents", "vehicles", "queue"]);
+  });
 }
 
 function taskHtml(t) {
@@ -993,7 +1061,7 @@ function badge(id, count) {
 // ------------------------------------------------------------ helpers
 
 function statusBadge(status) {
-  const cls = { REVIEW_REQUIRED: "review", QUEUED: "queued", NEEDS_TASK: "needs_task", ASSIGNED: "assigned", COMPLETED: "completed", REJECTED: "rejected", MERGED: "rejected", CANCELLED: "rejected" }[status] || "progress";
+  const cls = { PENDING_TRIGGER: "needs_task", REVIEW_REQUIRED: "review", QUEUED: "queued", NEEDS_TASK: "needs_task", ASSIGNED: "assigned", COMPLETED: "completed", REJECTED: "rejected", MERGED: "rejected", CANCELLED: "rejected" }[status] || "progress";
   return `<span class="status ${cls}">${escapeHtml(String(status || "").replace(/_/g, " "))}</span>`;
 }
 function urgencyBadge(urgency) { return urgency ? `<span class="urgency ${escapeHtml(urgency)}">${escapeHtml(urgency)}</span>` : ""; }

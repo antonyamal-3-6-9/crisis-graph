@@ -81,6 +81,27 @@ pub struct VehicleStatusCommand {
     pub reason: String,
 }
 
+/// Queue the road leg of a boat-then-road mission (T6): on the boat task
+/// ("victim aboard") or on the waiting road task itself ("send now").
+#[derive(Debug, Clone)]
+pub struct TriggerCommand {
+    pub request_id: String,
+    pub task_id: String,
+    pub expected_version: u64,
+    /// `VICTIM_ABOARD` or `EARLY`.
+    pub reason: String,
+}
+
+/// Cancel an incident's boat-then-road plan: back to a road pickup that is
+/// never converted again.
+#[derive(Debug, Clone)]
+pub struct CancelMissionCommand {
+    pub request_id: String,
+    pub incident_id: String,
+    pub expected_version: u64,
+    pub reason: String,
+}
+
 /// A command's result: the outcome, and whether it was replayed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandOutcome {
@@ -138,6 +159,25 @@ impl OpsRepository {
         self.run_command(&command.request_id, Body::VehicleStatus(actor, command)).await
     }
 
+    /// Queue a mission's road leg now (T6). Needs `UpdateResponderStatus`,
+    /// `AssignDispatch` or `CloseIncident`.
+    pub async fn trigger_road_leg(&self, actor: &ActorContext, command: &TriggerCommand) -> Result<CommandOutcome, OpsRepoError> {
+        require(actor, &[Permission::UpdateResponderStatus, Permission::AssignDispatch, Permission::CloseIncident])?;
+        check_text(&command.request_id, "request_id", 128)?;
+        if !matches!(command.reason.as_str(), "VICTIM_ABOARD" | "EARLY") {
+            return Err(OpsRepoError::InvalidData("reason must be VICTIM_ABOARD or EARLY".into()));
+        }
+        self.run_command(&command.request_id, Body::Trigger(actor, command)).await
+    }
+
+    /// Cancel a boat-then-road plan. Needs `ReviewIncident`.
+    pub async fn cancel_mission(&self, actor: &ActorContext, command: &CancelMissionCommand) -> Result<CommandOutcome, OpsRepoError> {
+        require(actor, &[Permission::ReviewIncident])?;
+        check_text(&command.request_id, "request_id", 128)?;
+        check_text(&command.reason, "reason", MAX_REASON_CHARS)?;
+        self.run_command(&command.request_id, Body::CancelMission(actor, command)).await
+    }
+
     /// Run one command transaction with replay and transient retry.
     async fn run_command(&self, request_id: &str, body: Body<'_>) -> Result<CommandOutcome, OpsRepoError> {
         let mut attempt = 0;
@@ -154,6 +194,8 @@ impl OpsRepository {
                     Body::Merge(actor, command) => merge_in(&mut txn, actor, command).await?,
                     Body::Split(actor, command) => split_in(&mut txn, actor, command).await?,
                     Body::VehicleStatus(actor, command) => vehicle_status_in(&mut txn, actor, command).await?,
+                    Body::Trigger(actor, command) => trigger_in(&mut txn, actor, command).await?,
+                    Body::CancelMission(actor, command) => cancel_mission_in(&mut txn, actor, command).await?,
                 };
                 txn_first_row(
                     &mut txn,
@@ -203,6 +245,8 @@ enum Body<'a> {
     Merge(&'a ActorContext, &'a MergeCommand),
     Split(&'a ActorContext, &'a SplitCommand),
     VehicleStatus(&'a ActorContext, &'a VehicleStatusCommand),
+    Trigger(&'a ActorContext, &'a TriggerCommand),
+    CancelMission(&'a ActorContext, &'a CancelMissionCommand),
 }
 
 async fn stored_outcome(txn: &mut Txn, request_id: &str) -> Result<Option<Value>, OpsRepoError> {
@@ -379,7 +423,7 @@ async fn complete_in(txn: &mut Txn, actor: &ActorContext, command: &CompleteTask
              OPTIONAL MATCH (:Reservation {task_id: t.task_id, resource_kind: 'BEDS', status: 'COMMITTED'})-[:AT_SHELTER]->(s:Shelter) \
              OPTIONAL MATCH (i)-[:LOCATED_AT]->(ij:Junction) \
              WITH t, i, r, v, head(collect(s)) AS s, head(collect(ij)) AS ij \
-             WITH t, i, r, v, s, ij, coalesce(s.junction_id, i.junction_id, v.junction_id) AS end_id \
+             WITH t, i, r, v, s, ij, coalesce(s.junction_id, t.target_junction_id, i.junction_id, v.junction_id) AS end_id \
              OPTIONAL MATCH (ej:Junction {id: end_id, dataset: ij.dataset}) \
              SET r.status = 'RELEASED', r.released_at = datetime(), r.release_reason = 'task completed' \
              REMOVE r.active_vehicle_key, r.active_task_key \
@@ -419,6 +463,9 @@ async fn complete_in(txn: &mut Txn, actor: &ActorContext, command: &CompleteTask
     let Some(row) = row else {
         return Err(complete_refusal(txn, command).await);
     };
+    // A boat back at the staging point with the victims: queue the road leg
+    // if nobody pressed "victim aboard" (owner decision 2026-11-02).
+    let triggered = trigger_dependents(txn, actor, &command.task_id, "BOAT_COMPLETED").await?;
     let outcome = json!({
         "task_id": command.task_id,
         "status": "COMPLETED",
@@ -428,6 +475,7 @@ async fn complete_in(txn: &mut Txn, actor: &ActorContext, command: &CompleteTask
         "vehicle_id": row.get::<String>("vehicle_id")?,
         "vehicle_position_junction": row.get::<Option<String>>("position_junction")?,
         "dropoff_shelter_id": row.get::<Option<String>>("dropoff_shelter_id")?,
+        "triggered_tasks": triggered,
     });
     txn_first_row(
         txn,
@@ -445,7 +493,146 @@ async fn complete_in(txn: &mut Txn, actor: &ActorContext, command: &CompleteTask
         .param("payload", outcome.to_string()),
     )
     .await?;
+    if !triggered.is_empty() {
+        let events: Vec<(&str, String)> = triggered.iter().map(|t| ("TASK_QUEUED", t.clone())).collect();
+        write_events(txn, &events, &outcome).await?;
+    }
     Ok(outcome)
+}
+
+// --------------------------------------------------------- missions (M6b)
+
+async fn trigger_in(txn: &mut Txn, actor: &ActorContext, command: &TriggerCommand) -> Result<Value, OpsRepoError> {
+    let row = txn_first_row(
+        txn,
+        query(
+            "MATCH (t:Task {task_id: $id}) \
+             SET t._lock = true \
+             REMOVE t._lock \
+             RETURN t.kind AS kind, t.status AS status, t.version AS version, t.depends_on AS depends_on",
+        )
+        .param("id", command.task_id.clone()),
+    )
+    .await?
+    .ok_or_else(|| OpsRepoError::NotFound(format!("task {}", command.task_id)))?;
+    let (kind, status): (String, String) = (row.get("kind")?, row.get("status")?);
+    if row.get::<i64>("version")? as u64 != command.expected_version {
+        return Err(OpsRepoError::NotAvailable(format!("task {} changed", command.task_id)));
+    }
+    // On the boat task the trigger releases its road leg; on the road task,
+    // itself (it waits on its boat task).
+    let water = match (kind.as_str(), status.as_str()) {
+        ("WATER_EXTRACTION", "QUEUED" | "ASSIGNED") => command.task_id.clone(),
+        ("ROAD_EVACUATION", "PENDING_TRIGGER") => row
+            .get::<Option<String>>("depends_on")?
+            .ok_or_else(|| OpsRepoError::InvalidData("road leg has no boat task".into()))?,
+        _ => {
+            return Err(OpsRepoError::InvalidData(format!(
+                "a {status} {kind} task has no road leg waiting to be sent"
+            )))
+        }
+    };
+    let triggered = trigger_dependents(txn, actor, &water, &command.reason).await?;
+    if triggered.is_empty() {
+        return Err(OpsRepoError::NotAvailable("the road leg was already sent".into()));
+    }
+    let outcome = json!({ "task_id": command.task_id, "triggered_tasks": triggered, "trigger": command.reason });
+    let events: Vec<(&str, String)> = triggered.iter().map(|t| ("TASK_QUEUED", t.clone())).collect();
+    write_events(txn, &events, &outcome).await?;
+    Ok(outcome)
+}
+
+async fn cancel_mission_in(txn: &mut Txn, actor: &ActorContext, command: &CancelMissionCommand) -> Result<Value, OpsRepoError> {
+    let side = lock_incident(txn, &command.incident_id)
+        .await?
+        .ok_or_else(|| OpsRepoError::NotFound(format!("incident {}", command.incident_id)))?;
+    if side.version != command.expected_version {
+        return Err(OpsRepoError::NotAvailable(format!("incident {} changed", command.incident_id)));
+    }
+    let mission = txn_first_row(
+        txn,
+        query(
+            "MATCH (i:OpsIncident {incident_id: $id}) \
+             OPTIONAL MATCH (i)-[:HAS_TASK]->(w:Task {kind: 'WATER_EXTRACTION'}) \
+             RETURN i.mission AS mission, collect(w.status) AS water, min(w.queued_at) AS queued_at",
+        )
+        .param("id", command.incident_id.clone()),
+    )
+    .await?
+    .ok_or_else(|| OpsRepoError::NotFound(format!("incident {}", command.incident_id)))?;
+    if mission.get::<Option<String>>("mission")?.as_deref() != Some("BOAT_THEN_ROAD") {
+        return Err(OpsRepoError::InvalidData("the incident has no active boat-then-road plan".into()));
+    }
+    if mission.get::<Vec<String>>("water")?.iter().any(|s| s == "COMPLETED") {
+        return Err(OpsRepoError::InvalidData("the boat already brought the victims to the staging point".into()));
+    }
+    let reason = format!("boat plan cancelled: {}", command.reason.trim());
+    let mut released = Vec::new();
+    for task_id in side.task_ids() {
+        released.extend(cancel_task(txn, actor, &task_id, &reason).await?);
+    }
+    let task_id = new_id();
+    txn_first_row(
+        txn,
+        query(
+            "MATCH (i:OpsIncident {incident_id: $id}) \
+             OPTIONAL MATCH (i)-[:HAS_TASK]->(w:Task {kind: 'WATER_EXTRACTION'}) \
+             WITH i, min(w.queued_at) AS queued_at \
+             CREATE (i)-[:HAS_TASK {seq: 4}]->(:Task { \
+                 task_id: $task_id, incident_id: i.incident_id, kind: 'ROAD_PICKUP', status: 'QUEUED', \
+                 required_asset: coalesce(i.required_asset, 'AMBULANCE'), urgency: i.urgency, \
+                 priority_rank: coalesce(i.priority_rank, 1), version: 0, created_at: datetime(), \
+                 queued_at: coalesce(queued_at, datetime()) }) \
+             SET i.mission = 'BOAT_THEN_ROAD_CANCELLED', i.boat_plan_declined = true, \
+                 i.version = i.version + 1, i.updated_at = datetime() \
+             CREATE (i)-[:HAS_AUDIT_EVENT]->(:AuditEvent { \
+                 event_id: $audit_id, aggregate_type: 'Incident', aggregate_id: i.incident_id, \
+                 action: 'MISSION_CANCELLED', actor_id: $actor, previous_version: $version, new_version: i.version, \
+                 reason: $reason, occurred_at: datetime(), details_json: '{}' }) \
+             RETURN i.version AS version",
+        )
+        .param("id", command.incident_id.clone())
+        .param("task_id", task_id.clone())
+        .param("version", command.expected_version as i64)
+        .param("actor", actor.actor_id.clone())
+        .param("reason", reason)
+        .param("audit_id", new_id()),
+    )
+    .await?;
+    let outcome = json!({ "incident_id": command.incident_id, "road_pickup_task_id": task_id,
+                          "cancelled_tasks": side.task_ids(), "released_vehicles": released });
+    let mut events = vec![("MISSION_CANCELLED", command.incident_id.clone()), ("TASK_QUEUED", task_id)];
+    events.extend(side.task_ids().into_iter().map(|t| ("TASK_CANCELLED", t)));
+    events.extend(released.iter().map(|v| ("VEHICLE_AVAILABLE", v.clone())));
+    write_events(txn, &events, &outcome).await?;
+    Ok(outcome)
+}
+
+/// Queue the road legs waiting on `water_task_id` (T6): `PENDING_TRIGGER →
+/// QUEUED`, queued now, with the trigger recorded. Returns their IDs.
+async fn trigger_dependents(txn: &mut Txn, actor: &ActorContext, water_task_id: &str, trigger: &str) -> Result<Vec<String>, OpsRepoError> {
+    let row = txn_first_row(
+        txn,
+        query(
+            "OPTIONAL MATCH (t:Task {depends_on: $water, status: 'PENDING_TRIGGER'}) \
+             FOREACH (x IN CASE WHEN t IS NULL THEN [] ELSE [t] END | \
+                 SET x.status = 'QUEUED', x.version = x.version + 1, x.updated_at = datetime(), \
+                     x.queued_at = datetime(), x.triggered_at = datetime(), x.trigger = $trigger, x.triggered_by = $actor \
+                 CREATE (x)-[:HAS_AUDIT_EVENT]->(:AuditEvent { \
+                     event_id: randomUUID(), aggregate_type: 'Task', aggregate_id: x.task_id, action: 'TASK_TRIGGERED', \
+                     actor_id: $actor, from_state: 'PENDING_TRIGGER', to_state: 'QUEUED', new_version: x.version, \
+                     reason: $trigger, occurred_at: datetime(), details_json: '{}' })) \
+             RETURN [y IN collect(t.task_id) WHERE y IS NOT NULL] AS ids",
+        )
+        .param("water", water_task_id)
+        .param("trigger", trigger)
+        .param("actor", actor.actor_id.clone()),
+    )
+    .await?;
+    Ok(match row {
+        Some(row) => row.get("ids")?,
+        None => Vec::new(),
+    })
 }
 
 async fn complete_refusal(txn: &mut Txn, command: &CompleteTaskCommand) -> OpsRepoError {

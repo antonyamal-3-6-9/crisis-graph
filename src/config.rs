@@ -102,6 +102,10 @@ pub struct PipelineParams {
     /// Simulated time on scene before leaving with the victims.
     pub sim_on_scene_secs: u64,
 
+    // Boat-then-road missions (M6b)
+    /// Assumed boat speed through flooded streets, for water-leg estimates.
+    pub boat_speed_kmh: f64,
+
     // Streams
     /// Stream the outbox relay feeds with new reports (extraction queue).
     pub extract_stream: String,
@@ -147,6 +151,7 @@ impl Default for PipelineParams {
             dispatch_wait_secs: 180,
             sim_time_scale: 0.1,
             sim_on_scene_secs: 300,
+            boat_speed_kmh: 8.0,
             extract_stream: "sos:extract".to_string(),
             events_stream: "ops:events".to_string(),
         }
@@ -230,6 +235,7 @@ impl PipelineParams {
             dispatch_wait_secs: u64_or("DISPATCH_WAIT_SECS", d.dispatch_wait_secs),
             sim_time_scale: f64_or("SIM_TIME_SCALE", d.sim_time_scale, 10.0),
             sim_on_scene_secs: u64_or("SIM_ON_SCENE_SECS", d.sim_on_scene_secs),
+            boat_speed_kmh: f64_or("BOAT_SPEED_KMH", d.boat_speed_kmh, 80.0),
             extract_stream: stream_or("EXTRACT_STREAM", &d.extract_stream),
             events_stream: stream_or("EVENTS_STREAM", &d.events_stream),
         };

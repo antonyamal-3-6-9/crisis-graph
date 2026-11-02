@@ -110,6 +110,7 @@ crisis-graph/
     ├── matcher_tests.rs               # allocation: overbooking race, resume, fencing, failover, tiers
     ├── console_api_tests.rs           # console API, review/complete commands, SSE replay, end-to-end dispatch
     ├── dispatcher_commands_tests.rs   # merge/split (T4), vehicle status and breakdown, simulated driver
+    ├── mission_tests.rs               # boat-then-road missions: conversion, trigger (T6), completion, cancel
     ├── neo4j_baseline_tests.rs        # directed baseline loader and hazard verification
     ├── aluva_pipeline_tests.rs        # legacy end-to-end pipeline (needs llama.cpp on :8000)
     └── integration_tests.rs
@@ -213,12 +214,15 @@ cargo test --test graph_hazard_tests
 cargo test --test matcher_tests
 cargo test --test console_api_tests
 cargo test --test dispatcher_commands_tests
+cargo test --test mission_tests
 
 # Batch-quality bench (read-only; real graph and fleet)
 cargo run --release --bin bench_matcher -- --sizes 10,25,40,60 --seeds 20 --seed 2026
 ```
 
 Triage workers (`--role triage`) consume `sos:extract` (consumer group `triage-workers`), save the extraction on the report before deduplicating (so a redelivery never calls the model twice), then in one transaction either attach a same-device follow-up (D-2) or create an `:OpsIncident` (`TRIAGE_APPROVED` + queued `ROAD_PICKUP` task, or `REVIEW_REQUIRED`). Nearby open incidents are flagged `POSSIBLE_DUPLICATE` (D-3), never merged. When extraction fails or the inference circuit breaker is open, the report still becomes a `REVIEW_REQUIRED` incident for manual triage.
+
+Since M6b victims **cut off by flood water** get a boat-then-road mission. When a queued road pickup's junction is unreachable by road from every depot, the matcher plans on the shared snapshot from each boat start (`RoutingGraph::multimodal`, flooded segments as water, timed at `BOAT_SPEED_KMH`). A terminal or island plan converts the task, in one transaction, into a QUEUED `WATER_EXTRACTION` (boat, towed by road to the staging point) and a `PENDING_TRIGGER` `ROAD_EVACUATION`. The road leg uses the requested road vehicle, else an ambulance for 4 or fewer people or a medical need, else a truck. The conversion raises a `MISSION_CONVERTED` alert. A fragmented cut escalates `NO_SURFACE_ROUTE`. The water leg is stored and shown as an **unverified estimate**; only road legs are verified live, and only road legs reserve drop-off beds. The road leg is queued on "victim aboard" or "send now" (`POST /api/v1/tasks/{id}/trigger`, T6), or automatically when the boat task completes. The boat then waits at the staging point. A dispatcher can cancel the plan (`POST /api/v1/incidents/{id}/mission/cancel`): the incident goes back to a road pickup that is never converted again. The simulated driver reports victim aboard halfway through a boat mission.
 
 Since M6a the dispatcher can **merge** possible duplicates (`POST /api/v1/incidents/{survivor}/merge`, T4: exactly one vehicle stays sent; the survivor keeps its own, else the absorbed incident's assignment moves over; headcount = the larger, urgency only raised, the absorbed incident becomes `MERGED` with `MERGED_INTO`), **split** a wrongly attached follow-up into its own `REVIEW_REQUIRED` incident (`/split`), and change **vehicle status** (`POST /api/v1/vehicles/{id}/status`: out of service and back; out of service on a task is a breakdown that re-queues the task and frees its beds). All are buttons in the console. The **driver** role is a simulated responder for demos only: it completes assigned tasks through the task-complete command after `(2 × eta + SIM_ON_SCENE_SECS) × SIM_TIME_SCALE` seconds, with replay-safe request IDs, so several drivers or a restart never complete twice.
 
@@ -339,6 +343,7 @@ cargo test --test graph_hazard_tests
 cargo test --test matcher_tests
 cargo test --test console_api_tests
 cargo test --test dispatcher_commands_tests
+cargo test --test mission_tests
 cargo test --test neo4j_baseline_tests
 cargo test --test aluva_pipeline_tests # legacy end to end; needs llama.cpp on :8000
 ```

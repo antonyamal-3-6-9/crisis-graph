@@ -169,18 +169,38 @@ pub struct QueuedTask {
     pub priority_rank: u8,
     pub queued_at: DateTime<Utc>,
     pub headcount: Option<u32>,
-    /// The incident's junction in the matcher's dataset.
+    /// Where the vehicle drives to: the incident's junction, or for the legs
+    /// of a boat-then-road mission the staging point (M6b).
     pub junction_id: String,
     /// Failed live route checks so far.
     pub verify_failures: u32,
     /// Escalation reasons already raised (each is raised once).
     pub escalations: Vec<String>,
+    pub kind: TaskKind,
+    /// The incident's own junction (the victims).
+    pub incident_junction_id: String,
+    /// Estimated water time added to the road ETA (boat tasks), seconds.
+    pub water_eta_s: f64,
+    /// A dispatcher cancelled a boat plan for this incident: never convert.
+    pub boat_plan_declined: bool,
 }
 
 impl QueuedTask {
     /// People to carry: an unknown headcount counts as one.
     pub fn persons(&self) -> u32 {
         self.headcount.unwrap_or(1).max(1)
+    }
+}
+
+/// Road vehicle that meets the boat at the staging point (owner decision
+/// 2026-11-02): the requested road vehicle if one was asked for; otherwise
+/// an ambulance for a medical need or up to `ambulance_capacity` people,
+/// else an evacuation truck.
+pub fn road_leg_asset(requested: &AssetType, persons: u32, medical: bool, ambulance_capacity: u32) -> AssetType {
+    match requested {
+        AssetType::Ambulance | AssetType::EvacTruck => requested.clone(),
+        _ if medical || persons <= ambulance_capacity => AssetType::Ambulance,
+        _ => AssetType::EvacTruck,
     }
 }
 
@@ -388,5 +408,14 @@ mod tests {
         assert_eq!(merge_plan(None, Queued), MergePlan::MoveAbsorbed);
         assert_eq!(merge_plan(None, None), MergePlan::KeepSurvivor);
         assert_eq!(display_status("MERGED", &["ASSIGNED".to_string()]), "MERGED");
+    }
+
+    #[test]
+    fn road_leg_keeps_the_request_else_fits_the_need() {
+        assert_eq!(road_leg_asset(&AssetType::EvacTruck, 2, true, 4), AssetType::EvacTruck);
+        assert_eq!(road_leg_asset(&AssetType::Ambulance, 12, false, 4), AssetType::Ambulance);
+        assert_eq!(road_leg_asset(&AssetType::RescueBoat, 3, false, 4), AssetType::Ambulance);
+        assert_eq!(road_leg_asset(&AssetType::RescueBoat, 12, true, 4), AssetType::Ambulance, "medical need");
+        assert_eq!(road_leg_asset(&AssetType::RescueBoat, 12, false, 4), AssetType::EvacTruck);
     }
 }

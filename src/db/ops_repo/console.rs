@@ -20,6 +20,8 @@ const INCIDENT_FIELDS: &str = "{ incident_id: i.incident_id, status: i.status, v
          ELSE {lat: i.caller_location.latitude, lon: i.caller_location.longitude} END, \
      report_count: coalesce(i.report_count, 1), callback_required: coalesce(i.callback_required, false), \
      merged_into: i.merged_into, split_from: i.split_from, \
+     mission: i.mission, staging_junction_id: i.staging_junction_id, \
+     boat_plan_declined: coalesce(i.boat_plan_declined, false), \
      created_at: toString(i.created_at), updated_at: toString(i.updated_at) }";
 
 const TASK_FIELDS: &str = "{ task_id: t.task_id, kind: t.kind, status: t.status, version: t.version, \
@@ -27,7 +29,9 @@ const TASK_FIELDS: &str = "{ task_id: t.task_id, kind: t.kind, status: t.status,
      assigned_vehicle_id: t.assigned_vehicle_id, eta_s: t.eta_s, overlay_version: t.overlay_version, \
      verify_failures: coalesce(t.verify_failures, 0), escalations: coalesce(t.escalations, []), \
      queued_at: toString(t.queued_at), assigned_at: toString(t.assigned_at), \
-     completed_at: toString(t.completed_at) }";
+     completed_at: toString(t.completed_at), target_junction_id: t.target_junction_id, \
+     depends_on: t.depends_on, trigger: t.trigger, triggered_at: toString(t.triggered_at), \
+     water_eta_s: t.water_eta_s }";
 
 impl OpsRepository {
     /// Recent incidents, newest first, with their display status. `status`
@@ -81,8 +85,8 @@ impl OpsRepository {
                      location_source: r.location_source, review_reasons: coalesce(r.review_reasons, []), \
                      latitude: r.latitude, longitude: r.longitude, accuracy_m: r.accuracy_m }} END) AS reports }} \
              CALL {{ WITH i \
-                 OPTIONAL MATCH (i)-[:HAS_TASK]->(t:Task) \
-                 WITH t ORDER BY t.created_at \
+                 OPTIONAL MATCH (i)-[link:HAS_TASK]->(t:Task) \
+                 WITH t ORDER BY coalesce(link.seq, 1), t.created_at \
                  RETURN collect(CASE WHEN t IS NULL THEN null ELSE {TASK_FIELDS} END) AS tasks, \
                         collect(t.status) AS task_statuses }} \
              CALL {{ WITH i \
@@ -123,20 +127,27 @@ impl OpsRepository {
         Ok(Some(incident))
     }
 
-    /// The incident's current route (assigned or completed task), with the
-    /// pickup and drop-off junctions: `(route_json, pickup, dropoff)`.
-    pub async fn console_route(&self, incident_id: &str) -> Result<Option<(String, Option<String>, Option<String>)>, OpsRepoError> {
+    /// Every leg of the incident that has a route: each task's road route
+    /// (`route_json`) and a boat task's water legs (`water_legs_json`), with
+    /// the victims' junction, the staging point and the drop-off shelter.
+    pub async fn console_routes(&self, incident_id: &str) -> Result<Option<Value>, OpsRepoError> {
         let q = query(
             "MATCH (i:OpsIncident {incident_id: $id})-[:HAS_TASK]->(t:Task) \
-             WHERE t.route_json IS NOT NULL \
-             WITH i, t ORDER BY t.assigned_at DESC LIMIT 1 \
+             WHERE t.status <> 'CANCELLED' AND (t.route_json IS NOT NULL OR t.water_legs_json IS NOT NULL) \
              OPTIONAL MATCH (b:Reservation {task_id: t.task_id, resource_kind: 'BEDS'})-[:AT_SHELTER]->(s:Shelter) \
-             RETURN t.route_json AS route, i.junction_id AS pickup, head(collect(s.junction_id)) AS dropoff",
+             WITH i, t, head(collect(s.junction_id)) AS dropoff ORDER BY t.created_at \
+             RETURN i.junction_id AS pickup, i.staging_junction_id AS staging, \
+                    collect({ task_id: t.task_id, kind: t.kind, status: t.status, route_json: t.route_json, \
+                              water_legs_json: t.water_legs_json, dropoff: dropoff }) AS legs",
         )
         .param("id", incident_id);
         let mut result = self.neo4j.graph.execute(q).await?;
         match result.next().await? {
-            Some(row) => Ok(Some((row.get("route")?, row.get("pickup")?, row.get("dropoff")?))),
+            Some(row) => Ok(Some(json!({
+                "pickup": row.get::<Option<String>>("pickup")?,
+                "staging": row.get::<Option<String>>("staging")?,
+                "legs": row.get::<Value>("legs")?,
+            }))),
             None => Ok(None),
         }
     }
@@ -192,7 +203,7 @@ impl OpsRepository {
     pub async fn console_alert_events(&self, limit: usize) -> Result<Vec<Value>, OpsRepoError> {
         let q = query(
             "MATCH (e:OutboxEvent) \
-             WHERE e.type IN ['INCIDENT_CRITICAL', 'DROPOFF_UNRESOLVED', 'TASK_ESCALATED', 'INCIDENT_REVIEW_REQUIRED'] \
+             WHERE e.type IN ['INCIDENT_CRITICAL', 'DROPOFF_UNRESOLVED', 'TASK_ESCALATED', 'INCIDENT_REVIEW_REQUIRED', 'MISSION_CONVERTED'] \
              WITH e ORDER BY e.created_at DESC LIMIT $limit \
              RETURN { event_id: e.event_id, type: e.type, aggregate_id: e.aggregate_id, \
                  payload_json: e.payload_json, created_at: toString(e.created_at) } AS event",

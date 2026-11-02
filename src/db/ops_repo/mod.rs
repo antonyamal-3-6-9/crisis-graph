@@ -8,6 +8,7 @@ mod commands;
 mod console;
 mod hazards;
 mod incidents;
+mod missions;
 mod outbox;
 mod reports;
 mod reservations;
@@ -20,9 +21,10 @@ pub use allocation::{
 };
 pub use commands::{
     validate_review, CommandOutcome, CompleteTaskCommand, MergeCommand, ReviewCommand, ReviewVerdict, SplitCommand,
-    VehicleStatusCommand, MAX_HEADCOUNT,
+    VehicleStatusCommand, MAX_HEADCOUNT, CancelMissionCommand, TriggerCommand,
 };
 pub use hazards::OverlayRead;
+pub use missions::{MissionConversion, ESCALATION_NO_SURFACE_ROUTE};
 pub use reservations::HoldOutcome;
 pub use vehicles::{FleetCapacities, BASELINE_FLEET};
 

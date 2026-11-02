@@ -24,7 +24,7 @@ use tracing::{info, warn};
 use crate::db::{OpsRepoError, OpsRepository, OverlayRead, RedisClient, StateManager};
 use crate::models::in_force;
 use crate::runtime::Shutdown;
-use crate::solver::{PathfinderError, RouteResult, RoutingGraph, RoutingQuery};
+use crate::solver::{MultiModalPlan, PathfinderError, RouteResult, RoutingGraph, RoutingQuery};
 
 pub const HAZARDS_CHANGED: &str = "HAZARDS_CHANGED";
 
@@ -154,6 +154,21 @@ impl GraphSnapshot {
         let mut query = query.clone();
         query.blocked_segments.extend(overlay.blocked_at(now));
         Ok((self.baseline.costs_from(&query)?, overlay.version))
+    }
+
+    /// Boat-then-road plan (M6b) from `query.origin` to `query.destination`
+    /// with the hazards in force at `now` as the water stretches, water legs
+    /// timed at `boat_speed_kmh`; and the overlay version used.
+    pub fn plan_mission(
+        &self,
+        query: &RoutingQuery,
+        now: DateTime<Utc>,
+        boat_speed_kmh: f64,
+    ) -> Result<(MultiModalPlan, u64), PathfinderError> {
+        let overlay = self.overlay.load();
+        let mut query = query.clone();
+        query.blocked_segments.extend(overlay.blocked_at(now));
+        Ok((self.baseline.multimodal(&query, Some(boat_speed_kmh))?, overlay.version))
     }
 
     /// Reload the overlay if its version changed. Returns whether it was

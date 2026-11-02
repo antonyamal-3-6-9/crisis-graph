@@ -25,7 +25,7 @@ use super::auth::{authorize, OperatorTokens};
 use super::{error_status, validate, ReportRequest};
 use crate::config::PipelineParams;
 use crate::db::{
-    CompleteTaskCommand, MergeCommand, OpsRepoError, OpsRepository, RedisClient, ReviewCommand, ReviewVerdict,
+    CancelMissionCommand, CompleteTaskCommand, MergeCommand, TriggerCommand, OpsRepoError, OpsRepository, RedisClient, ReviewCommand, ReviewVerdict,
     SplitCommand, StateManager, VehicleStatusCommand,
 };
 use crate::matcher::{effective_tier, lease_name, Tier};
@@ -63,6 +63,8 @@ pub fn console_routes(state: ConsoleApiState) -> Router {
         .route("/api/v1/incidents/{incident_id}/split", post(split))
         .route("/api/v1/tasks/{task_id}/complete", post(complete))
         .route("/api/v1/vehicles/{vehicle_id}/status", post(vehicle_status))
+        .route("/api/v1/tasks/{task_id}/trigger", post(trigger))
+        .route("/api/v1/incidents/{incident_id}/mission/cancel", post(cancel_mission))
         .route("/api/v1/vehicles", get(vehicles))
         .route("/api/v1/shelters", get(shelters))
         .route("/api/v1/queue", get(queue))
@@ -106,20 +108,53 @@ async fn get_route(State(state): State<ConsoleApiState>, Path(incident_id): Path
     }
 }
 
-/// The incident's route as GeoJSON: the line, plus pickup and drop-off points.
+/// The incident's legs as GeoJSON: each road route (`kind`: the task kind),
+/// each water leg (`kind: "water"`, `verified: false`), and the pickup,
+/// staging and drop-off points.
 async fn route_geojson(state: &ConsoleApiState, incident_id: &str) -> Result<Option<Value>, Box<dyn std::error::Error + Send + Sync>> {
-    let Some((route_json, pickup, dropoff)) = state.repo.console_route(incident_id).await? else {
+    let Some(routes) = state.repo.console_routes(incident_id).await? else {
         return Ok(None);
     };
-    let route: RouteResult = serde_json::from_str(&route_json)?;
-    let line = state.state.get_junction_coordinates(&route.path).await?;
-    let mut features = vec![json!({
-        "type": "Feature",
-        "geometry": { "type": "LineString", "coordinates": line },
-        "properties": { "kind": "route", "distance_km": route.total_distance_km,
-                        "travel_time_s": route.total_travel_time_s, "segments": route.segment_path.len() },
-    })];
-    for (kind, junction) in [("pickup", pickup), ("dropoff", dropoff)] {
+    let mut features = Vec::new();
+    let mut dropoff = None;
+    for leg in routes["legs"].as_array().into_iter().flatten() {
+        if let Some(text) = leg["route_json"].as_str() {
+            let route: RouteResult = serde_json::from_str(text)?;
+            let line = state.state.get_junction_coordinates(&route.path).await?;
+            features.push(json!({
+                "type": "Feature",
+                "geometry": { "type": "LineString", "coordinates": line },
+                "properties": { "kind": "route", "task_kind": leg["kind"], "task_status": leg["status"],
+                                "distance_km": route.total_distance_km, "travel_time_s": route.total_travel_time_s,
+                                "segments": route.segment_path.len() },
+            }));
+        }
+        if let Some(text) = leg["water_legs_json"].as_str() {
+            let water: Vec<Value> = serde_json::from_str(text)?;
+            for part in water {
+                let waypoints: Vec<String> = serde_json::from_value(part["waypoints"].clone()).unwrap_or_default();
+                let line = state.state.get_junction_coordinates(&waypoints).await?;
+                features.push(json!({
+                    "type": "Feature",
+                    "geometry": { "type": "LineString", "coordinates": line },
+                    "properties": { "kind": "water", "mode": part["mode"], "verified": false,
+                                    "distance_km": part["distance_km"], "travel_time_s": part["travel_time_s"] },
+                }));
+            }
+        }
+        if let Some(junction) = leg["dropoff"].as_str() {
+            dropoff = Some(junction.to_string());
+        }
+    }
+    if features.is_empty() {
+        return Ok(None);
+    }
+    let points = [
+        ("pickup", routes["pickup"].as_str().map(str::to_string)),
+        ("staging", routes["staging"].as_str().map(str::to_string)),
+        ("dropoff", dropoff),
+    ];
+    for (kind, junction) in points {
         if let Some(junction) = junction {
             if let Some(point) = state.state.get_junction_coordinates(std::slice::from_ref(&junction)).await?.first() {
                 features.push(json!({
@@ -510,6 +545,64 @@ async fn vehicle_status(
         reason: request.reason.unwrap_or_default(),
     };
     command_response(state.repo.set_vehicle_status(&actor, &command).await)
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct TriggerRequest {
+    pub request_id: Option<String>,
+    pub expected_version: Option<u64>,
+    /// `VICTIM_ABOARD` (on the boat task) or `EARLY`.
+    pub reason: Option<String>,
+}
+
+/// Queue a boat-then-road mission's road leg (T6).
+async fn trigger(
+    State(state): State<ConsoleApiState>,
+    Path(task_id): Path<String>,
+    headers: HeaderMap,
+    body: Option<Json<TriggerRequest>>,
+) -> Response {
+    let permissions = [Permission::UpdateResponderStatus, Permission::AssignDispatch, Permission::CloseIncident];
+    let actor = match authorize(&state.operators, &headers, &permissions) {
+        Ok(actor) => actor,
+        Err(refused) => return refused.into_response(),
+    };
+    let Some(Json(request)) = body else {
+        return unprocessable("request body must be JSON");
+    };
+    let (Some(request_id), Some(expected_version)) = (request.request_id, request.expected_version) else {
+        return unprocessable("request_id and expected_version are required");
+    };
+    let reason = request.reason.unwrap_or_else(|| "VICTIM_ABOARD".into()).to_ascii_uppercase();
+    command_response(state.repo.trigger_road_leg(&actor, &TriggerCommand { request_id, task_id, expected_version, reason }).await)
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CancelMissionRequest {
+    pub request_id: Option<String>,
+    pub expected_version: Option<u64>,
+    pub reason: Option<String>,
+}
+
+/// Cancel an incident's boat-then-road plan.
+async fn cancel_mission(
+    State(state): State<ConsoleApiState>,
+    Path(incident_id): Path<String>,
+    headers: HeaderMap,
+    body: Option<Json<CancelMissionRequest>>,
+) -> Response {
+    let actor = match authorize(&state.operators, &headers, &[Permission::ReviewIncident]) {
+        Ok(actor) => actor,
+        Err(refused) => return refused.into_response(),
+    };
+    let Some(Json(request)) = body else {
+        return unprocessable("request body must be JSON");
+    };
+    let (Some(request_id), Some(expected_version)) = (request.request_id, request.expected_version) else {
+        return unprocessable("request_id and expected_version are required");
+    };
+    let command = CancelMissionCommand { request_id, incident_id, expected_version, reason: request.reason.unwrap_or_default() };
+    command_response(state.repo.cancel_mission(&actor, &command).await)
 }
 
 fn command_response(result: Result<crate::db::CommandOutcome, OpsRepoError>) -> Response {

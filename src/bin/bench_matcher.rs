@@ -179,6 +179,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                                 .clone(),
                             verify_failures: 0,
                             escalations: Vec::new(),
+                            kind: crisis_graph::models::TaskKind::RoadPickup,
+                            incident_junction_id: String::new(),
+                            water_eta_s: 0.0,
+                            boat_plan_declined: false,
                         }
                     })
                     .collect();
