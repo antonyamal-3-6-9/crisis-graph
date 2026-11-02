@@ -20,7 +20,7 @@ use neo4rs::query;
 use uuid::Uuid;
 
 use crisis_graph::config::{Config, PipelineParams};
-use crisis_graph::db::{ensure_ops_schema, Neo4jClient, OpsRepoError, OpsRepository, RedisClient, StateManager};
+use crisis_graph::db::{ensure_ops_schema, MergeCommand, Neo4jClient, OpsRepoError, OpsRepository, RedisClient, StateManager};
 use crisis_graph::graph::GraphSnapshot;
 use crisis_graph::matcher::Matcher;
 use crisis_graph::models::{ActorContext, ActorRole, HazardCommand, HazardSource, HazardStatus};
@@ -220,6 +220,7 @@ impl Ctx {
              OPTIONAL MATCH (e:OutboxEvent {aggregate_id: t.task_id}) OPTIONAL MATCH (t)-[:HAS_AUDIT_EVENT]->(ta:AuditEvent) \
              DETACH DELETE r, ra, e, ta, t",
             "MATCH (r:Report) WHERE r.request_id STARTS WITH $d DETACH DELETE r",
+            "MATCH (c:Command) WHERE c.request_id STARTS WITH $d DELETE c",
             "MATCH (r:Reservation) WHERE r.task_id STARTS WITH $d \
              OPTIONAL MATCH (r)-[:HAS_AUDIT_EVENT]->(a:AuditEvent) DETACH DELETE r, a",
             "MATCH (n) WHERE (n:Task OR n:OpsIncident OR n:Vehicle) \
@@ -708,6 +709,46 @@ async fn rising_headcount_tops_up_a_planned_group() {
     assert_eq!(ctx.outbox("GROUP_SPLIT", &ctx.id("I-medical")).await, 2);
     // Covered: nothing more is added.
     assert_eq!(matcher.run_cycle(token).await.unwrap().grouped, 0);
+    ctx.assert_no_overbooking().await;
+    ctx.cleanup().await;
+}
+
+/// T8 with a merge: the absorbed incident had the only ambulance, so its
+/// assignment moves to the planned survivor (T4) and the survivor's queued
+/// pickups are cancelled. The moved task keeps the absorbed group's people,
+/// so the next cycle tops the survivor up for the rest of its headcount.
+#[tokio::test]
+async fn merge_into_a_planned_group_keeps_its_headcount_covered() {
+    let Some(ctx) = setup(50).await else { return };
+    ctx.vehicle("AMB-1", "AMBULANCE", 4, "A").await;
+    ctx.task("big", 1, "AMBULANCE", 6, "D", 0).await; // URGENT, medical: 2 ambulances
+    ctx.medical_report("big").await;
+    ctx.task("small", 2, "AMBULANCE", 3, "B", 0).await; // CRITICAL: gets the ambulance
+    let matcher = ctx.matcher().await;
+    let token = leader(&matcher).await;
+    matcher.sync_queue().await.unwrap();
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.assigned.len(), 1, "{report:?}");
+    assert_eq!(ctx.pickups("small").await[0].2, "ASSIGNED");
+    assert_eq!(ctx.pickups("big").await.iter().map(|p| p.1).collect::<Vec<_>>(), vec![4, 2]);
+
+    let version = |name: &str| format!("MATCH (i:OpsIncident {{incident_id: $d + '/I-{name}'}}) RETURN i.version AS n");
+    let merge = MergeCommand {
+        request_id: ctx.id("merge-1"),
+        survivor_id: ctx.id("I-big"),
+        survivor_version: ctx.count(&version("big")).await as u64,
+        absorbed_id: ctx.id("I-small"),
+        absorbed_version: ctx.count(&version("small")).await as u64,
+        reason: "same family, two callers".into(),
+    };
+    ctx.repo.merge_incidents(&ActorContext::new("dispatcher", [ActorRole::Dispatcher]), &merge).await.unwrap();
+
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.grouped, 1, "top-up after the merge: {report:?}");
+    let mut live: Vec<(i64, String)> =
+        ctx.pickups("big").await.into_iter().filter(|p| p.2 != "CANCELLED").map(|p| (p.1, p.2)).collect();
+    live.sort();
+    assert_eq!(live, vec![(3, "ASSIGNED".to_string()), (3, "QUEUED".to_string())], "the moved ambulance carries 3, one more for the other 3");
     ctx.assert_no_overbooking().await;
     ctx.cleanup().await;
 }
