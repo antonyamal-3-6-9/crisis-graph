@@ -634,11 +634,17 @@ fn write_page(dir: &PathBuf, page: &PathBuf) -> AnyResult<()> {
     );
     let f = |v: &Value| v.as_f64().map(|x| format!("{:.1}", x)).unwrap_or_else(|| "—".into());
     let f2 = |v: &Value| v.as_f64().map(|x| format!("{:.2}", x)).unwrap_or_else(|| "—".into());
+    // Written findings (what each run showed and what was fixed), kept in
+    // the results folder; every measured number stays in the tables below.
+    if let Ok(findings) = std::fs::read_to_string(dir.join("findings.md")) {
+        md += findings.trim();
+        md += "\n\n## Runs\n\n";
+    }
     for run in &runs {
         let s = &run["scenario"];
         let r = &run["results"];
         let steps = s["steps"].as_array().map(|a| a.iter().map(|st| format!("{} /s × {} s", st["rate"], st["seconds"])).collect::<Vec<_>>().join(", ")).unwrap_or_default();
-        md += &format!("## {} (extraction: {})\n\n", s["run_id"].as_str().unwrap_or(""), s["extraction"].as_str().unwrap_or(""));
+        md += &format!("### {} (extraction: {})\n\n", s["run_id"].as_str().unwrap_or(""), s["extraction"].as_str().unwrap_or(""));
         md += &format!(
             "- **Scenario:** {steps}; seed {}; neighbours {}; repeat callers {}; hazards at {} s. {}\n",
             s["seed"], s["neighbours"], s["repeats"], s["hazards_at"], s["notes"].as_str().unwrap_or("")
