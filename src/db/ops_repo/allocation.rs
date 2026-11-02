@@ -14,8 +14,8 @@ use neo4rs::{query, Row, Txn};
 use serde_json::json;
 
 use super::beds::reserve_beds_query;
-use super::{new_id, parse_asset, parse_time, txn_first_row, OpsRepoError, OpsRepository, SYSTEM_ACTOR};
-use crate::models::{AssetType, DropoffShelter, OrphanedHold, QueuedTask};
+use super::{new_id, parse_asset, parse_enum, parse_time, txn_first_row, OpsRepoError, OpsRepository, SYSTEM_ACTOR};
+use crate::models::{AssetType, DropoffShelter, OrphanedHold, QueuedTask, TaskKind};
 
 /// Escalation reasons (each raised at most once per task).
 pub const ESCALATION_OVERDUE: &str = "OVERDUE";
@@ -25,8 +25,9 @@ pub const ESCALATION_ROUTE_VERIFICATION_FAILED: &str = "ROUTE_VERIFICATION_FAILE
 const QUEUED_TASK_FIELDS: &str = "t.task_id AS task_id, t.incident_id AS incident_id, t.version AS version, \
      t.required_asset AS required_asset, coalesce(t.priority_rank, 1) AS priority_rank, \
      toString(coalesce(t.queued_at, t.created_at)) AS queued_at, i.headcount AS headcount, \
-     j.id AS junction_id, coalesce(t.verify_failures, 0) AS verify_failures, \
-     coalesce(t.escalations, []) AS escalations";
+     coalesce(t.target_junction_id, j.id) AS junction_id, j.id AS incident_junction_id, t.kind AS kind, \
+     coalesce(t.water_eta_s, 0.0) AS water_eta_s, coalesce(i.boat_plan_declined, false) AS declined, \
+     coalesce(t.verify_failures, 0) AS verify_failures, coalesce(t.escalations, []) AS escalations";
 
 /// Everything the T2 commit records.
 #[derive(Debug, Clone)]
@@ -44,6 +45,12 @@ pub struct AssignmentCommit {
     pub eta_s: f64,
     /// Drop-off shelter and beds to reserve; `None` when no shelter fits.
     pub dropoff: Option<(String, u32)>,
+    /// Whether this leg carries people to a shelter. A boat leg does not
+    /// (the road leg does), so it never raises `DROPOFF_UNRESOLVED`.
+    pub dropoff_required: bool,
+    /// Extra fields for the `TASK_ASSIGNED` payload (e.g. the unverified
+    /// water leg of a boat task).
+    pub extra: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,14 +97,14 @@ impl OpsRepository {
     }
 
     /// `ASSIGNED` tasks in `dataset`: `(task_id, version, assigned_at,
-    /// eta_s)`. Read by the simulated driver.
-    pub async fn assigned_tasks(&self, dataset: &str) -> Result<Vec<(String, u64, DateTime<Utc>, f64)>, OpsRepoError> {
+    /// eta_s, kind)`. Read by the simulated driver.
+    pub async fn assigned_tasks(&self, dataset: &str) -> Result<Vec<(String, u64, DateTime<Utc>, f64, String)>, OpsRepoError> {
         let q = query(
             "MATCH (i:OpsIncident)-[:HAS_TASK]->(t:Task {status: 'ASSIGNED'}), \
                    (i)-[:LOCATED_AT]->(:Junction {dataset: $dataset}) \
              WHERE t.assigned_at IS NOT NULL \
              RETURN t.task_id AS task_id, t.version AS version, toString(t.assigned_at) AS assigned_at, \
-                    coalesce(t.eta_s, 0.0) AS eta_s ORDER BY t.assigned_at",
+                    coalesce(t.eta_s, 0.0) AS eta_s, t.kind AS kind ORDER BY t.assigned_at",
         )
         .param("dataset", dataset);
         let mut result = self.neo4j.graph.execute(q).await?;
@@ -108,6 +115,7 @@ impl OpsRepository {
                 row.get::<i64>("version")? as u64,
                 parse_time(&row.get::<String>("assigned_at")?)?,
                 row.get::<f64>("eta_s")?,
+                row.get::<String>("kind")?,
             ));
         }
         Ok(tasks)
@@ -341,7 +349,7 @@ async fn commit_in(txn: &mut Txn, commit: &AssignmentCommit) -> Result<Assignmen
         }
     }
 
-    let payload = json!({
+    let mut payload = json!({
         "task_id": commit.task_id,
         "incident_id": incident_id,
         "vehicle_id": commit.vehicle_id,
@@ -349,8 +357,12 @@ async fn commit_in(txn: &mut Txn, commit: &AssignmentCommit) -> Result<Assignmen
         "eta_s": commit.eta_s,
         "overlay_version": commit.overlay_version,
         "dropoff_shelter_id": dropoff_shelter,
-    })
-    .to_string();
+    });
+    if let (Some(target), Some(extra)) = (payload.as_object_mut(), commit.extra.as_object()) {
+        target.extend(extra.clone());
+    }
+    let payload = payload.to_string();
+    let unresolved = commit.dropoff_required && dropoff_shelter.is_none();
     txn_first_row(
         txn,
         query(
@@ -367,7 +379,7 @@ async fn commit_in(txn: &mut Txn, commit: &AssignmentCommit) -> Result<Assignmen
         .param("alert_id", new_id())
         .param("task_id", commit.task_id.clone())
         .param("payload", payload)
-        .param("unresolved", dropoff_shelter.is_none()),
+        .param("unresolved", unresolved),
     )
     .await?;
     Ok(AssignmentOutcome { dropoff_shelter })
@@ -387,5 +399,9 @@ fn queued_task_from_row(row: &Row) -> Result<QueuedTask, OpsRepoError> {
         junction_id: row.get("junction_id")?,
         verify_failures: row.get::<i64>("verify_failures")?.max(0) as u32,
         escalations: row.get("escalations")?,
+        kind: parse_enum(&row.get::<String>("kind")?, TaskKind::parse, "task kind")?,
+        incident_junction_id: row.get("incident_junction_id")?,
+        water_eta_s: row.get("water_eta_s")?,
+        boat_plan_declined: row.get("declined")?,
     })
 }

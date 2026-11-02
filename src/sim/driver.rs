@@ -14,7 +14,7 @@ use redis::AsyncCommands;
 use tracing::{info, warn};
 
 use crate::config::PipelineParams;
-use crate::db::{CompleteTaskCommand, OpsRepoError, OpsRepository, RedisClient};
+use crate::db::{CompleteTaskCommand, OpsRepoError, OpsRepository, RedisClient, TriggerCommand};
 use crate::models::{ActorContext, ActorRole};
 use crate::runtime::Shutdown;
 
@@ -50,9 +50,25 @@ impl SimDriver {
     /// Returns the tasks completed by this pass (replays are not counted).
     pub async fn run_once(&self, now: DateTime<Utc>) -> Result<Vec<String>, OpsRepoError> {
         let mut completed = Vec::new();
-        for (task_id, version, assigned_at, eta_s) in self.repo.assigned_tasks(&self.params.graph_dataset).await? {
+        for (task_id, version, assigned_at, eta_s, kind) in self.repo.assigned_tasks(&self.params.graph_dataset).await? {
             let due = mission_secs(eta_s, self.params.sim_on_scene_secs, self.params.sim_time_scale);
-            if (now - assigned_at).num_milliseconds() as f64 / 1000.0 < due {
+            let elapsed = (now - assigned_at).num_milliseconds() as f64 / 1000.0;
+            // A boat crew reports "victim aboard" halfway through, so the
+            // road leg is sent to meet it (M6b). Replays are harmless.
+            if kind == "WATER_EXTRACTION" && elapsed >= due / 2.0 {
+                let aboard = TriggerCommand {
+                    request_id: format!("sim:aboard:{task_id}"),
+                    task_id: task_id.clone(),
+                    expected_version: version,
+                    reason: "VICTIM_ABOARD".into(),
+                };
+                match self.repo.trigger_road_leg(&self.actor, &aboard).await {
+                    Ok(outcome) if !outcome.replayed => info!(task_id = %task_id, "Simulated crew: victim aboard"),
+                    Ok(_) | Err(OpsRepoError::NotAvailable(_) | OpsRepoError::InvalidData(_) | OpsRepoError::NotFound(_)) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            if elapsed < due {
                 continue;
             }
             let command = CompleteTaskCommand {

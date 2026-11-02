@@ -346,3 +346,15 @@ textarea:focus, input:focus, select:focus { border-color: #629a81; box-shadow: 0
 .inline-form { display: flex; gap: 8px; align-items: center; }
 .inline-form span { font-size: 11px; color: var(--ink); white-space: nowrap; }
 .inline-form input { flex: 1; padding: 7px 9px; }
+
+/* M6b: boat-then-road missions */
+.mission-panel { margin-top: 16px; padding: 14px; border: 1px solid #c9d8e6; border-left: 4px solid #2f6fb0; border-radius: 8px; background: #f6f9fc; }
+.mission-panel h3 { font-size: 14px; }
+.mission-legs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mission-leg { border: 1px solid var(--line); border-radius: 6px; padding: 9px; background: #fff; font-size: 11px; }
+.mission-leg b { display: block; font: 600 10px var(--mono); margin-bottom: 4px; }
+.mission-leg small { display: block; color: var(--muted); margin-top: 4px; }
+.mission-leg.completed { border-color: #bed9cb; }
+.mission-leg.assigned { border-color: #b9cfe0; }
+@media (max-width: 600px) { .mission-legs { grid-template-columns: 1fr; } }
+.map-legend .water::before { background: #2f6fb0; }

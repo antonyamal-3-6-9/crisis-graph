@@ -381,55 +381,6 @@ impl RoutingGraph {
 }
 
 impl RoutingGraph {
-    /// Cost from `query.origin` to every reachable junction (single-source
-    /// Dijkstra, no target; `query.destination` is ignored). Uses the same
-    /// edge costs as [`RoutingGraph::route`], so a cost here equals the
-    /// route's total for that destination. Unreachable junctions are absent.
-    pub fn costs_from(&self, query: &RoutingQuery) -> Result<HashMap<String, f64>, PathfinderError> {
-        let start_idx = *self
-            .node_indices
-            .get(&query.origin)
-            .ok_or_else(|| PathfinderError::OriginNotFound(query.origin.clone()))?;
-        let distances = dijkstra(&self.graph, start_idx, None, |edge_ref| edge_cost(query, edge_ref.weight()));
-        Ok(distances
-            .into_iter()
-            .filter(|(_, cost)| cost.is_finite())
-            .map(|(idx, cost)| (self.graph[idx].clone(), cost))
-            .collect())
-    }
-}
-
-/// Cost of one edge for a query: infinite when the segment is blocked or the
-/// asset may not use it, otherwise the chosen metric.
-fn edge_cost(query: &RoutingQuery, edge: &RoutingEdge) -> f64 {
-    if query.blocked_segments.contains(&edge.segment_id) {
-        return f64::INFINITY;
-    }
-    if !road_access_allowed(query.asset_type.as_ref(), edge) {
-        return f64::INFINITY;
-    }
-    match query.cost_metric {
-        CostMetric::FastestTime => edge.travel_time_s.max(0.01),
-        CostMetric::ShortestDistance => (edge.length_m / 1_000.0).max(0.0001),
-    }
-}
-
-/// Deterministic directed graph pathfinder.
-pub struct DeterministicPathfinder;
-
-impl DeterministicPathfinder {
-    /// Primary multi-modal directed routing engine.
-    ///
-    /// Evaluates passable edges using a directed graph (`DiGraph`), enforcing one-way directionality,
-    /// vehicle-specific accessibility, active operational closures, and user-specified cost metrics.
-    /// Builds the graph for this call; use [`RoutingGraph`] to build it once and route many times.
-    pub fn find_directed_route(
-        edges: &[RoutingEdge],
-        query: &RoutingQuery,
-    ) -> Result<RouteResult, PathfinderError> {
-        RoutingGraph::from_edges(edges).route(query)
-    }
-
     /// Actionable Multi-Modal Routing & Cut-Edge Mitigation Solver.
     ///
     /// 1. Primary Pass: Evaluates strict passable directed routing via `find_directed_route`.
@@ -442,10 +393,10 @@ impl DeterministicPathfinder {
     ///
     /// 3. Leg Segmentation: Decomposes the traversed segments into homogeneous operational legs
     ///    (Road Vehicle -> Staging Junction -> Rescue Boat -> Destination).
-    pub fn find_multimodal_route(
-        edges: &[RoutingEdge],
-        query: &RoutingQuery,
-    ) -> Result<MultiModalPlan, PathfinderError> {
+    ///
+    /// `boat_speed_kmh`: when given, water legs are timed at this speed (an
+    /// estimate: there is no water network); otherwise at road speed.
+    pub fn multimodal(&self, query: &RoutingQuery, boat_speed_kmh: Option<f64>) -> Result<MultiModalPlan, PathfinderError> {
         let primary_asset = query.asset_type.clone().unwrap_or(AssetType::Ambulance);
 
         if query.origin == query.destination {
@@ -479,7 +430,7 @@ impl DeterministicPathfinder {
         }
 
         // Pass 1: Try strict passable directed route
-        match Self::find_directed_route(edges, query) {
+        match self.route(query) {
             Ok(direct_route) => {
                 let single_leg = RouteLeg {
                     leg_index: 0,
@@ -520,44 +471,13 @@ impl DeterministicPathfinder {
         }
 
         // Pass 2: Relaxed Dijkstra with Big-M Hazard Penalty
-        let mut graph = DiGraph::<String, RoutingEdge>::new();
-        let mut node_map_indices: HashMap<String, NodeIndex> = HashMap::new();
-        let mut index_to_node_name: HashMap<NodeIndex, String> = HashMap::new();
-
-        let get_or_create_node = |name: &str,
-                                  g: &mut DiGraph<String, RoutingEdge>,
-                                  map: &mut HashMap<String, NodeIndex>,
-                                  rev: &mut HashMap<NodeIndex, String>| {
-            if let Some(&idx) = map.get(name) {
-                idx
-            } else {
-                let idx = g.add_node(name.to_string());
-                map.insert(name.to_string(), idx);
-                rev.insert(idx, name.to_string());
-                idx
-            }
-        };
-
-        for edge in edges {
-            let u = get_or_create_node(
-                &edge.source,
-                &mut graph,
-                &mut node_map_indices,
-                &mut index_to_node_name,
-            );
-            let v = get_or_create_node(
-                &edge.target,
-                &mut graph,
-                &mut node_map_indices,
-                &mut index_to_node_name,
-            );
-            graph.add_edge(u, v, edge.clone());
-        }
-
-        let start_idx = *node_map_indices
+        let graph = &self.graph;
+        let start_idx = *self
+            .node_indices
             .get(&query.origin)
             .ok_or_else(|| PathfinderError::OriginNotFound(query.origin.clone()))?;
-        let target_idx = *node_map_indices
+        let target_idx = *self
+            .node_indices
             .get(&query.destination)
             .ok_or_else(|| PathfinderError::DestinationNotFound(query.destination.clone()))?;
 
@@ -579,7 +499,7 @@ impl DeterministicPathfinder {
             }
         };
 
-        let distances = dijkstra(&graph, start_idx, Some(target_idx), penalty_cost_fn);
+        let distances = dijkstra(graph, start_idx, Some(target_idx), penalty_cost_fn);
 
         let _target_distance = distances
             .get(&target_idx)
@@ -723,7 +643,10 @@ impl DeterministicPathfinder {
 
             let segment_ids: Vec<String> = raw_leg.edges.iter().map(|e| e.segment_id.clone()).collect();
             let distance_km: f64 = raw_leg.edges.iter().map(|e| e.length_m / 1_000.0).sum();
-            let travel_time_s: f64 = raw_leg.edges.iter().map(|e| e.travel_time_s).sum();
+            let travel_time_s: f64 = match boat_speed_kmh {
+                Some(kmh) if raw_leg.is_hazard && kmh > 0.0 => distance_km / kmh * 3600.0,
+                _ => raw_leg.edges.iter().map(|e| e.travel_time_s).sum(),
+            };
 
             if raw_leg.is_hazard && staging_junction.is_none() {
                 staging_junction = Some(leg_origin.clone());
@@ -837,6 +760,64 @@ impl DeterministicPathfinder {
             mitigation_asset,
             recommendation_summary,
         })
+    }
+
+    /// Cost from `query.origin` to every reachable junction (single-source
+    /// Dijkstra, no target; `query.destination` is ignored). Uses the same
+    /// edge costs as [`RoutingGraph::route`], so a cost here equals the
+    /// route's total for that destination. Unreachable junctions are absent.
+    pub fn costs_from(&self, query: &RoutingQuery) -> Result<HashMap<String, f64>, PathfinderError> {
+        let start_idx = *self
+            .node_indices
+            .get(&query.origin)
+            .ok_or_else(|| PathfinderError::OriginNotFound(query.origin.clone()))?;
+        let distances = dijkstra(&self.graph, start_idx, None, |edge_ref| edge_cost(query, edge_ref.weight()));
+        Ok(distances
+            .into_iter()
+            .filter(|(_, cost)| cost.is_finite())
+            .map(|(idx, cost)| (self.graph[idx].clone(), cost))
+            .collect())
+    }
+}
+
+/// Cost of one edge for a query: infinite when the segment is blocked or the
+/// asset may not use it, otherwise the chosen metric.
+fn edge_cost(query: &RoutingQuery, edge: &RoutingEdge) -> f64 {
+    if query.blocked_segments.contains(&edge.segment_id) {
+        return f64::INFINITY;
+    }
+    if !road_access_allowed(query.asset_type.as_ref(), edge) {
+        return f64::INFINITY;
+    }
+    match query.cost_metric {
+        CostMetric::FastestTime => edge.travel_time_s.max(0.01),
+        CostMetric::ShortestDistance => (edge.length_m / 1_000.0).max(0.0001),
+    }
+}
+
+/// Deterministic directed graph pathfinder.
+pub struct DeterministicPathfinder;
+
+impl DeterministicPathfinder {
+    /// Primary multi-modal directed routing engine.
+    ///
+    /// Evaluates passable edges using a directed graph (`DiGraph`), enforcing one-way directionality,
+    /// vehicle-specific accessibility, active operational closures, and user-specified cost metrics.
+    /// Builds the graph for this call; use [`RoutingGraph`] to build it once and route many times.
+    pub fn find_directed_route(
+        edges: &[RoutingEdge],
+        query: &RoutingQuery,
+    ) -> Result<RouteResult, PathfinderError> {
+        RoutingGraph::from_edges(edges).route(query)
+    }
+
+    /// Multi-modal planner over a slice of edges; builds the graph for this
+    /// call. See [`RoutingGraph::multimodal`] (water legs timed at road speed).
+    pub fn find_multimodal_route(
+        edges: &[RoutingEdge],
+        query: &RoutingQuery,
+    ) -> Result<MultiModalPlan, PathfinderError> {
+        RoutingGraph::from_edges(edges).multimodal(query, None)
     }
 
     /// Legacy compatibility method: computes shortest path over `PassableEdge` slice.
@@ -1274,5 +1255,24 @@ mod tests {
             graph.costs_from(&RoutingQuery::new("Z", "")),
             Err(PathfinderError::OriginNotFound(_))
         ));
+    }
+
+    #[test]
+    fn snapshot_planner_times_water_legs_at_boat_speed() {
+        let edges = vec![
+            create_edge("seg_A_B", "A", "B", 1.0, true, true),
+            create_edge("seg_B_C_flooded", "B", "C", 2.0, true, true),
+        ];
+        let graph = RoutingGraph::from_edges(&edges);
+        let query = RoutingQuery::new("A", "C")
+            .with_asset_type(AssetType::RescueBoat)
+            .with_blocked_segments(HashSet::from(["seg_B_C_flooded".to_string()]));
+        let legacy = graph.multimodal(&query, None).unwrap();
+        let boat = graph.multimodal(&query, Some(8.0)).unwrap();
+        assert_eq!(boat.topology, MitigationTopology::TerminalHazard);
+        assert_eq!(boat.staging_junction.as_deref(), Some("B"));
+        assert!((legacy.legs[1].travel_time_s - 120.0).abs() < 1e-6, "legacy keeps road timing");
+        assert!((boat.legs[1].travel_time_s - 900.0).abs() < 1e-6, "2 km at 8 km/h");
+        assert!((boat.legs[0].travel_time_s - 60.0).abs() < 1e-6, "road leg unchanged");
     }
 }

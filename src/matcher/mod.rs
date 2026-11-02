@@ -17,6 +17,7 @@
 //! is checked segment by segment against live Neo4j state before commit.
 
 pub mod assign;
+mod mission;
 pub mod queue;
 
 use std::collections::HashMap;
@@ -34,7 +35,7 @@ use crate::db::{
     ESCALATION_NO_ELIGIBLE_VEHICLE, ESCALATION_OVERDUE,
 };
 use crate::graph::{GraphSnapshot, HAZARDS_CHANGED};
-use crate::models::{AssetType, DropoffShelter, QueuedTask, Vehicle};
+use crate::models::{AssetType, DropoffShelter, QueuedTask, TaskKind, Vehicle};
 use crate::runtime::{Lease, Shutdown};
 use crate::solver::RoutingQuery;
 
@@ -73,6 +74,8 @@ pub struct CycleReport {
     pub verify_failures: usize,
     pub escalated: usize,
     pub dropoff_unresolved: usize,
+    /// Cut-off tasks converted to boat-then-road missions (M6b).
+    pub converted: usize,
 }
 
 impl CycleReport {
@@ -83,6 +86,7 @@ impl CycleReport {
             && self.conflicts == 0
             && self.verify_failures == 0
             && self.escalated == 0
+            && self.converted == 0
     }
 }
 
@@ -193,6 +197,14 @@ impl Matcher {
             .map(|t| effective_tier(t.priority_rank, t.queued_at, now, self.params.aging_stable_to_urgent_secs))
             .collect();
         let costs = build_cost_table(&self.snapshot, &tasks, &vehicles, now).await?;
+        // Road pickups no vehicle can serve may be cut off by water (M6b).
+        let unserved: Vec<&QueuedTask> = tasks
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| t.kind == TaskKind::RoadPickup && (0..costs.vehicles()).all(|v| costs.get(*i, v).is_none()))
+            .map(|(_, t)| t)
+            .collect();
+        self.convert_cut_off(unserved, &fleet, now, &mut report).await?;
         let mut assigned_tasks = Vec::new();
         for pair in solve_tiers(&tiers, &costs) {
             let (task, vehicle) = (&tasks[pair.task], &vehicles[pair.vehicle]);
@@ -285,7 +297,16 @@ impl Matcher {
             return Ok(false);
         }
 
-        let dropoff = self.choose_dropoff(task, &asset, shelters).await?;
+        // A boat leg carries no one to a shelter: the road leg from the
+        // staging point does. Its water part is an unverified estimate.
+        let boat = task.kind == TaskKind::WaterExtraction;
+        let dropoff = if boat { None } else { self.choose_dropoff(task, &asset, shelters).await? };
+        let extra = if boat {
+            json!({ "kind": task.kind.as_str(), "staging_junction_id": task.junction_id,
+                    "water_eta_s": task.water_eta_s, "water_leg": "UNVERIFIED_ESTIMATE" })
+        } else {
+            json!({ "kind": task.kind.as_str() })
+        };
         let commit = AssignmentCommit {
             reservation_id: reservation_id.to_string(),
             task_id: task.task_id.clone(),
@@ -295,12 +316,14 @@ impl Matcher {
             fence_token: token,
             route_json: serde_json::to_string(&routed.route)?,
             overlay_version: routed.overlay_version,
-            eta_s: routed.route.total_travel_time_s,
+            eta_s: routed.route.total_travel_time_s + task.water_eta_s,
             dropoff,
+            dropoff_required: !boat,
+            extra,
         };
         match self.repo.commit_assignment(&commit).await {
             Ok(outcome) => {
-                if outcome.dropoff_shelter.is_none() {
+                if commit.dropoff_required && outcome.dropoff_shelter.is_none() {
                     report.dropoff_unresolved += 1;
                 }
                 report.assigned.push((task.task_id.clone(), vehicle.vehicle_id.clone()));
