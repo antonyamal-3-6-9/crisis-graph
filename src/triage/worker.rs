@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
-use tracing::{info, warn};
+use tracing::{info, warn, Instrument};
 
 use super::{failed_record, record_from_output, TriageEngine};
 use crate::config::PipelineParams;
@@ -45,6 +45,9 @@ impl TriageOutcome {
 pub struct TriageWorker {
     repo: OpsRepository,
     redis: RedisClient,
+    /// Connection for the blocking group read, so it never delays acks and
+    /// dead-letter writes on the shared connection (M8).
+    reader: RedisClient,
     engine: Arc<dyn TriageEngine>,
     breaker: Arc<Mutex<CircuitBreaker>>,
     permits: Arc<Semaphore>,
@@ -71,6 +74,7 @@ impl TriageWorker {
         let concurrency = concurrency.max(1);
         Self {
             repo,
+            reader: redis.clone(),
             redis,
             engine,
             breaker: Arc::new(Mutex::new(breaker)),
@@ -79,6 +83,12 @@ impl TriageWorker {
             concurrency,
             consumer: consumer.into(),
         }
+    }
+
+    /// Do the blocking stream read on its own connection.
+    pub fn with_reader(mut self, reader: RedisClient) -> Self {
+        self.reader = reader;
+        self
     }
 
     pub fn dead_letter_stream(&self) -> String {
@@ -93,6 +103,13 @@ impl TriageWorker {
     /// (including dead-lettered and ignored messages); `Err` means a
     /// processing error, so it is left pending and retried later.
     pub async fn handle_message(&self, message: &StreamMessage) -> Result<TriageOutcome, OpsRepoError> {
+        // Continue the report's trace from intake (M8).
+        let span = tracing::info_span!("triage.report", report_id = message.field("aggregate_id").unwrap_or_default());
+        crate::runtime::telemetry::set_parent(&span, message.field("traceparent"));
+        self.handle_message_traced(message).instrument(span).await
+    }
+
+    async fn handle_message_traced(&self, message: &StreamMessage) -> Result<TriageOutcome, OpsRepoError> {
         if message.field("type") != Some("REPORT_RECEIVED") {
             return Ok(TriageOutcome::Ignored);
         }
@@ -186,7 +203,11 @@ impl TriageWorker {
             }
             match result {
                 Ok(output) => record_from_output(&output),
-                Err(error) => failed_record(&format!("Triage extraction failed: {error}")),
+                Err(error) => {
+                    metrics::counter!("crisisgraph_triage_extraction_failures_total", "reason" => failure_reason(&error))
+                        .increment(1);
+                    failed_record(&format!("Triage extraction failed: {error}"))
+                }
             }
         };
         self.publish_breaker_state();
@@ -264,7 +285,7 @@ impl TriageWorker {
             }
 
             let read = tokio::select! {
-                read = self.redis.read_group(&stream, TRIAGE_GROUP, &self.consumer, self.concurrency, READ_BLOCK_MS) => read,
+                read = self.reader.read_group(&stream, TRIAGE_GROUP, &self.consumer, self.concurrency, READ_BLOCK_MS) => read,
                 _ = shutdown.wait() => break,
             };
             match read {
@@ -283,6 +304,20 @@ impl TriageWorker {
             while tasks.join_next().await.is_some() {}
         }
         info!(consumer = %self.consumer, "Triage worker stopped");
+    }
+}
+
+/// A coarse class for an extraction failure, for metrics.
+fn failure_reason(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("429") || lower.contains("rate limit") {
+        "rate_limited"
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        "timeout"
+    } else if lower.contains("unavailable") || lower.contains("http ") {
+        "http"
+    } else {
+        "invalid"
     }
 }
 

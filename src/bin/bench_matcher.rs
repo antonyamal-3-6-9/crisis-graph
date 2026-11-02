@@ -183,6 +183,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             incident_junction_id: String::new(),
                             water_eta_s: 0.0,
                             boat_plan_declined: false,
+                            traceparent: None,
                         }
                     })
                     .collect();

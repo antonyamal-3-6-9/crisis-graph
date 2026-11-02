@@ -183,6 +183,19 @@ pub struct QueuedTask {
     pub water_eta_s: f64,
     /// A dispatcher cancelled a boat plan for this incident: never convert.
     pub boat_plan_declined: bool,
+    /// W3C trace context of the report that created the task (M8).
+    pub traceparent: Option<String>,
+}
+
+/// An `ASSIGNED` task as the simulated driver sees it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssignedTask {
+    pub task_id: String,
+    pub version: u64,
+    pub assigned_at: DateTime<Utc>,
+    pub eta_s: f64,
+    pub kind: String,
+    pub traceparent: Option<String>,
 }
 
 impl QueuedTask {
@@ -350,6 +363,8 @@ pub struct OutboxRecord {
     pub event_type: String,
     pub payload_json: String,
     pub created_at: DateTime<Utc>,
+    /// W3C trace context to carry into the stream message (M8).
+    pub traceparent: Option<String>,
 }
 
 #[cfg(test)]

@@ -6,11 +6,14 @@ pub mod lease;
 pub mod metrics;
 pub mod ops_http;
 pub mod shutdown;
+pub mod streams;
+pub mod telemetry;
 
 pub use breaker::{BreakerState, CircuitBreaker};
 pub use lease::Lease;
 pub use ops_http::{instrument, ops_router, ops_routes, OpsState, ReadyGate};
 pub use shutdown::Shutdown;
+pub use streams::{sample_streams, SampledStream};
 
 /// A pipeline role. One binary runs exactly one role per process; roles are
 /// scaled independently by running more processes.

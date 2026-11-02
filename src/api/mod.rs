@@ -13,7 +13,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use tracing::warn;
+use tracing::{warn, Instrument};
 
 mod auth;
 mod console;
@@ -166,7 +166,10 @@ async fn create_report(State(state): State<ApiState>, body: Option<Json<ReportRe
         }
     };
 
-    match state.repo.create_report(&report).await {
+    // One SOS is one trace: it starts here (M8).
+    let span = tracing::info_span!("intake.report", device_id = %report.device_id);
+    let traceparent = crate::runtime::telemetry::traceparent(&span);
+    match state.repo.create_report_traced(&report, traceparent.as_deref()).instrument(span).await {
         Ok((saved, created)) => {
             record(if created { "created" } else { "replayed" });
             let mut headers = HeaderMap::new();

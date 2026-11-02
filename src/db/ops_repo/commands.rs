@@ -178,8 +178,28 @@ impl OpsRepository {
         self.run_command(&command.request_id, Body::CancelMission(actor, command)).await
     }
 
-    /// Run one command transaction with replay and transient retry.
+    /// Run one command transaction with replay and transient retry, and
+    /// count the result per command.
     async fn run_command(&self, request_id: &str, body: Body<'_>) -> Result<CommandOutcome, OpsRepoError> {
+        let result = self.run_command_once(request_id, body).await;
+        let outcome = match &result {
+            Ok(o) if o.replayed => "replayed",
+            Ok(_) => "applied",
+            Err(OpsRepoError::Conflict(_)) => {
+                metrics::counter!("crisisgraph_reservation_conflicts_total", "source" => "command").increment(1);
+                "conflict"
+            }
+            Err(OpsRepoError::NotAvailable(_)) => "stale",
+            Err(OpsRepoError::Forbidden(_)) => "forbidden",
+            Err(OpsRepoError::InvalidData(_)) => "invalid",
+            Err(OpsRepoError::NotFound(_)) => "not_found",
+            Err(_) => "error",
+        };
+        metrics::counter!("crisisgraph_commands_total", "command" => body.name(), "result" => outcome).increment(1);
+        result
+    }
+
+    async fn run_command_once(&self, request_id: &str, body: Body<'_>) -> Result<CommandOutcome, OpsRepoError> {
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -233,6 +253,20 @@ impl OpsRepository {
                 }
                 other => return other,
             }
+        }
+    }
+}
+
+impl Body<'_> {
+    fn name(&self) -> &'static str {
+        match self {
+            Body::Review(..) => "review",
+            Body::Complete(..) => "complete",
+            Body::Merge(..) => "merge",
+            Body::Split(..) => "split",
+            Body::VehicleStatus(..) => "vehicle_status",
+            Body::Trigger(..) => "trigger",
+            Body::CancelMission(..) => "cancel_mission",
         }
     }
 }
@@ -291,7 +325,7 @@ async fn review_in(txn: &mut Txn, actor: &ActorContext, command: &ReviewCommand)
                      CREATE (i)-[:HAS_TASK {seq: 1}]->(:Task { \
                          task_id: $task_id, incident_id: i.incident_id, kind: 'ROAD_PICKUP', status: 'QUEUED', \
                          required_asset: $asset, urgency: urgency, priority_rank: rank, version: 0, \
-                         created_at: datetime(), queued_at: datetime() }) \
+                         created_at: datetime(), queued_at: datetime(), traceparent: i.traceparent }) \
                      CREATE (i)-[:HAS_AUDIT_EVENT]->(:AuditEvent { \
                          event_id: $audit_id, aggregate_type: 'Incident', aggregate_id: i.incident_id, \
                          action: 'INCIDENT_REVIEW_APPROVED', actor_id: $actor, from_state: 'REVIEW_REQUIRED', \
@@ -582,7 +616,7 @@ async fn cancel_mission_in(txn: &mut Txn, actor: &ActorContext, command: &Cancel
                  task_id: $task_id, incident_id: i.incident_id, kind: 'ROAD_PICKUP', status: 'QUEUED', \
                  required_asset: coalesce(i.required_asset, 'AMBULANCE'), urgency: i.urgency, \
                  priority_rank: coalesce(i.priority_rank, 1), version: 0, created_at: datetime(), \
-                 queued_at: coalesce(queued_at, datetime()) }) \
+                 queued_at: coalesce(queued_at, datetime()), traceparent: i.traceparent }) \
              SET i.mission = 'BOAT_THEN_ROAD_CANCELLED', i.boat_plan_declined = true, \
                  i.version = i.version + 1, i.updated_at = datetime() \
              CREATE (i)-[:HAS_AUDIT_EVENT]->(:AuditEvent { \
@@ -953,7 +987,7 @@ async fn split_in(txn: &mut Txn, actor: &ActorContext, command: &SplitCommand) -
                  urgency_flags: coalesce(r.urgency_flags, []), urgency_rules_version: r.urgency_rules_version, \
                  priority_rank: coalesce(r.priority_rank, 1), \
                  callback_required: coalesce(r.urgency, 'UNKNOWN') = 'UNKNOWN', \
-                 split_from: i.incident_id, created_at: datetime(), updated_at: datetime() }) \
+                 split_from: i.incident_id, traceparent: r.traceparent, created_at: datetime(), updated_at: datetime() }) \
              CREATE (r)-[:REPORTS {kind: 'PRIMARY', attached_at: datetime(), rule: 'SPLIT'}]->(n) \
              FOREACH (_ IN CASE WHEN j IS NULL THEN [] ELSE [1] END | CREATE (n)-[:LOCATED_AT]->(j)) \
              WITH i, n, r, link.kind AS old_kind \

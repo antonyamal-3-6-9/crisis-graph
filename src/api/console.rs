@@ -19,7 +19,7 @@ use chrono::Utc;
 use redis::AsyncCommands;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tracing::warn;
+use tracing::{warn, Instrument};
 
 use super::auth::{authorize, OperatorTokens};
 use super::{error_status, validate, ReportRequest};
@@ -319,6 +319,10 @@ async fn system(State(state): State<ConsoleApiState>) -> Response {
         "overlay_version": overlay_version,
         "queue_length": queue_len,
         "simulated_driver": driver,
+        "monitoring": {
+            "grafana": (!state.params.grafana_url.is_empty()).then(|| state.params.grafana_url.clone()),
+            "jaeger": (!state.params.jaeger_url.is_empty()).then(|| state.params.jaeger_url.clone()),
+        },
         "checked_at": Utc::now().to_rfc3339(),
     }))
     .into_response()
@@ -632,7 +636,9 @@ async fn dispatch(State(state): State<ConsoleApiState>, body: Option<Json<Report
         Ok(report) => report,
         Err(reason) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": reason }))).into_response(),
     };
-    let (report, _) = match state.repo.create_report(&report).await {
+    let span = tracing::info_span!("intake.dispatch", device_id = %report.device_id);
+    let traceparent = crate::runtime::telemetry::traceparent(&span);
+    let (report, _) = match state.repo.create_report_traced(&report, traceparent.as_deref()).instrument(span).await {
         Ok(created) => created,
         Err(error) => return repo_error(&error),
     };

@@ -1,0 +1,23 @@
+# Prometheus for a local CrisisGraph pipeline (M8). Run with ops/run-prometheus.sh.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: crisisgraph
+    static_configs:
+      - targets: ["localhost:3100"]
+        labels: { role: api }
+      - targets: ["localhost:9101"]
+        labels: { role: triage }
+      - targets: ["localhost:9102", "localhost:9112"]
+        labels: { role: matcher }
+      - targets: ["localhost:9103"]
+        labels: { role: graph }
+      - targets: ["localhost:9104"]
+        labels: { role: relay }
+      - targets: ["localhost:9105"]
+        labels: { role: driver }

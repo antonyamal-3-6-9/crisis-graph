@@ -370,7 +370,7 @@ async fn commit_triage_in(
                  urgency_flags: coalesce(r.urgency_flags, []), \
                  urgency_rules_version: r.urgency_rules_version, \
                  priority_rank: coalesce(r.priority_rank, 1), \
-                 callback_required: coalesce(r.urgency, 'UNKNOWN') = 'UNKNOWN', \
+                 callback_required: coalesce(r.urgency, 'UNKNOWN') = 'UNKNOWN', traceparent: r.traceparent, \
                  created_at: datetime(), updated_at: datetime() }) \
              CREATE (r)-[:REPORTS {kind: 'PRIMARY', attached_at: datetime(), rule: 'NEW'}]->(i) \
              SET r.dedup_rule = 'NEW' \
@@ -379,7 +379,7 @@ async fn commit_triage_in(
                  CREATE (i)-[:HAS_TASK {seq: 1}]->(:Task { \
                      task_id: $task_id, incident_id: $incident_id, kind: 'ROAD_PICKUP', status: 'QUEUED', \
                      required_asset: r.required_asset, urgency: i.urgency, priority_rank: i.priority_rank, \
-                     version: 0, created_at: datetime(), queued_at: datetime() })) \
+                     version: 0, created_at: datetime(), queued_at: datetime(), traceparent: r.traceparent })) \
              CREATE (i)-[:HAS_AUDIT_EVENT]->(:AuditEvent { \
                  event_id: $audit_id, aggregate_type: 'Incident', aggregate_id: $incident_id, \
                  action: 'INCIDENT_CREATED', actor_id: $actor_id, to_state: $status, new_version: 0, \

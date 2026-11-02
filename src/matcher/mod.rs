@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
 use serde_json::json;
-use tracing::{info, warn};
+use tracing::{info, warn, Instrument};
 
 use crate::config::PipelineParams;
 use crate::db::{
@@ -162,7 +162,9 @@ impl Matcher {
             match (task.first(), vehicle) {
                 (Some(task), Some(vehicle)) => {
                     report.resumed_holds += 1;
-                    self.finish(token, task, &vehicle, &hold.reservation_id, &mut shelters, &mut report).await?;
+                    self.finish(token, task, &vehicle, &hold.reservation_id, &mut shelters, &mut report)
+                        .instrument(assign_span(task, &vehicle.vehicle_id))
+                        .await?;
                 }
                 _ => {
                     self.repo.release_reservation(&hold.reservation_id, "hold could not be resumed").await?;
@@ -211,12 +213,16 @@ impl Matcher {
             let held_until = Utc::now() + chrono::Duration::seconds(self.params.hold_expiry_secs as i64);
             match self.repo.hold_vehicle(&task.task_id, &task.incident_id, &vehicle.vehicle_id, vehicle.version, held_until).await {
                 Ok(hold) => {
-                    if self.finish(token, task, vehicle, &hold.reservation.reservation_id, &mut shelters, &mut report).await? {
+                    let span = assign_span(task, &vehicle.vehicle_id);
+                    if self.finish(token, task, vehicle, &hold.reservation.reservation_id, &mut shelters, &mut report).instrument(span).await? {
                         assigned_tasks.push(pair.task);
                     }
                 }
                 // Taken meanwhile (dispatcher action): the task waits for the next cycle.
-                Err(OpsRepoError::Conflict(_) | OpsRepoError::NotAvailable(_)) => report.conflicts += 1,
+                Err(OpsRepoError::Conflict(_) | OpsRepoError::NotAvailable(_)) => {
+                    report.conflicts += 1;
+                    metrics::counter!("crisisgraph_reservation_conflicts_total", "source" => "matcher_hold").increment(1);
+                }
                 Err(error) => return Err(error.into()),
             }
         }
@@ -328,6 +334,14 @@ impl Matcher {
                 }
                 report.assigned.push((task.task_id.clone(), vehicle.vehicle_id.clone()));
                 metrics::counter!("crisisgraph_matcher_assignments_total").increment(1);
+                let now = Utc::now();
+                let tier = effective_tier(task.priority_rank, task.queued_at, now, self.params.aging_stable_to_urgent_secs);
+                let since = |at: DateTime<Utc>| (now - at).num_milliseconds().max(0) as f64 / 1000.0;
+                metrics::histogram!("crisisgraph_queue_wait_seconds", "tier" => tier.as_str()).record(since(task.queued_at));
+                if let Some(first) = outcome.first_report_at {
+                    metrics::histogram!("crisisgraph_time_to_assignment_seconds", "tier" => tier.as_str(), "kind" => task.kind.as_str())
+                        .record(since(first));
+                }
                 if let Err(error) = self.queue.remove(&task.task_id).await {
                     warn!(%error, task_id = %task.task_id, "Could not remove assigned task from the queue");
                 }
@@ -342,6 +356,7 @@ impl Matcher {
                 match error {
                     OpsRepoError::NotAvailable(_) | OpsRepoError::Conflict(_) => {
                         report.conflicts += 1;
+                        metrics::counter!("crisisgraph_reservation_conflicts_total", "source" => "matcher_commit").increment(1);
                         Ok(false)
                     }
                     other => Err(other.into()),
@@ -559,6 +574,14 @@ pub async fn build_cost_table(
         }
         reach[start_of[v]].get(&task.junction_id).map(|seconds| seconds.ceil() as u32)
     }))
+}
+
+/// The span for one assignment (route, verify, commit), continuing the
+/// task's trace from intake (M8).
+fn assign_span(task: &QueuedTask, vehicle_id: &str) -> tracing::Span {
+    let span = tracing::info_span!("matcher.assign", task_id = %task.task_id, vehicle_id = %vehicle_id, kind = task.kind.as_str());
+    crate::runtime::telemetry::set_parent(&span, task.traceparent.as_deref());
+    span
 }
 
 fn escalated(task: &QueuedTask, reason: &str) -> bool {

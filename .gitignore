@@ -29,3 +29,6 @@ docs/internal/
 .DS_Store
 Thumbs.db
 
+
+# Local monitoring data (Prometheus, Grafana)
+/.ops-data/

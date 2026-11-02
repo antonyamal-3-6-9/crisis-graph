@@ -211,11 +211,28 @@ async function loadSystem() {
     dot("relay", data.relay_leader, data.relay_leader ? "Relay: leader running" : "Relay: no leader (events delayed)");
     dot("matcher", data.matcher_leader, data.matcher_leader ? `Matcher: leader · queue ${data.queue_length}` : "Matcher: no leader (no assignment)");
     dot("driver", data.simulated_driver ? null : false, data.simulated_driver ? "Simulated driver: completing missions (demo)" : "Simulated driver: off");
+    renderMonitoringLinks(data.monitoring || {});
   } catch (error) {
     dot("relay", false, "Relay: API unreachable");
     dot("matcher", false, "Matcher: API unreachable");
     dot("driver", false, "Simulated driver: unknown");
   }
+}
+
+// Grafana and Jaeger links when the api role has GRAFANA_URL / JAEGER_URL.
+function renderMonitoringLinks(monitoring) {
+  const box = document.getElementById("monitoring-links");
+  const links = [["grafana", "Dashboards (Grafana)"], ["jaeger", "Traces (Jaeger)"]]
+    .filter(([key]) => typeof monitoring[key] === "string" && /^https?:\/\//.test(monitoring[key]));
+  box.replaceChildren(...links.map(([key, label]) => {
+    const a = document.createElement("a");
+    a.href = monitoring[key];
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = label;
+    return a;
+  }));
+  box.hidden = links.length === 0;
 }
 
 async function loadIncidents() {

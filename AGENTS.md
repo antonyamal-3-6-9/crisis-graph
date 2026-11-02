@@ -55,6 +55,7 @@ Dispatcher / responder action or human escalation
 - **Petgraph:** deterministic shortest-path logic on a directed graph (one-way, access and hazard constraints); the baseline is loaded once per process into a shared snapshot (`arc-swap` hazard overlay).
 - **pathfinding + rayon:** Hungarian assignment per priority tier and parallel cost-table searches in the matcher.
 - **axum + metrics:** intake/hazard API, `/healthz` `/readyz` `/metrics` (Prometheus) on every role; `sha2` for operator token hashes.
+- **OpenTelemetry (`tracing-opentelemetry`, OTLP/HTTP):** one trace per SOS across roles via W3C `traceparent`; exported to Jaeger when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Prometheus, Grafana and Jaeger run natively from `ops/`.
 - **Serde/chrono/thiserror/tracing:** typed contracts, time, errors, and instrumentation.
 
 ## Repository layout
@@ -69,6 +70,7 @@ crisis-graph/
 │   │   └── aluva-periyar-pilot.geojson
 │   └── raw/                          # ignored; downloaded/generated source datasets
 ├── web/                              # operations console (new pipeline); web/legacy/ = old console for `server`
+├── ops/                              # Prometheus config + alert rules, Grafana provisioning + dashboard, run-*.sh
 ├── docs/
 │   ├── asynchronous-multimodal-pipelined-relay.md
 │   └── geospatial-data-engineering.md
@@ -81,7 +83,8 @@ crisis-graph/
 │   │   ├── crisisgraph.rs             # new pipeline: one role per process (--role)
 │   │   ├── migrate_ops.rs             # creates the operational data model (idempotent)
 │   │   ├── load_baseline_graph.rs     # loads normalized junctions/segments into Neo4j
-│   │   └── bench_matcher.rs           # batch vs one-at-a-time allocation bench (read-only)
+│   │   ├── bench_matcher.rs           # batch vs one-at-a-time allocation bench (read-only)
+│   │   └── surge.rs                   # load test: run a scenario, write results, clean up a run
 │   ├── db/
 │   │   ├── ops_schema.rs              # operational constraints/indexes
 │   │   └── ops_repo/                  # vehicles, reservations, beds, reports, tasks, incidents,
@@ -93,10 +96,12 @@ crisis-graph/
 │   ├── api/                           # intake, hazard command, console API + commands, SSE events, operator tokens
 │   ├── graph/                         # shared graph snapshot (baseline once + hazard overlay)
 │   ├── matcher/                       # matcher role: priority queue, tiered Hungarian assignment, T2/T3
-│   ├── sim/                           # simulated driver (demo only)
+│   ├── sim/                           # simulated driver (demo only); surge scenarios + run cleanup
 │   ├── relay.rs                       # outbox relay (leader lease + fencing)
-│   ├── runtime/                       # roles, lease, breaker, shutdown, /healthz /readyz /metrics
-│   ├── triage/                        # triage workers: extraction, minimal dedup, incidents
+│   ├── runtime/                       # roles, lease, breaker, shutdown, /healthz /readyz /metrics,
+│   │                                  # telemetry (tracing + OTLP), stream sampler
+│   ├── triage/                        # triage workers: extraction, minimal dedup, incidents;
+│   │                                  # simulated engine (load tests only)
 │   ├── solver/
 │   ├── config.rs
 │   ├── lib.rs
@@ -111,6 +116,7 @@ crisis-graph/
     ├── console_api_tests.rs           # console API, review/complete commands, SSE replay, end-to-end dispatch
     ├── dispatcher_commands_tests.rs   # merge/split (T4), vehicle status and breakdown, simulated driver
     ├── mission_tests.rs               # boat-then-road missions: conversion, trigger (T6), completion, cancel
+    ├── observability_tests.rs         # one trace intake → assignment, M8 metrics, simulated engine, surge cleanup
     ├── neo4j_baseline_tests.rs        # directed baseline loader and hazard verification
     ├── aluva_pipeline_tests.rs        # legacy end-to-end pipeline (needs llama.cpp on :8000)
     └── integration_tests.rs
@@ -215,12 +221,33 @@ cargo test --test matcher_tests
 cargo test --test console_api_tests
 cargo test --test dispatcher_commands_tests
 cargo test --test mission_tests
+cargo test --test observability_tests
 
 # Batch-quality bench (read-only; real graph and fleet)
 cargo run --release --bin bench_matcher -- --sizes 10,25,40,60 --seeds 20 --seed 2026
 ```
 
 Triage workers (`--role triage`) consume `sos:extract` (consumer group `triage-workers`), save the extraction on the report before deduplicating (so a redelivery never calls the model twice), then in one transaction either attach a same-device follow-up (D-2) or create an `:OpsIncident` (`TRIAGE_APPROVED` + queued `ROAD_PICKUP` task, or `REVIEW_REQUIRED`). Nearby open incidents are flagged `POSSIBLE_DUPLICATE` (D-3), never merged. When extraction fails or the inference circuit breaker is open, the report still becomes a `REVIEW_REQUIRED` incident for manual triage.
+
+Since M8 the pipeline is **observable and load-tested**. Every role exports metrics from pipeline doc §4.11, including:
+
+- stream length, pending count, oldest pending age and dead letters (`src/runtime/streams.rs`);
+- time to assignment and queue wait by tier (histograms);
+- reservation conflicts blocked, by source;
+- extraction failures by reason;
+- commands by result.
+
+`ops/` holds the Prometheus scrape config and alert rules (`promtool check config|rules`) and the provisioned Grafana dashboard *CrisisGraph pipeline*. Run each tool as a user process: `ops/run-prometheus.sh` (:9090), `ops/run-grafana.sh` (:3300), `ops/run-jaeger.sh` (OTLP :4318, UI :16686). Their data goes in the git-ignored `.ops-data/`. Set `GRAFANA_URL` / `JAEGER_URL` on the api role for console links.
+
+**Tracing** (`src/runtime/telemetry.rs`): intake starts a trace and stores its `traceparent` on the report and outbox event. The relay copies it into the stream message. Triage, the matcher (`matcher.assign`) and the driver continue it, and incidents and tasks keep it, so one SOS is one trace in Jaeger.
+
+**Load tests** (`cargo run --release --bin surge -- run|cleanup|page`; results in `docs/results/*.json` and `docs/load-test-results.md`):
+
+- The tool posts seeded reports on real junctions at stepped rates, in English, Manglish and Malayalam, with neighbours (D-3) and repeat callers (D-2). It floods roads mid-run (T7), waits for the pipeline to drain, then records throughput, latencies by tier, queue lag, verification failures and blocked overbooking.
+- `surge cleanup --run-id <id>` removes everything the run created and restores vehicles, beds and hazards.
+- **Run A** uses `INFERENCE_BACKEND=simulated`. The report carries its ground truth as a `#sim{…}` tag, returned after a seeded log-normal delay, so the run measures CrisisGraph rather than the model. Results are labelled "extraction: simulated".
+- **Run B** uses `INFERENCE_BACKEND=openai` (Gemini's OpenAI-compatible endpoint) with `INFERENCE_MAX_RPM`; 429s are retried.
+- Hosted models only ever receive **synthetic** surge reports, never the frozen test sets.
 
 Since M6b victims **cut off by flood water** get a boat-then-road mission. When a queued road pickup's junction is unreachable by road from every depot, the matcher plans on the shared snapshot from each boat start (`RoutingGraph::multimodal`, flooded segments as water, timed at `BOAT_SPEED_KMH`). A terminal or island plan converts the task, in one transaction, into a QUEUED `WATER_EXTRACTION` (boat, towed by road to the staging point) and a `PENDING_TRIGGER` `ROAD_EVACUATION`. The road leg uses the requested road vehicle, else an ambulance for 4 or fewer people or a medical need, else a truck. The conversion raises a `MISSION_CONVERTED` alert. A fragmented cut escalates `NO_SURFACE_ROUTE`. The water leg is stored and shown as an **unverified estimate**; only road legs are verified live, and only road legs reserve drop-off beds. The road leg is queued on "victim aboard" or "send now" (`POST /api/v1/tasks/{id}/trigger`, T6), or automatically when the boat task completes. The boat then waits at the staging point. A dispatcher can cancel the plan (`POST /api/v1/incidents/{id}/mission/cancel`): the incident goes back to a road pickup that is never converted again. The simulated driver reports victim aboard halfway through a boat mission.
 
@@ -344,6 +371,7 @@ cargo test --test matcher_tests
 cargo test --test console_api_tests
 cargo test --test dispatcher_commands_tests
 cargo test --test mission_tests
+cargo test --test observability_tests
 cargo test --test neo4j_baseline_tests
 cargo test --test aluva_pipeline_tests # legacy end to end; needs llama.cpp on :8000
 ```

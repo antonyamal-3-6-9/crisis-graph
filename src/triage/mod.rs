@@ -5,6 +5,7 @@
 //! engine reuses the existing stage 1 (LLM extraction, GPS snapping, landmark
 //! lookup) without changing the legacy pipeline.
 
+pub mod simulated;
 mod worker;
 
 pub use worker::{TriageOutcome, TriageWorker, TRIAGE_GROUP};

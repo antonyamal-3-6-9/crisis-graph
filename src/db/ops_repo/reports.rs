@@ -15,19 +15,31 @@ impl OpsRepository {
     /// `request_id` returns the original report with `created = false` and
     /// writes nothing.
     pub async fn create_report(&self, report: &NewReport) -> Result<(Report, bool), OpsRepoError> {
+        self.create_report_traced(report, None).await
+    }
+
+    /// [`Self::create_report`], recording the W3C `traceparent` of the intake
+    /// span on the report and its `REPORT_RECEIVED` event (M8), so the whole
+    /// pipeline continues one trace.
+    pub async fn create_report_traced(
+        &self,
+        report: &NewReport,
+        traceparent: Option<&str>,
+    ) -> Result<(Report, bool), OpsRepoError> {
         let report_id = new_id();
         let q = query(&format!(
             "MERGE (r:Report {{request_id: $request_id}}) \
              ON CREATE SET r.report_id = $report_id, r.device_id = $device_id, r.channel = $channel, \
                  r.raw_text = $raw_text, r.latitude = $latitude, r.longitude = $longitude, \
                  r.accuracy_m = $accuracy_m, r.received_at = datetime(), \
-                 r.extraction_status = 'PENDING', r._created = true \
+                 r.extraction_status = 'PENDING', r.traceparent = $traceparent, r._created = true \
              WITH r, coalesce(r._created, false) AS created \
              REMOVE r._created \
              FOREACH (_ IN CASE WHEN created THEN [1] ELSE [] END | \
                  CREATE (:OutboxEvent {{ \
                      event_id: $outbox_id, aggregate_id: r.report_id, type: 'REPORT_RECEIVED', \
-                     payload_json: $payload, created_at: datetime(), published: false, attempts: 0 }})) \
+                     payload_json: $payload, created_at: datetime(), published: false, attempts: 0, \
+                     traceparent: $traceparent }})) \
              RETURN created, {REPORT_FIELDS}"
         ))
         .param("request_id", report.request_id.clone())
@@ -39,7 +51,8 @@ impl OpsRepository {
         .param("longitude", report.longitude)
         .param("accuracy_m", report.accuracy_m)
         .param("outbox_id", new_id())
-        .param("payload", json!({ "report_id": report_id }).to_string());
+        .param("payload", json!({ "report_id": report_id }).to_string())
+        .param("traceparent", traceparent);
 
         let row = self
             .write_first_row(q)

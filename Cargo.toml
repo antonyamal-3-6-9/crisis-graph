@@ -44,6 +44,13 @@ axum = "0.8.9"
 tower-http = { version = "0.7.1", features = ["cors", "fs", "trace", "request-id"] }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 
+# Distributed tracing (M8): OpenTelemetry spans exported over OTLP/HTTP to
+# Jaeger when OTEL_EXPORTER_OTLP_ENDPOINT is set
+opentelemetry = "=0.29.1"
+opentelemetry_sdk = { version = "=0.29.0", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "=0.29.0", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+tracing-opentelemetry = "=0.30.0"
+
 # Metrics (Prometheus text exposition, rendered by the ops HTTP endpoint)
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }

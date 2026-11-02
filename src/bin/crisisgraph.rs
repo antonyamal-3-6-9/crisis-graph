@@ -44,9 +44,9 @@ use crisis_graph::ingestion::TriageExtractor;
 use crisis_graph::matcher::Matcher;
 use crisis_graph::sim::SimDriver;
 use crisis_graph::pipeline::PipelineStages;
-use crisis_graph::triage::{StageOneEngine, TriageWorker};
+use crisis_graph::triage::{simulated::SimulatedEngine, StageOneEngine, TriageEngine, TriageWorker, TRIAGE_GROUP};
 use crisis_graph::relay::OutboxRelay;
-use crisis_graph::runtime::{self, instrument, ops_routes, OpsState, ReadyGate, Role, Shutdown};
+use crisis_graph::runtime::{self, instrument, ops_routes, sample_streams, OpsState, ReadyGate, Role, SampledStream, Shutdown};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -106,14 +106,12 @@ fn parse_args() -> Result<Args, Box<dyn Error + Send + Sync>> {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let args = parse_args()?;
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "crisis_graph=info,crisisgraph=info,tower_http=info".into()),
-        )
-        .with_target(true)
-        .compact()
-        .init();
+    // Logs, plus OpenTelemetry spans exported when OTEL_EXPORTER_OTLP_ENDPOINT
+    // is set; flushed when `_telemetry` drops at exit.
+    let _telemetry = runtime::telemetry::init(&format!("crisisgraph-{}", args.role.as_str()))?;
+    if let Some(endpoint) = &_telemetry.exporting_to {
+        info!(%endpoint, "Exporting traces over OTLP");
+    }
 
     let role = args.role;
     let config = Config::from_env();
@@ -172,6 +170,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let role_task = match role {
         Role::Relay => {
+            tokio::spawn(sample_streams(
+                redis.clone(),
+                vec![SampledStream { stream: config.params.events_stream.clone(), group: None }],
+                None,
+                shutdown.clone(),
+            ));
             let relay = OutboxRelay::new(repo.clone(), redis.clone(), config.params.clone());
             Some(tokio::spawn(relay.run(shutdown.clone())))
         }
@@ -183,14 +187,28 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             )
             .with_on_scene_radius_m(config.params.on_scene_radius_m);
             let consumer = format!("triage-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+            tokio::spawn(sample_streams(
+                redis.clone(),
+                vec![SampledStream { stream: config.params.extract_stream.clone(), group: Some(TRIAGE_GROUP.to_string()) }],
+                Some(format!("{}:dead", config.params.extract_stream)),
+                shutdown.clone(),
+            ));
+            // Load tests only: facts come from the report's ground-truth tag.
+            let engine: Arc<dyn TriageEngine> = if config.inference_backend.eq_ignore_ascii_case("simulated") {
+                warn!(median_ms = config.params.sim_extraction_median_ms, "SIMULATED extraction engine (load tests only)");
+                Arc::new(SimulatedEngine::new(config.params.sim_extraction_median_ms))
+            } else {
+                Arc::new(StageOneEngine::new(stages))
+            };
             let worker = TriageWorker::new(
                 repo.clone(),
                 redis.clone(),
-                std::sync::Arc::new(StageOneEngine::new(stages)),
+                engine,
                 config.params.clone(),
                 config.inference_max_concurrency,
                 consumer,
-            );
+            )
+            .with_reader(redis.dedicated().await?);
             Some(tokio::spawn(worker.run(shutdown.clone())))
         }
         Role::Graph => {
