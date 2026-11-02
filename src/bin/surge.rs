@@ -257,8 +257,8 @@ async fn run(config: &Config, args: RunArgs) -> AnyResult<()> {
     let posted_secs = started.elapsed().as_secs_f64();
     println!("Posted {} reports in {posted_secs:.0} s; waiting for the pipeline to drain…", planned.len());
 
-    // Drain: every report linked to an incident and no task still waiting
-    // without an escalation, or the timeout.
+    // Drain: every report linked to an incident and every servable task
+    // assigned, or the timeout.
     let prefix = format!("SURGE-{}-", scenario.run_id);
     let deadline = Instant::now() + Duration::from_secs(args.drain_timeout);
     let drained = loop {
@@ -333,7 +333,8 @@ async fn incoming_segment(neo4j: &Neo4jClient, dataset: &str, junction: &str) ->
 }
 
 /// Reports not yet linked to an incident, and tasks still waiting for a
-/// vehicle without an escalation.
+/// vehicle that can still get one (an OVERDUE escalation keeps waiting; no
+/// surface route, no eligible vehicle or failed verification do not).
 async fn progress(neo4j: &Neo4jClient, prefix: &str) -> AnyResult<(i64, i64)> {
     let q = query(
         "MATCH (r:Report) WHERE r.request_id STARTS WITH $p \
@@ -341,7 +342,8 @@ async fn progress(neo4j: &Neo4jClient, prefix: &str) -> AnyResult<(i64, i64)> {
          WITH collect(DISTINCT CASE WHEN i IS NULL THEN r END) AS unlinked, collect(DISTINCT i) AS incidents \
          UNWIND (CASE WHEN size(incidents) = 0 THEN [null] ELSE incidents END) AS i \
          OPTIONAL MATCH (i)-[:HAS_TASK]->(t:Task) \
-         WHERE t.status IN ['QUEUED', 'PENDING_TRIGGER'] AND size(coalesce(t.escalations, [])) = 0 \
+         WHERE t.status IN ['QUEUED', 'PENDING_TRIGGER'] \
+           AND NONE(e IN coalesce(t.escalations, []) WHERE e IN ['NO_SURFACE_ROUTE', 'NO_ELIGIBLE_VEHICLE', 'ROUTE_VERIFICATION_FAILED']) \
          RETURN size(unlinked) AS unlinked, count(DISTINCT t) AS waiting",
     )
     .param("p", prefix);
