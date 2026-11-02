@@ -33,7 +33,7 @@ use tokio::sync::{Mutex, Semaphore};
 
 use crisis_graph::config::Config;
 use crisis_graph::db::{Neo4jClient, OpsRepository, RedisClient};
-use crisis_graph::models::{ActorContext, ActorRole, HazardCommand, HazardSource, HazardStatus};
+use crisis_graph::models::{ActorContext, ActorRole, HazardCommand, HazardOutcome, HazardSource, HazardStatus};
 use crisis_graph::sim::surge::{cleanup_run, plan, quantile, Place, Scenario, Step};
 use crisis_graph::triage::TRIAGE_GROUP;
 
@@ -211,7 +211,9 @@ async fn run(config: &Config, args: RunArgs) -> AnyResult<()> {
                 let segment = incoming_segment(&neo4j, &dataset, &report.place.junction_id).await.ok().flatten();
                 let Some(segment) = segment else { continue };
                 let command = HazardCommand {
-                    request_id: format!("SURGE-{}-HZ-{i}", scenario.run_id),
+                    // Unique per execution: a rerun of the same run ID must
+                    // flood again, not replay the earlier (cleared) command.
+                    request_id: format!("SURGE-{}-HZ-{i}-{}", scenario.run_id, started_at.timestamp_millis()),
                     dataset: dataset.clone(),
                     segment_id: segment.clone(),
                     status: HazardStatus::Flooded,
@@ -220,10 +222,11 @@ async fn run(config: &Config, args: RunArgs) -> AnyResult<()> {
                     source: HazardSource::Operator,
                 };
                 match repo.apply_hazard(&actor, &command).await {
-                    Ok(_) => {
+                    Ok(HazardOutcome::Applied { .. }) => {
                         println!("  t={at}s flooded {segment}");
                         applied.push(segment);
                     }
+                    Ok(other) => eprintln!("  hazard at t={at}s not applied: {other:?}"),
                     Err(error) => eprintln!("  hazard at t={at}s failed: {error}"),
                 }
             }
@@ -488,7 +491,15 @@ async fn results(
     let lag: Vec<f64> = samples.iter().map(|s| s.oldest_pending_s).collect();
     let diff = |name: &str| after.get(name).copied().unwrap_or(0.0) - before.get(name).copied().unwrap_or(0.0);
     let mut conn = redis.manager.clone();
-    let dead: i64 = redis::cmd("XLEN").arg(format!("{}:dead", config.params.extract_stream)).query_async(&mut conn).await.unwrap_or(0);
+    // Dead letters written during this run (stream IDs start with ms time).
+    let dead_entries: Vec<redis::Value> = redis::cmd("XRANGE")
+        .arg(format!("{}:dead", config.params.extract_stream))
+        .arg(first_received.min(Utc::now().timestamp_millis()).to_string())
+        .arg("+")
+        .query_async(&mut conn)
+        .await
+        .unwrap_or_default();
+    let dead = dead_entries.len() as i64;
 
     Ok(json!({
         "drained": drained,
@@ -521,7 +532,7 @@ async fn results(
         "verification_failures": verify_failures,
         "overbooking_attempts_blocked": diff("crisisgraph_reservation_conflicts_total"),
         "rate_limited_retries": diff("crisisgraph_triage_rate_limited_total"),
-        "dead_letters_total": dead,
+        "dead_letters": dead,
         "hazards_flooded": flooded,
     }))
 }
@@ -662,7 +673,7 @@ fn write_page(dir: &PathBuf, page: &PathBuf) -> AnyResult<()> {
             r["incidents"]["review_required"], r["incidents"]["possible_duplicates_flagged"], r["reports"]["follow_ups_attached"], r["incidents"]["boat_missions"]
         );
         md += &format!("| Escalations | {} |\n", r["incidents"]["escalations"]);
-        md += &format!("| Dead letters (stream total) / 429 retries | {} / {} |\n\n", r["dead_letters_total"], r["rate_limited_retries"]);
+        md += &format!("| Dead letters during the run / 429 retries | {} / {} |\n\n", r["dead_letters"], r["rate_limited_retries"]);
         if let Some(steps) = r["time_to_assignment_by_step_s"].as_array().filter(|a| a.len() > 1) {
             md += "Time to assignment by load step:\n\n| Offered rate | p50 | p95 | Incidents |\n|---|---|---|---|\n";
             for st in steps {
