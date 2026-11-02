@@ -113,7 +113,7 @@ impl Matcher {
 
     /// Junctions each road vehicle type can reach from any depot (hazards in
     /// force masked; access rules such as `hgv=no` applied).
-    async fn reach_by_type(&self, now: DateTime<Utc>) -> MatcherResult<Reach> {
+    pub(super) async fn reach_by_type(&self, now: DateTime<Utc>) -> MatcherResult<Reach> {
         let version = self.snapshot.overlay().version;
         if let Some((cached_version, at, reach)) = self.reach_cache.0.lock().expect("reach cache").clone() {
             if cached_version == version && at.elapsed() < REACH_MAX_AGE {

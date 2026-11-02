@@ -712,6 +712,35 @@ async fn rising_headcount_tops_up_a_planned_group() {
     ctx.cleanup().await;
 }
 
+/// Found in the M8 surge run: victims reachable only over roads unsuitable
+/// for every road vehicle type (farm tracks) were neither re-planned (T8)
+/// nor treated as cut off, and waited with only OVERDUE. Both checks now use
+/// the same per-type reachability, so the task goes to the boat-then-road
+/// check and, with no boat plan, to a person at once.
+#[tokio::test]
+async fn pickup_reachable_only_over_unsuitable_tracks_is_escalated_at_once() {
+    let Some(ctx) = setup(50).await else { return };
+    ctx.run(
+        "MATCH ()-[r:CONNECTS_TO {dataset: $d}]->(:Junction {id: $d + '/JD'}) SET r.baseline_status = 'UNSUITABLE'",
+        &[],
+    )
+    .await;
+    ctx.vehicle("AMB-1", "AMBULANCE", 4, "A").await;
+    ctx.vehicle("TRK-1", "EVAC_TRUCK", 20, "A").await;
+    let task = ctx.task("track", 1, "AMBULANCE", 2, "D", 0).await;
+    let matcher = ctx.matcher().await;
+    let token = leader(&matcher).await;
+    matcher.sync_queue().await.unwrap();
+
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert!(report.assigned.is_empty(), "{report:?}");
+    assert_eq!(report.grouped, 0, "no road type reaches: nothing to re-plan");
+    let reasons = ctx.string("MATCH (t:Task) WHERE t.task_id = $d + '/T-track' RETURN head(t.escalations) AS v").await;
+    assert_eq!(reasons.as_deref(), Some("NO_SURFACE_ROUTE"));
+    assert_eq!(ctx.outbox("TASK_ESCALATED", &task).await, 1);
+    ctx.cleanup().await;
+}
+
 /// No shelter with free beds: the pickup still goes out, with an alert.
 #[tokio::test]
 async fn no_free_beds_still_dispatches_with_an_alert() {
