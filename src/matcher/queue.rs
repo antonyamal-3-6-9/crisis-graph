@@ -55,6 +55,15 @@ impl AllocQueue {
         Ok(conn.zrange(&self.key, 0, limit as isize - 1).await?)
     }
 
+    /// Up to `limit` task ids starting at position `offset` (0 = first served).
+    pub async fn page(&self, offset: usize, limit: usize) -> QueueResult<Vec<String>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut conn = self.redis.manager.clone();
+        Ok(conn.zrange(&self.key, offset as isize, (offset + limit) as isize - 1).await?)
+    }
+
     pub async fn remove(&self, task_id: &str) -> QueueResult<()> {
         let mut conn = self.redis.manager.clone();
         conn.zrem::<_, _, ()>(&self.key, task_id).await?;

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::victim::{UrgencyResult, VictimProfile};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum AssetType {
     #[serde(rename = "RESCUE_BOAT")]
     RescueBoat,

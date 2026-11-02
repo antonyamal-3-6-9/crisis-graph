@@ -20,7 +20,7 @@ const INCIDENT_FIELDS: &str = "{ incident_id: i.incident_id, status: i.status, v
          ELSE {lat: i.caller_location.latitude, lon: i.caller_location.longitude} END, \
      report_count: coalesce(i.report_count, 1), callback_required: coalesce(i.callback_required, false), \
      merged_into: i.merged_into, split_from: i.split_from, \
-     mission: i.mission, staging_junction_id: i.staging_junction_id, \
+     mission: i.mission, staging_junction_id: i.staging_junction_id, group_plan_asset: i.group_plan_asset, \
      boat_plan_declined: coalesce(i.boat_plan_declined, false), \
      created_at: toString(i.created_at), updated_at: toString(i.updated_at) }";
 
@@ -31,7 +31,8 @@ const TASK_FIELDS: &str = "{ task_id: t.task_id, kind: t.kind, status: t.status,
      queued_at: toString(t.queued_at), assigned_at: toString(t.assigned_at), \
      completed_at: toString(t.completed_at), target_junction_id: t.target_junction_id, \
      depends_on: t.depends_on, trigger: t.trigger, triggered_at: toString(t.triggered_at), \
-     water_eta_s: t.water_eta_s }";
+     water_eta_s: t.water_eta_s, persons: t.persons, asset_switched_from: t.asset_switched_from, \
+     group_reason: t.group_reason }";
 
 impl OpsRepository {
     /// Recent incidents, newest first, with their display status. `status`
@@ -203,7 +204,7 @@ impl OpsRepository {
     pub async fn console_alert_events(&self, limit: usize) -> Result<Vec<Value>, OpsRepoError> {
         let q = query(
             "MATCH (e:OutboxEvent) \
-             WHERE e.type IN ['INCIDENT_CRITICAL', 'DROPOFF_UNRESOLVED', 'TASK_ESCALATED', 'INCIDENT_REVIEW_REQUIRED', 'MISSION_CONVERTED'] \
+             WHERE e.type IN ['INCIDENT_CRITICAL', 'DROPOFF_UNRESOLVED', 'TASK_ESCALATED', 'INCIDENT_REVIEW_REQUIRED', 'MISSION_CONVERTED', 'ASSET_SWITCHED', 'GROUP_SPLIT'] \
              WITH e ORDER BY e.created_at DESC LIMIT $limit \
              RETURN { event_id: e.event_id, type: e.type, aggregate_id: e.aggregate_id, \
                  payload_json: e.payload_json, created_at: toString(e.created_at) } AS event",

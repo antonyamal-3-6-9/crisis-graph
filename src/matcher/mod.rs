@@ -17,6 +17,7 @@
 //! is checked segment by segment against live Neo4j state before commit.
 
 pub mod assign;
+mod groups;
 mod mission;
 pub mod queue;
 
@@ -27,7 +28,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use rayon::prelude::*;
 use serde_json::json;
-use tracing::{info, warn};
+use tracing::{info, warn, Instrument};
 
 use crate::config::PipelineParams;
 use crate::db::{
@@ -76,6 +77,11 @@ pub struct CycleReport {
     pub dropoff_unresolved: usize,
     /// Cut-off tasks converted to boat-then-road missions (M6b).
     pub converted: usize,
+    /// Tasks in the window that no vehicle in the fleet could carry (they
+    /// do not count against `matcher_batch_cap`).
+    pub unservable: usize,
+    /// Road pickups re-planned or topped up by a group plan (T8).
+    pub grouped: usize,
 }
 
 impl CycleReport {
@@ -86,6 +92,7 @@ impl CycleReport {
             && self.conflicts == 0
             && self.verify_failures == 0
             && self.escalated == 0
+            && self.grouped == 0
             && self.converted == 0
     }
 }
@@ -101,6 +108,8 @@ pub struct Matcher {
     queue: AllocQueue,
     params: PipelineParams,
     lease_name: String,
+    /// Junctions each road type can reach, per overlay version (T8).
+    reach_cache: groups::ReachCache,
 }
 
 impl Matcher {
@@ -113,7 +122,7 @@ impl Matcher {
     ) -> Self {
         let queue = AllocQueue::new(redis.clone(), snapshot.dataset(), params.aging_stable_to_urgent_secs);
         let lease_name = lease_name(snapshot.dataset());
-        Self { repo, events: redis.clone(), redis, state, snapshot, queue, params, lease_name }
+        Self { repo, events: redis.clone(), redis, state, snapshot, queue, params, lease_name, reach_cache: Default::default() }
     }
 
     /// Read the events stream on its own connection, so the blocking read
@@ -162,7 +171,9 @@ impl Matcher {
             match (task.first(), vehicle) {
                 (Some(task), Some(vehicle)) => {
                     report.resumed_holds += 1;
-                    self.finish(token, task, &vehicle, &hold.reservation_id, &mut shelters, &mut report).await?;
+                    self.finish(token, task, &vehicle, &hold.reservation_id, &mut shelters, &mut report)
+                        .instrument(assign_span(task, &vehicle.vehicle_id))
+                        .await?;
                 }
                 _ => {
                     self.repo.release_reservation(&hold.reservation_id, "hold could not be resumed").await?;
@@ -171,32 +182,38 @@ impl Matcher {
         }
 
         let now = Utc::now();
-        let ids = self.queue.first(self.params.matcher_batch_cap).await?;
-        let order: HashMap<&str, usize> = ids.iter().enumerate().map(|(i, id)| (id.as_str(), i)).collect();
-        let mut tasks = self.repo.queued_tasks(&dataset, Some(&ids)).await?;
-        tasks.sort_by_key(|t| order.get(t.task_id.as_str()).copied().unwrap_or(usize::MAX));
+        let fleet = self.repo.fleet_max_capacity(&dataset).await?;
+        let mut tasks = self.window(&dataset, &fleet, &mut report).await?;
         let vehicles = self.repo.list_available_vehicles_in(&dataset).await?;
+        let mut costs = build_cost_table(&self.snapshot, &tasks, &vehicles, now).await?;
+
+        // T8: road pickups that cannot be served as requested (too big for
+        // one vehicle, or no available vehicle reaches them this cycle and
+        // maybe none of their type ever can) get a group plan; planned
+        // incidents whose headcount rose get more vehicles.
+        let candidates: Vec<QueuedTask> = tasks
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| {
+                let too_big = fleet.get(&t.required_asset.to_string()).is_none_or(|c| *c < t.persons());
+                too_big || (0..costs.vehicles()).all(|v| costs.get(*i, v).is_none())
+            })
+            .map(|(_, t)| t.clone())
+            .collect();
+        if self.plan_groups(&candidates, &fleet, now, &mut report).await? > 0 {
+            self.sync_queue().await?;
+            report.unservable = 0;
+            tasks = self.window(&dataset, &fleet, &mut report).await?;
+            costs = build_cost_table(&self.snapshot, &tasks, &vehicles, now).await?;
+        }
+        metrics::gauge!("crisisgraph_matcher_unservable_tasks").set(report.unservable as f64);
         report.tasks = tasks.len();
         report.vehicles = vehicles.len();
-
-        // A task no vehicle in the fleet could ever serve goes to a person now.
-        let fleet = self.repo.fleet_max_capacity(&dataset).await?;
-        for task in &tasks {
-            let capacity = fleet.get(&task.required_asset.to_string()).copied();
-            if capacity.is_none_or(|c| c < task.persons()) && !escalated(task, ESCALATION_NO_ELIGIBLE_VEHICLE) {
-                let details = json!({ "required_asset": task.required_asset.to_string(), "persons": task.persons(),
-                                      "largest_capacity": capacity });
-                if self.repo.escalate_task(&task.task_id, ESCALATION_NO_ELIGIBLE_VEHICLE, details).await? {
-                    report.escalated += 1;
-                }
-            }
-        }
 
         let tiers: Vec<Tier> = tasks
             .iter()
             .map(|t| effective_tier(t.priority_rank, t.queued_at, now, self.params.aging_stable_to_urgent_secs))
             .collect();
-        let costs = build_cost_table(&self.snapshot, &tasks, &vehicles, now).await?;
         // Road pickups no vehicle can serve may be cut off by water (M6b).
         let unserved: Vec<&QueuedTask> = tasks
             .iter()
@@ -211,12 +228,16 @@ impl Matcher {
             let held_until = Utc::now() + chrono::Duration::seconds(self.params.hold_expiry_secs as i64);
             match self.repo.hold_vehicle(&task.task_id, &task.incident_id, &vehicle.vehicle_id, vehicle.version, held_until).await {
                 Ok(hold) => {
-                    if self.finish(token, task, vehicle, &hold.reservation.reservation_id, &mut shelters, &mut report).await? {
+                    let span = assign_span(task, &vehicle.vehicle_id);
+                    if self.finish(token, task, vehicle, &hold.reservation.reservation_id, &mut shelters, &mut report).instrument(span).await? {
                         assigned_tasks.push(pair.task);
                     }
                 }
                 // Taken meanwhile (dispatcher action): the task waits for the next cycle.
-                Err(OpsRepoError::Conflict(_) | OpsRepoError::NotAvailable(_)) => report.conflicts += 1,
+                Err(OpsRepoError::Conflict(_) | OpsRepoError::NotAvailable(_)) => {
+                    report.conflicts += 1;
+                    metrics::counter!("crisisgraph_reservation_conflicts_total", "source" => "matcher_hold").increment(1);
+                }
                 Err(error) => return Err(error.into()),
             }
         }
@@ -237,6 +258,61 @@ impl Matcher {
 
         self.publish_metrics(&tasks, &tiers, now, &report, started.elapsed());
         Ok(report)
+    }
+
+    /// The cycle's window: the first `matcher_batch_cap` tasks in queue order
+    /// that some vehicle in the fleet could carry, plus up to as many that no
+    /// vehicle could carry (more people than the largest vehicle of its
+    /// type). Those are escalated to a person once and still considered for
+    /// a boat-then-road mission (M6b), but they never take the place of a
+    /// servable task, so they cannot hold the head of the queue and starve
+    /// the tasks behind it (found in the M8 surge run).
+    async fn window(
+        &self,
+        dataset: &str,
+        fleet: &HashMap<String, u32>,
+        report: &mut CycleReport,
+    ) -> MatcherResult<Vec<QueuedTask>> {
+        let cap = self.params.matcher_batch_cap;
+        let mut window = Vec::with_capacity(cap);
+        let mut unservable = Vec::new();
+        let mut offset = 0;
+        while window.len() < cap {
+            let ids = self.queue.page(offset, cap).await?;
+            if ids.is_empty() {
+                break;
+            }
+            offset += ids.len();
+            let order: HashMap<&str, usize> = ids.iter().enumerate().map(|(i, id)| (id.as_str(), i)).collect();
+            let mut tasks = self.repo.queued_tasks(dataset, Some(&ids)).await?;
+            tasks.sort_by_key(|t| order.get(t.task_id.as_str()).copied().unwrap_or(usize::MAX));
+            for task in tasks {
+                let capacity = fleet.get(&task.required_asset.to_string()).copied();
+                if capacity.is_some_and(|c| c >= task.persons()) {
+                    if window.len() < cap {
+                        window.push(task);
+                    }
+                    continue;
+                }
+                // A road pickup for a road vehicle type gets a group plan
+                // (T8) instead; other tasks go to a person.
+                let plannable = task.kind == TaskKind::RoadPickup
+                    && matches!(task.required_asset, AssetType::Ambulance | AssetType::EvacTruck);
+                if !plannable && !escalated(&task, ESCALATION_NO_ELIGIBLE_VEHICLE) {
+                    let details = json!({ "required_asset": task.required_asset.to_string(), "persons": task.persons(),
+                                          "largest_capacity": capacity });
+                    if self.repo.escalate_task(&task.task_id, ESCALATION_NO_ELIGIBLE_VEHICLE, details).await? {
+                        report.escalated += 1;
+                    }
+                }
+                if unservable.len() < cap {
+                    unservable.push(task);
+                }
+            }
+        }
+        report.unservable = unservable.len();
+        window.extend(unservable);
+        Ok(window)
     }
 
     /// The rest of T2 for a held vehicle: route on the snapshot, verify live,
@@ -328,6 +404,14 @@ impl Matcher {
                 }
                 report.assigned.push((task.task_id.clone(), vehicle.vehicle_id.clone()));
                 metrics::counter!("crisisgraph_matcher_assignments_total").increment(1);
+                let now = Utc::now();
+                let tier = effective_tier(task.priority_rank, task.queued_at, now, self.params.aging_stable_to_urgent_secs);
+                let since = |at: DateTime<Utc>| (now - at).num_milliseconds().max(0) as f64 / 1000.0;
+                metrics::histogram!("crisisgraph_queue_wait_seconds", "tier" => tier.as_str()).record(since(task.queued_at));
+                if let Some(first) = outcome.first_report_at {
+                    metrics::histogram!("crisisgraph_time_to_assignment_seconds", "tier" => tier.as_str(), "kind" => task.kind.as_str())
+                        .record(since(first));
+                }
                 if let Err(error) = self.queue.remove(&task.task_id).await {
                     warn!(%error, task_id = %task.task_id, "Could not remove assigned task from the queue");
                 }
@@ -342,6 +426,7 @@ impl Matcher {
                 match error {
                     OpsRepoError::NotAvailable(_) | OpsRepoError::Conflict(_) => {
                         report.conflicts += 1;
+                        metrics::counter!("crisisgraph_reservation_conflicts_total", "source" => "matcher_commit").increment(1);
                         Ok(false)
                     }
                     other => Err(other.into()),
@@ -559,6 +644,14 @@ pub async fn build_cost_table(
         }
         reach[start_of[v]].get(&task.junction_id).map(|seconds| seconds.ceil() as u32)
     }))
+}
+
+/// The span for one assignment (route, verify, commit), continuing the
+/// task's trace from intake (M8).
+fn assign_span(task: &QueuedTask, vehicle_id: &str) -> tracing::Span {
+    let span = tracing::info_span!("matcher.assign", task_id = %task.task_id, vehicle_id = %vehicle_id, kind = task.kind.as_str());
+    crate::runtime::telemetry::set_parent(&span, task.traceparent.as_deref());
+    span
 }
 
 fn escalated(task: &QueuedTask, reason: &str) -> bool {

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reqwest::Client;
@@ -33,7 +34,13 @@ pub struct TriageExtractor {
     adapter_id: Option<String>,
     adapter_sha256: Option<String>,
     spatial_resolver: SpatialResolver,
+    /// Earliest time the next request may start, when requests per minute
+    /// are limited (`INFERENCE_MAX_RPM`); shared by every clone.
+    pacer: Option<(Arc<tokio::sync::Mutex<Instant>>, Duration)>,
 }
+
+/// Retries after an HTTP 429 (rate limited) before giving up.
+const RATE_LIMIT_RETRIES: u32 = 3;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct OpenAiChatResponse {
@@ -116,6 +123,65 @@ impl TriageExtractor {
             adapter_id: config.triage_adapter_id.clone(),
             adapter_sha256: config.triage_adapter_sha256.clone(),
             spatial_resolver: SpatialResolver::new(),
+            pacer: (config.inference_max_rpm > 0).then(|| {
+                (
+                    Arc::new(tokio::sync::Mutex::new(Instant::now())),
+                    Duration::from_secs_f64(60.0 / config.inference_max_rpm as f64),
+                )
+            }),
+        }
+    }
+
+    /// Wait for the next request slot when requests per minute are limited.
+    async fn pace(&self) {
+        if let Some((next, interval)) = &self.pacer {
+            let mut next = next.lock().await;
+            let now = Instant::now();
+            if *next > now {
+                tokio::time::sleep(*next - now).await;
+            }
+            *next = Instant::now().max(*next) + *interval;
+        }
+    }
+
+    /// POST a chat completion, paced, retrying HTTP 429 (rate limited) and
+    /// 503 (service unavailable, owner decision 2026-11-02) with the server's
+    /// `Retry-After` or an exponential backoff, up to `RATE_LIMIT_RETRIES`
+    /// times. Other failures, and the last retry, return at once so the
+    /// pipeline fails closed (the report goes to review).
+    async fn post_chat(&self, payload: &Value) -> ExtractResult<reqwest::Response> {
+        let url = format!("{}/chat/completions", self.inference_base_url.trim_end_matches('/'));
+        let mut attempt = 0;
+        loop {
+            self.pace().await;
+            let mut request = self.http_client.post(&url).json(payload);
+            if let Some(api_key) = &self.inference_api_key {
+                request = request.bearer_auth(api_key);
+            }
+            let response = request
+                .send()
+                .await
+                .map_err(|error| format!("Triage inference endpoint unavailable at {url}: {error}"))?;
+            let status = response.status();
+            let retryable = status == reqwest::StatusCode::TOO_MANY_REQUESTS || status == reqwest::StatusCode::SERVICE_UNAVAILABLE;
+            if !retryable || attempt >= RATE_LIMIT_RETRIES {
+                return Ok(response);
+            }
+            attempt += 1;
+            let wait = response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(Duration::from_secs)
+                .unwrap_or_else(|| Duration::from_secs(2u64.pow(attempt)));
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                metrics::counter!("crisisgraph_triage_rate_limited_total").increment(1);
+            } else {
+                metrics::counter!("crisisgraph_triage_unavailable_retries_total").increment(1);
+            }
+            tracing::warn!(attempt, %status, wait_s = wait.as_secs(), "Inference endpoint busy; retrying");
+            tokio::time::sleep(wait.min(Duration::from_secs(60))).await;
         }
     }
 
@@ -133,20 +199,8 @@ impl TriageExtractor {
         );
 
         let payload = self.request_payload(&alert.raw_text)?;
-        let url = format!(
-            "{}/chat/completions",
-            self.inference_base_url.trim_end_matches('/')
-        );
         let started = Instant::now();
-        let mut request = self.http_client.post(&url).json(&payload);
-        if let Some(api_key) = &self.inference_api_key {
-            request = request.bearer_auth(api_key);
-        }
-
-        let response = request
-            .send()
-            .await
-            .map_err(|error| format!("Triage inference endpoint unavailable at {url}: {error}"))?;
+        let response = self.post_chat(&payload).await?;
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
@@ -225,13 +279,7 @@ impl TriageExtractor {
             "max_tokens": 25
         });
 
-        let url = format!("{}/chat/completions", self.inference_base_url.trim_end_matches('/'));
-        let mut req = self.http_client.post(&url).json(&payload);
-        if let Some(api_key) = &self.inference_api_key {
-            req = req.bearer_auth(api_key);
-        }
-
-        if let Ok(resp) = req.send().await {
+        if let Ok(resp) = self.post_chat(&payload).await {
             if let Ok(parsed) = resp.json::<OpenAiChatResponse>().await {
                 if let Some(choice) = parsed.choices.into_iter().next() {
                     let text = choice.message.content.trim().trim_matches('"').trim();
@@ -306,7 +354,8 @@ impl TriageExtractor {
         });
 
         match self.inference_backend.trim().to_ascii_lowercase().as_str() {
-            "llama-cpp" | "llama.cpp" => {
+            // llama.cpp and hosted OpenAI-compatible endpoints (e.g. Gemini).
+            "llama-cpp" | "llama.cpp" | "openai" => {
                 payload["response_format"] = json!({
                     "type": "json_schema",
                     "json_schema": {
@@ -321,7 +370,7 @@ impl TriageExtractor {
             }
             unsupported => {
                 return Err(format!(
-                    "Unsupported INFERENCE_BACKEND '{unsupported}'; expected llama-cpp or vllm"
+                    "Unsupported INFERENCE_BACKEND '{unsupported}'; expected llama-cpp, vllm or openai"
                 )
                 .into());
             }
@@ -670,6 +719,114 @@ mod tests {
         let payload = extractor.request_payload("test report").unwrap();
         assert_eq!(payload["response_format"]["type"], "json_schema");
         assert!(payload.get("structured_outputs").is_none());
+    }
+
+    #[test]
+    fn openai_payload_uses_strict_json_schema() {
+        let mut extractor = extractor();
+        extractor.inference_backend = "openai".to_string();
+        extractor.inference_model = "gemini-3.5-flash-lite".to_string();
+        let payload = extractor.request_payload("test report").unwrap();
+        assert_eq!(payload["model"], "gemini-3.5-flash-lite");
+        assert_eq!(payload["response_format"]["type"], "json_schema");
+        assert_eq!(payload["response_format"]["json_schema"]["strict"], true);
+        assert!(payload["response_format"]["json_schema"]["schema"].is_object());
+        assert!(payload.get("structured_outputs").is_none());
+    }
+
+    #[tokio::test]
+    async fn pacer_spaces_requests_by_the_rpm_limit() {
+        let mut extractor = extractor();
+        // 600 requests per minute: one slot every 100 ms.
+        extractor.pacer = Some((Arc::new(tokio::sync::Mutex::new(Instant::now())), Duration::from_millis(100)));
+        let started = Instant::now();
+        for _ in 0..4 {
+            extractor.pace().await;
+        }
+        let took = started.elapsed();
+        assert!(took >= Duration::from_millis(290), "4 slots need about 300 ms, took {took:?}");
+        assert!(took < Duration::from_millis(1000), "{took:?}");
+
+        extractor.pacer = None;
+        let started = Instant::now();
+        for _ in 0..4 {
+            extractor.pace().await;
+        }
+        assert!(started.elapsed() < Duration::from_millis(20), "no limit, no wait");
+    }
+
+    #[tokio::test]
+    async fn rate_limited_requests_are_retried_after_retry_after() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            axum::routing::post(move || {
+                let counter = counter.clone();
+                async move {
+                    if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                        (reqwest::StatusCode::TOO_MANY_REQUESTS, [("retry-after", "1")], "slow down")
+                    } else {
+                        (reqwest::StatusCode::OK, [("retry-after", "0")], "ok")
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let mut extractor = extractor();
+        extractor.pacer = None; // independent of the local INFERENCE_MAX_RPM
+        extractor.inference_base_url = base;
+        let started = Instant::now();
+        let response = extractor.post_chat(&json!({})).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "one 429, one retry");
+        assert!(started.elapsed() >= Duration::from_millis(950), "waited for Retry-After");
+    }
+
+    #[tokio::test]
+    async fn unavailable_endpoint_is_retried_then_fails_closed() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        // Answers 503 twice, then 200: retried through.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            axum::routing::post(move || {
+                let counter = counter.clone();
+                async move {
+                    if counter.fetch_add(1, Ordering::SeqCst) < 2 {
+                        (reqwest::StatusCode::SERVICE_UNAVAILABLE, [("retry-after", "0")], "busy")
+                    } else {
+                        (reqwest::StatusCode::OK, [("retry-after", "0")], "ok")
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut extractor = extractor();
+        extractor.pacer = None; // independent of the local INFERENCE_MAX_RPM
+        extractor.inference_base_url = base;
+        let response = extractor.post_chat(&json!({})).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+
+        // Always 503: gives up after the retries and returns the 503 (the caller fails closed).
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            axum::routing::post(|| async { (reqwest::StatusCode::SERVICE_UNAVAILABLE, [("retry-after", "0")], "down") }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        extractor.inference_base_url = base;
+        let response = extractor.post_chat(&json!({})).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[test]

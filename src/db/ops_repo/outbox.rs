@@ -9,7 +9,8 @@ impl OpsRepository {
         let q = query(
             "MATCH (e:OutboxEvent {published: false}) \
              RETURN e.event_id AS event_id, e.aggregate_id AS aggregate_id, e.type AS event_type, \
-                    e.payload_json AS payload_json, toString(e.created_at) AS created_at \
+                    e.payload_json AS payload_json, toString(e.created_at) AS created_at, \
+                    e.traceparent AS traceparent \
              ORDER BY e.created_at ASC LIMIT $limit",
         )
         .param("limit", limit as i64);
@@ -23,6 +24,7 @@ impl OpsRepository {
                 event_type: row.get("event_type")?,
                 payload_json: row.get("payload_json")?,
                 created_at: parse_time(&row.get::<String>("created_at")?)?,
+                traceparent: row.get("traceparent")?,
             });
         }
         Ok(events)

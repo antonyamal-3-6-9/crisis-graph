@@ -183,6 +183,19 @@ pub struct QueuedTask {
     pub water_eta_s: f64,
     /// A dispatcher cancelled a boat plan for this incident: never convert.
     pub boat_plan_declined: bool,
+    /// W3C trace context of the report that created the task (M8).
+    pub traceparent: Option<String>,
+}
+
+/// An `ASSIGNED` task as the simulated driver sees it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssignedTask {
+    pub task_id: String,
+    pub version: u64,
+    pub assigned_at: DateTime<Utc>,
+    pub eta_s: f64,
+    pub kind: String,
+    pub traceparent: Option<String>,
 }
 
 impl QueuedTask {
@@ -202,6 +215,92 @@ pub fn road_leg_asset(requested: &AssetType, persons: u32, medical: bool, ambula
         _ if medical || persons <= ambulance_capacity => AssetType::Ambulance,
         _ => AssetType::EvacTruck,
     }
+}
+
+/// Why a road pickup cannot be served as requested.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupReason {
+    /// No vehicle of the requested type can reach the victims.
+    NoRoute,
+    /// More people than the largest vehicle of the requested type carries.
+    TooBig,
+}
+
+impl GroupReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GroupReason::NoRoute => "NO_ROUTE_FOR_ASSET",
+            GroupReason::TooBig => "GROUP_TOO_BIG",
+        }
+    }
+}
+
+/// How a road pickup that cannot be served as requested is served instead
+/// (owner decision 2026-11-02): the vehicle type and the people per vehicle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupPlan {
+    pub asset: AssetType,
+    /// People per vehicle, largest first (e.g. 6 people, 4 seats: [4, 2]).
+    pub shares: Vec<u32>,
+    pub reason: GroupReason,
+}
+
+impl GroupPlan {
+    pub fn switched_from(&self, requested: &AssetType) -> Option<AssetType> {
+        (self.asset != *requested).then(|| requested.clone())
+    }
+}
+
+/// Decide how to serve a road pickup for `persons` people that asked for
+/// `requested`, given the road vehicle types that can reach the victims
+/// (`reachable`) and the largest vehicle of each type in the fleet
+/// (`capacity`, keyed by asset name). Deterministic graph facts only.
+///
+/// - Served as requested (reachable, fits one vehicle): `None`.
+/// - No road type reaches: `None` (the boat-then-road check takes over).
+/// - Otherwise: ambulances for a medical need if they can reach, else one
+///   truck if trucks can reach, else ambulances; as many vehicles of the
+///   chosen type as the group needs.
+pub fn group_plan(
+    requested: &AssetType,
+    persons: u32,
+    medical: bool,
+    reachable: &[AssetType],
+    capacity: &std::collections::HashMap<String, u32>,
+) -> Option<GroupPlan> {
+    let persons = persons.max(1);
+    let seats = |asset: &AssetType| capacity.get(&asset.to_string()).copied().filter(|c| *c > 0);
+    let usable = |asset: &AssetType| reachable.contains(asset) && seats(asset).is_some();
+    let can_reach = usable(requested);
+    if can_reach && seats(requested).is_some_and(|c| c >= persons) {
+        return None;
+    }
+    let reason = if can_reach { GroupReason::TooBig } else { GroupReason::NoRoute };
+    let asset = if medical && usable(&AssetType::Ambulance) {
+        AssetType::Ambulance
+    } else if usable(&AssetType::EvacTruck) {
+        AssetType::EvacTruck
+    } else if usable(&AssetType::Ambulance) {
+        AssetType::Ambulance
+    } else {
+        return None;
+    };
+    let shares = split_persons(persons, seats(&asset)?);
+    Some(GroupPlan { asset, shares, reason })
+}
+
+/// People per vehicle: full vehicles first, then the rest (45 people in
+/// 20-seat trucks: [20, 20, 5]).
+pub fn split_persons(persons: u32, seats: u32) -> Vec<u32> {
+    let seats = seats.max(1);
+    let mut left = persons.max(1);
+    let mut shares = Vec::new();
+    while left > 0 {
+        let share = left.min(seats);
+        shares.push(share);
+        left -= share;
+    }
+    shares
 }
 
 /// A `HELD` vehicle reservation whose commit never happened (the matcher
@@ -350,6 +449,8 @@ pub struct OutboxRecord {
     pub event_type: String,
     pub payload_json: String,
     pub created_at: DateTime<Utc>,
+    /// W3C trace context to carry into the stream message (M8).
+    pub traceparent: Option<String>,
 }
 
 #[cfg(test)]
@@ -417,5 +518,45 @@ mod tests {
         assert_eq!(road_leg_asset(&AssetType::RescueBoat, 3, false, 4), AssetType::Ambulance);
         assert_eq!(road_leg_asset(&AssetType::RescueBoat, 12, true, 4), AssetType::Ambulance, "medical need");
         assert_eq!(road_leg_asset(&AssetType::RescueBoat, 12, false, 4), AssetType::EvacTruck);
+    }
+
+    fn fleet() -> std::collections::HashMap<String, u32> {
+        [("AMBULANCE", 4), ("EVAC_TRUCK", 20), ("RESCUE_BOAT", 8)].into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+    }
+
+    #[test]
+    fn group_plan_follows_the_owner_rule() {
+        use AssetType::*;
+        let both = [Ambulance, EvacTruck];
+        // Served as requested: no plan.
+        assert_eq!(group_plan(&Ambulance, 3, true, &both, &fleet()), None);
+        // Too big, medical need: two ambulances, 4 + 2.
+        let plan = group_plan(&Ambulance, 6, true, &both, &fleet()).unwrap();
+        assert_eq!((plan.asset.clone(), plan.shares.clone(), plan.reason), (Ambulance, vec![4, 2], GroupReason::TooBig));
+        assert_eq!(plan.switched_from(&Ambulance), None);
+        // Too big, no medical need: one truck.
+        let plan = group_plan(&Ambulance, 6, false, &both, &fleet()).unwrap();
+        assert_eq!((plan.asset.clone(), plan.shares.clone()), (EvacTruck, vec![6]));
+        assert_eq!(plan.switched_from(&Ambulance), Some(Ambulance));
+        // No truck route (hgv=no lane): ambulances, as many as needed.
+        let plan = group_plan(&EvacTruck, 5, false, &[Ambulance], &fleet()).unwrap();
+        assert_eq!((plan.asset.clone(), plan.shares.clone(), plan.reason), (Ambulance, vec![4, 1], GroupReason::NoRoute));
+        // No ambulance route, medical need: a truck rather than nothing.
+        let plan = group_plan(&Ambulance, 2, true, &[EvacTruck], &fleet()).unwrap();
+        assert_eq!((plan.asset, plan.shares), (EvacTruck, vec![2]));
+        // Bigger than one truck: several trucks.
+        assert_eq!(group_plan(&EvacTruck, 45, false, &both, &fleet()).unwrap().shares, vec![20, 20, 5]);
+        // No road type reaches (cut off by water): left to the boat-then-road check.
+        assert_eq!(group_plan(&Ambulance, 3, true, &[], &fleet()), None);
+        // A type with no vehicles in the fleet is never chosen.
+        let no_trucks: std::collections::HashMap<String, u32> = [("AMBULANCE".to_string(), 4)].into_iter().collect();
+        assert_eq!(group_plan(&Ambulance, 6, false, &both, &no_trucks).unwrap().shares, vec![4, 2]);
+    }
+
+    #[test]
+    fn split_persons_fills_vehicles_first() {
+        assert_eq!(split_persons(6, 4), vec![4, 2]);
+        assert_eq!(split_persons(8, 4), vec![4, 4]);
+        assert_eq!(split_persons(0, 4), vec![1], "an unknown headcount counts as one");
     }
 }

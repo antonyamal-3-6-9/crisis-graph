@@ -152,16 +152,8 @@ impl PipelineStages {
                     }
                     state.errors.push("TriageRequiresHumanReview: Victim location was not provided".to_string());
                 } else {
-                    // Location is known. A missing headcount is covered by the
-                    // waterfall's baseline unit; a missing asset is never guessed
-                    // (finding F-2), so it blocks automatic dispatch.
-                    let non_blocking_reasons = ["Headcount was not provided"];
-                    let remaining_blocking_reasons: Vec<String> = triage
-                        .uncertainty_reasons
-                        .iter()
-                        .filter(|r| !non_blocking_reasons.contains(&r.as_str()))
-                        .cloned()
-                        .collect();
+                    // Location is known: see `blocking_review_reasons`.
+                    let remaining_blocking_reasons = crate::models::blocking_review_reasons(&triage.uncertainty_reasons);
 
                     if !remaining_blocking_reasons.is_empty() {
                         state.errors.push(format!(
@@ -889,6 +881,30 @@ impl PipelineStages {
 #[cfg(test)]
 mod tests {
     use super::PipelineStages;
+    use crate::models::blocking_review_reasons;
+
+    #[test]
+    fn located_victims_are_not_held_for_our_own_satisfied_checks() {
+        let reasons = |r: &[&str]| r.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // On-scene caller located by GPS, no place named, hazard without duration: dispatch.
+        assert!(blocking_review_reasons(&reasons(&[
+            "Victim location was not provided",
+            "Hazard duration was not provided",
+            "Hazard road was not specifically identified",
+            "Headcount was not provided",
+        ]))
+        .is_empty());
+        // A missing vehicle type is never guessed (F-2): still blocks.
+        assert_eq!(
+            blocking_review_reasons(&reasons(&["Victim location was not provided", "Required asset was not specified"])),
+            reasons(&["Required asset was not specified"])
+        );
+        // The model's own doubt, in its own words, still blocks.
+        assert_eq!(
+            blocking_review_reasons(&reasons(&["Victim location was not specified", "Model requested human review"])),
+            reasons(&["Victim location was not specified", "Model requested human review"])
+        );
+    }
 
     #[test]
     fn humanizes_typed_pipeline_error_for_dispatcher_brief() {

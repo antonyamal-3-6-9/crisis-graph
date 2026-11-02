@@ -1,0 +1,2086 @@
+{
+  "dataset": "aluva-periyar-pilot",
+  "git_commit": "a0e326a",
+  "machine": {
+    "cores": 12,
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+    "gpu": "none",
+    "memory_gb": 15.0,
+    "services": "Neo4j 5 + Redis, native, same machine"
+  },
+  "results": {
+    "dead_letters": 0,
+    "drained": true,
+    "hazards_flooded": [
+      "way/474858099/seg/0/rev"
+    ],
+    "incidents": {
+      "boat_missions": 0,
+      "escalations": {},
+      "possible_duplicates_flagged": 7,
+      "review_required": 6,
+      "total": 58
+    },
+    "intake_latency_s": {
+      "n": 60,
+      "p50": 0.010974685,
+      "p95": 0.032678443,
+      "p99": 0.035097814
+    },
+    "max_alloc_queue": 1,
+    "max_stream_pending": 1,
+    "model_latency_s": {
+      "n": 60,
+      "p50": 6.628,
+      "p95": 8.348,
+      "p99": 37.181
+    },
+    "overbooking_attempts_blocked": 0.0,
+    "queue_lag_s": {
+      "max": 204.533,
+      "p95": 192.598
+    },
+    "queue_wait_s": {
+      "n": 53,
+      "p50": 0.521,
+      "p95": 0.716,
+      "p99": 0.819
+    },
+    "rate_limited_retries": 0.0,
+    "reports": {
+      "accepted": 60,
+      "failed_extraction": 0,
+      "follow_ups_attached": 2,
+      "planned": 60,
+      "stored": 60
+    },
+    "throughput_per_s": {
+      "accepted": 0.16948504200612974,
+      "assigned": 0.0943613641023966,
+      "offered": 0.16666666666666666,
+      "triaged": 0.10878808262817503
+    },
+    "time_to_assignment_by_step_s": [
+      {
+        "n": 52,
+        "p50": 87.147,
+        "p95": 198.668,
+        "rate": 0.16667,
+        "seconds": 360
+      }
+    ],
+    "time_to_assignment_s": {
+      "CRITICAL": {
+        "n": 5,
+        "p50": 68.984,
+        "p95": 111.559,
+        "p99": 111.559
+      },
+      "STABLE": {
+        "n": 10,
+        "p50": 121.979,
+        "p95": 198.668,
+        "p99": 198.668
+      },
+      "URGENT": {
+        "n": 37,
+        "p50": 85.995,
+        "p95": 204.132,
+        "p99": 204.998
+      },
+      "all": {
+        "n": 52,
+        "p50": 87.147,
+        "p95": 198.668,
+        "p99": 204.998
+      }
+    },
+    "triage_latency_s": {
+      "n": 60,
+      "p50": 86.681,
+      "p95": 198.063,
+      "p99": 205.184
+    },
+    "verification_failures": 0
+  },
+  "samples": [
+    {
+      "oldest_pending_s": 0.0,
+      "pending": 0,
+      "queue_length": 0,
+      "stream_length": 12766,
+      "t_s": 0.001851467
+    },
+    {
+      "oldest_pending_s": 1.703,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12767,
+      "t_s": 2.003038912
+    },
+    {
+      "oldest_pending_s": 3.706,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12767,
+      "t_s": 4.006319928
+    },
+    {
+      "oldest_pending_s": 5.709,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12767,
+      "t_s": 6.008130586
+    },
+    {
+      "oldest_pending_s": 1.929,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12768,
+      "t_s": 8.010894179
+    },
+    {
+      "oldest_pending_s": 3.931,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12768,
+      "t_s": 10.01323007
+    },
+    {
+      "oldest_pending_s": 5.934,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12768,
+      "t_s": 12.015697291
+    },
+    {
+      "oldest_pending_s": 7.936,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12769,
+      "t_s": 14.018295426
+    },
+    {
+      "oldest_pending_s": 9.939,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12769,
+      "t_s": 16.021019802
+    },
+    {
+      "oldest_pending_s": 11.942,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12769,
+      "t_s": 18.024183958
+    },
+    {
+      "oldest_pending_s": 7.908,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12770,
+      "t_s": 20.02672982
+    },
+    {
+      "oldest_pending_s": 9.91,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12770,
+      "t_s": 22.029135636
+    },
+    {
+      "oldest_pending_s": 11.912,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12770,
+      "t_s": 24.030941952
+    },
+    {
+      "oldest_pending_s": 13.915,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12771,
+      "t_s": 26.034379064
+    },
+    {
+      "oldest_pending_s": 15.919,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12771,
+      "t_s": 28.037672367
+    },
+    {
+      "oldest_pending_s": 17.921,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12771,
+      "t_s": 30.040287245
+    },
+    {
+      "oldest_pending_s": 13.89,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12772,
+      "t_s": 32.042281331
+    },
+    {
+      "oldest_pending_s": 15.894,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12772,
+      "t_s": 34.045433959
+    },
+    {
+      "oldest_pending_s": 17.896,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12772,
+      "t_s": 36.047836678
+    },
+    {
+      "oldest_pending_s": 19.898,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12773,
+      "t_s": 38.050038528
+    },
+    {
+      "oldest_pending_s": 15.87,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12773,
+      "t_s": 40.052772507
+    },
+    {
+      "oldest_pending_s": 17.871,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12773,
+      "t_s": 42.054090489
+    },
+    {
+      "oldest_pending_s": 19.874,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12774,
+      "t_s": 44.056938205
+    },
+    {
+      "oldest_pending_s": 21.876,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12774,
+      "t_s": 46.058955016
+    },
+    {
+      "oldest_pending_s": 23.878,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12774,
+      "t_s": 48.061013851
+    },
+    {
+      "oldest_pending_s": 19.861,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12775,
+      "t_s": 50.064039464
+    },
+    {
+      "oldest_pending_s": 21.864,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12775,
+      "t_s": 52.066295299
+    },
+    {
+      "oldest_pending_s": 23.865,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12776,
+      "t_s": 54.068272708
+    },
+    {
+      "oldest_pending_s": 25.868,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12776,
+      "t_s": 56.070734634
+    },
+    {
+      "oldest_pending_s": 21.834,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12776,
+      "t_s": 58.072855604
+    },
+    {
+      "oldest_pending_s": 23.836,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12776,
+      "t_s": 60.074890748
+    },
+    {
+      "oldest_pending_s": 25.839,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12777,
+      "t_s": 62.077335865
+    },
+    {
+      "oldest_pending_s": 27.84,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12777,
+      "t_s": 64.079047917
+    },
+    {
+      "oldest_pending_s": 23.822,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12777,
+      "t_s": 66.081594826
+    },
+    {
+      "oldest_pending_s": 25.824,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12778,
+      "t_s": 68.08421291
+    },
+    {
+      "oldest_pending_s": 27.827,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12778,
+      "t_s": 70.086937981
+    },
+    {
+      "oldest_pending_s": 29.83,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12778,
+      "t_s": 72.089711739
+    },
+    {
+      "oldest_pending_s": 25.821,
+      "pending": 1,
+      "queue_length": 1,
+      "stream_length": 12779,
+      "t_s": 74.090572992
+    },
+    {
+      "oldest_pending_s": 27.823,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12779,
+      "t_s": 76.092567002
+    },
+    {
+      "oldest_pending_s": 29.825,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12779,
+      "t_s": 78.095613003
+    },
+    {
+      "oldest_pending_s": 31.828,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12780,
+      "t_s": 80.097467103
+    },
+    {
+      "oldest_pending_s": 28.038,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12780,
+      "t_s": 82.098389995
+    },
+    {
+      "oldest_pending_s": 30.04,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12780,
+      "t_s": 84.101045473
+    },
+    {
+      "oldest_pending_s": 32.043,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12781,
+      "t_s": 86.103555229
+    },
+    {
+      "oldest_pending_s": 34.045,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12781,
+      "t_s": 88.105675659
+    },
+    {
+      "oldest_pending_s": 36.046,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12781,
+      "t_s": 90.107098843
+    },
+    {
+      "oldest_pending_s": 38.049,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12782,
+      "t_s": 92.109735119
+    },
+    {
+      "oldest_pending_s": 34.004,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12782,
+      "t_s": 94.112051049
+    },
+    {
+      "oldest_pending_s": 36.007,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12782,
+      "t_s": 96.115253404
+    },
+    {
+      "oldest_pending_s": 38.01,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12783,
+      "t_s": 98.117773239
+    },
+    {
+      "oldest_pending_s": 40.012,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12783,
+      "t_s": 100.11955522
+    },
+    {
+      "oldest_pending_s": 42.014,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12784,
+      "t_s": 102.122069537
+    },
+    {
+      "oldest_pending_s": 37.998,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12784,
+      "t_s": 104.124752732
+    },
+    {
+      "oldest_pending_s": 40.0,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12784,
+      "t_s": 106.126300552
+    },
+    {
+      "oldest_pending_s": 42.002,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12785,
+      "t_s": 108.128374843
+    },
+    {
+      "oldest_pending_s": 44.004,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12785,
+      "t_s": 110.130447561
+    },
+    {
+      "oldest_pending_s": 46.006,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12785,
+      "t_s": 112.133226531
+    },
+    {
+      "oldest_pending_s": 48.009,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12786,
+      "t_s": 114.136071769
+    },
+    {
+      "oldest_pending_s": 44.002,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12786,
+      "t_s": 116.138881496
+    },
+    {
+      "oldest_pending_s": 46.005,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12786,
+      "t_s": 118.141664227
+    },
+    {
+      "oldest_pending_s": 48.007,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12787,
+      "t_s": 120.143398248
+    },
+    {
+      "oldest_pending_s": 50.009,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12787,
+      "t_s": 122.14623713
+    },
+    {
+      "oldest_pending_s": 52.012,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12787,
+      "t_s": 124.149047894
+    },
+    {
+      "oldest_pending_s": 54.014,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12788,
+      "t_s": 126.15062169
+    },
+    {
+      "oldest_pending_s": 49.982,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12788,
+      "t_s": 128.152397777
+    },
+    {
+      "oldest_pending_s": 51.985,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12788,
+      "t_s": 130.15549894
+    },
+    {
+      "oldest_pending_s": 53.987,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12789,
+      "t_s": 132.157360569
+    },
+    {
+      "oldest_pending_s": 55.989,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12789,
+      "t_s": 134.159486749
+    },
+    {
+      "oldest_pending_s": 57.991,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12789,
+      "t_s": 136.161879188
+    },
+    {
+      "oldest_pending_s": 59.994,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12789,
+      "t_s": 138.164449382
+    },
+    {
+      "oldest_pending_s": 55.967,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12790,
+      "t_s": 140.166465578
+    },
+    {
+      "oldest_pending_s": 57.97,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12790,
+      "t_s": 142.169802446
+    },
+    {
+      "oldest_pending_s": 59.972,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12790,
+      "t_s": 144.172202753
+    },
+    {
+      "oldest_pending_s": 61.975,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12791,
+      "t_s": 146.174347693
+    },
+    {
+      "oldest_pending_s": 57.958,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12791,
+      "t_s": 148.177448173
+    },
+    {
+      "oldest_pending_s": 59.961,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12791,
+      "t_s": 150.180011044
+    },
+    {
+      "oldest_pending_s": 61.964,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12792,
+      "t_s": 152.182956625
+    },
+    {
+      "oldest_pending_s": 57.922,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12792,
+      "t_s": 154.184925289
+    },
+    {
+      "oldest_pending_s": 59.924,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12793,
+      "t_s": 156.187296248
+    },
+    {
+      "oldest_pending_s": 61.927,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12793,
+      "t_s": 158.190075165
+    },
+    {
+      "oldest_pending_s": 58.169,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12793,
+      "t_s": 160.194194628
+    },
+    {
+      "oldest_pending_s": 60.172,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12794,
+      "t_s": 162.196876792
+    },
+    {
+      "oldest_pending_s": 62.175,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12794,
+      "t_s": 164.199964477
+    },
+    {
+      "oldest_pending_s": 58.154,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12794,
+      "t_s": 166.202069597
+    },
+    {
+      "oldest_pending_s": 60.156,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12795,
+      "t_s": 168.204125888
+    },
+    {
+      "oldest_pending_s": 56.139,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12795,
+      "t_s": 170.206467996
+    },
+    {
+      "oldest_pending_s": 58.141,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12795,
+      "t_s": 172.209030293
+    },
+    {
+      "oldest_pending_s": 60.144,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12796,
+      "t_s": 174.212283558
+    },
+    {
+      "oldest_pending_s": 62.147,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12796,
+      "t_s": 176.214531744
+    },
+    {
+      "oldest_pending_s": 64.149,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12796,
+      "t_s": 178.217091584
+    },
+    {
+      "oldest_pending_s": 66.152,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12797,
+      "t_s": 180.220160194
+    },
+    {
+      "oldest_pending_s": 62.122,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12797,
+      "t_s": 182.222623463
+    },
+    {
+      "oldest_pending_s": 64.124,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12797,
+      "t_s": 184.224495445
+    },
+    {
+      "oldest_pending_s": 66.126,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12798,
+      "t_s": 186.227195316
+    },
+    {
+      "oldest_pending_s": 68.128,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12798,
+      "t_s": 188.229099771
+    },
+    {
+      "oldest_pending_s": 64.102,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12798,
+      "t_s": 190.232228261
+    },
+    {
+      "oldest_pending_s": 66.105,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12799,
+      "t_s": 192.235260636
+    },
+    {
+      "oldest_pending_s": 62.081,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12799,
+      "t_s": 194.237894753
+    },
+    {
+      "oldest_pending_s": 64.084,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12799,
+      "t_s": 196.240461074
+    },
+    {
+      "oldest_pending_s": 66.085,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12800,
+      "t_s": 198.242129786
+    },
+    {
+      "oldest_pending_s": 68.088,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12800,
+      "t_s": 200.244727247
+    },
+    {
+      "oldest_pending_s": 64.061,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12800,
+      "t_s": 202.245113976
+    },
+    {
+      "oldest_pending_s": 66.063,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12801,
+      "t_s": 204.248284454
+    },
+    {
+      "oldest_pending_s": 68.066,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12801,
+      "t_s": 206.251366566
+    },
+    {
+      "oldest_pending_s": 70.069,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12801,
+      "t_s": 208.253616674
+    },
+    {
+      "oldest_pending_s": 72.07,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12802,
+      "t_s": 210.255257384
+    },
+    {
+      "oldest_pending_s": 68.034,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12802,
+      "t_s": 212.258185134
+    },
+    {
+      "oldest_pending_s": 70.037,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12802,
+      "t_s": 214.261008774
+    },
+    {
+      "oldest_pending_s": 72.04,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12803,
+      "t_s": 216.264500335
+    },
+    {
+      "oldest_pending_s": 74.043,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12803,
+      "t_s": 218.266586133
+    },
+    {
+      "oldest_pending_s": 76.045,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12803,
+      "t_s": 220.268639916
+    },
+    {
+      "oldest_pending_s": 78.047,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12804,
+      "t_s": 222.271022583
+    },
+    {
+      "oldest_pending_s": 74.016,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12804,
+      "t_s": 224.273479492
+    },
+    {
+      "oldest_pending_s": 76.019,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12804,
+      "t_s": 226.276340872
+    },
+    {
+      "oldest_pending_s": 78.021,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12805,
+      "t_s": 228.278540026
+    },
+    {
+      "oldest_pending_s": 80.023,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12805,
+      "t_s": 230.280949013
+    },
+    {
+      "oldest_pending_s": 76.258,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12805,
+      "t_s": 232.28417619
+    },
+    {
+      "oldest_pending_s": 78.261,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12806,
+      "t_s": 234.287301382
+    },
+    {
+      "oldest_pending_s": 74.24,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12806,
+      "t_s": 236.288717168
+    },
+    {
+      "oldest_pending_s": 76.241,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12806,
+      "t_s": 238.290088428
+    },
+    {
+      "oldest_pending_s": 78.244,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12807,
+      "t_s": 240.292907888
+    },
+    {
+      "oldest_pending_s": 80.247,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12807,
+      "t_s": 242.295424555
+    },
+    {
+      "oldest_pending_s": 76.217,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12807,
+      "t_s": 244.298104771
+    },
+    {
+      "oldest_pending_s": 78.221,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12808,
+      "t_s": 246.301758093
+    },
+    {
+      "oldest_pending_s": 80.223,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12808,
+      "t_s": 248.304467068
+    },
+    {
+      "oldest_pending_s": 82.226,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12808,
+      "t_s": 250.306498558
+    },
+    {
+      "oldest_pending_s": 84.228,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12809,
+      "t_s": 252.308906092
+    },
+    {
+      "oldest_pending_s": 80.198,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12809,
+      "t_s": 254.311187297
+    },
+    {
+      "oldest_pending_s": 82.201,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12809,
+      "t_s": 256.313587484
+    },
+    {
+      "oldest_pending_s": 84.202,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12810,
+      "t_s": 258.315173111
+    },
+    {
+      "oldest_pending_s": 86.205,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12810,
+      "t_s": 260.318082243
+    },
+    {
+      "oldest_pending_s": 82.184,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12810,
+      "t_s": 262.320416056
+    },
+    {
+      "oldest_pending_s": 84.187,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12811,
+      "t_s": 264.323057132
+    },
+    {
+      "oldest_pending_s": 86.19,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12811,
+      "t_s": 266.326205239
+    },
+    {
+      "oldest_pending_s": 88.192,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12811,
+      "t_s": 268.32816266
+    },
+    {
+      "oldest_pending_s": 90.196,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12812,
+      "t_s": 270.331541315
+    },
+    {
+      "oldest_pending_s": 86.153,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12812,
+      "t_s": 272.33475874
+    },
+    {
+      "oldest_pending_s": 88.155,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12812,
+      "t_s": 274.336915762
+    },
+    {
+      "oldest_pending_s": 90.158,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12813,
+      "t_s": 276.340498843
+    },
+    {
+      "oldest_pending_s": 92.161,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12813,
+      "t_s": 278.343128537
+    },
+    {
+      "oldest_pending_s": 94.164,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12813,
+      "t_s": 280.345715911
+    },
+    {
+      "oldest_pending_s": 96.166,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12814,
+      "t_s": 282.347601748
+    },
+    {
+      "oldest_pending_s": 92.145,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12814,
+      "t_s": 284.350243174
+    },
+    {
+      "oldest_pending_s": 94.148,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12814,
+      "t_s": 286.352569282
+    },
+    {
+      "oldest_pending_s": 96.15,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12815,
+      "t_s": 288.354953138
+    },
+    {
+      "oldest_pending_s": 98.153,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12815,
+      "t_s": 290.357675388
+    },
+    {
+      "oldest_pending_s": 94.12,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12815,
+      "t_s": 292.360347253
+    },
+    {
+      "oldest_pending_s": 96.122,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12816,
+      "t_s": 294.361954584
+    },
+    {
+      "oldest_pending_s": 98.125,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12816,
+      "t_s": 296.365122726
+    },
+    {
+      "oldest_pending_s": 100.128,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12816,
+      "t_s": 298.368246441
+    },
+    {
+      "oldest_pending_s": 102.131,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12817,
+      "t_s": 300.370672268
+    },
+    {
+      "oldest_pending_s": 98.334,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12817,
+      "t_s": 302.373302053
+    },
+    {
+      "oldest_pending_s": 100.337,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12817,
+      "t_s": 304.37635975
+    },
+    {
+      "oldest_pending_s": 102.34,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12818,
+      "t_s": 306.378571593
+    },
+    {
+      "oldest_pending_s": 104.342,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12818,
+      "t_s": 308.381217069
+    },
+    {
+      "oldest_pending_s": 100.335,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12818,
+      "t_s": 310.384346546
+    },
+    {
+      "oldest_pending_s": 102.338,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12819,
+      "t_s": 312.387078094
+    },
+    {
+      "oldest_pending_s": 104.34,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12819,
+      "t_s": 314.38888736
+    },
+    {
+      "oldest_pending_s": 106.343,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12819,
+      "t_s": 316.392326869
+    },
+    {
+      "oldest_pending_s": 108.347,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12820,
+      "t_s": 318.395901985
+    },
+    {
+      "oldest_pending_s": 104.318,
+      "pending": 1,
+      "queue_length": 1,
+      "stream_length": 12820,
+      "t_s": 320.398073967
+    },
+    {
+      "oldest_pending_s": 106.321,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12820,
+      "t_s": 322.400948575
+    },
+    {
+      "oldest_pending_s": 108.324,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12821,
+      "t_s": 324.403871851
+    },
+    {
+      "oldest_pending_s": 110.326,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12821,
+      "t_s": 326.405460239
+    },
+    {
+      "oldest_pending_s": 106.305,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12821,
+      "t_s": 328.408788651
+    },
+    {
+      "oldest_pending_s": 108.307,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12822,
+      "t_s": 330.411045441
+    },
+    {
+      "oldest_pending_s": 110.31,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12822,
+      "t_s": 332.413201256
+    },
+    {
+      "oldest_pending_s": 106.256,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12822,
+      "t_s": 334.415675383
+    },
+    {
+      "oldest_pending_s": 108.258,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12823,
+      "t_s": 336.41775018
+    },
+    {
+      "oldest_pending_s": 110.26,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12823,
+      "t_s": 338.420062466
+    },
+    {
+      "oldest_pending_s": 106.237,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12823,
+      "t_s": 340.422840023
+    },
+    {
+      "oldest_pending_s": 108.239,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12824,
+      "t_s": 342.424670607
+    },
+    {
+      "oldest_pending_s": 110.24,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12824,
+      "t_s": 344.425869787
+    },
+    {
+      "oldest_pending_s": 106.211,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12824,
+      "t_s": 346.427275607
+    },
+    {
+      "oldest_pending_s": 108.214,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12825,
+      "t_s": 348.429446861
+    },
+    {
+      "oldest_pending_s": 110.216,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12825,
+      "t_s": 350.432199564
+    },
+    {
+      "oldest_pending_s": 112.219,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12825,
+      "t_s": 352.43503106000003
+    },
+    {
+      "oldest_pending_s": 114.222,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 354.437788478
+    },
+    {
+      "oldest_pending_s": 110.184,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 356.439087328
+    },
+    {
+      "oldest_pending_s": 112.187,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 358.442454831
+    },
+    {
+      "oldest_pending_s": 114.191,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 360.445664246
+    },
+    {
+      "oldest_pending_s": 116.193,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 362.448110476
+    },
+    {
+      "oldest_pending_s": 118.196,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 364.45070424
+    },
+    {
+      "oldest_pending_s": 120.198,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 366.452817405
+    },
+    {
+      "oldest_pending_s": 116.177,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 368.4552148
+    },
+    {
+      "oldest_pending_s": 118.181,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 370.458590199
+    },
+    {
+      "oldest_pending_s": 120.183,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 372.461609821
+    },
+    {
+      "oldest_pending_s": 122.186,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 374.463585295
+    },
+    {
+      "oldest_pending_s": 118.391,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 376.466187013
+    },
+    {
+      "oldest_pending_s": 120.394,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 378.469249356
+    },
+    {
+      "oldest_pending_s": 122.396,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 380.471051352
+    },
+    {
+      "oldest_pending_s": 118.355,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 382.474005067
+    },
+    {
+      "oldest_pending_s": 120.358,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 384.476640593
+    },
+    {
+      "oldest_pending_s": 122.36,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 386.478458549
+    },
+    {
+      "oldest_pending_s": 124.362,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 388.481555152
+    },
+    {
+      "oldest_pending_s": 126.365,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 390.484133873
+    },
+    {
+      "oldest_pending_s": 122.332,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 392.487287579
+    },
+    {
+      "oldest_pending_s": 124.336,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 394.490940273
+    },
+    {
+      "oldest_pending_s": 126.339,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 396.493954976
+    },
+    {
+      "oldest_pending_s": 128.341,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 398.496181025
+    },
+    {
+      "oldest_pending_s": 124.313,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 400.49826279
+    },
+    {
+      "oldest_pending_s": 126.316,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 402.500408384
+    },
+    {
+      "oldest_pending_s": 128.318,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 404.503362751
+    },
+    {
+      "oldest_pending_s": 130.322,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 406.506547465
+    },
+    {
+      "oldest_pending_s": 132.324,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 408.508185319
+    },
+    {
+      "oldest_pending_s": 134.326,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 410.510815628
+    },
+    {
+      "oldest_pending_s": 136.327,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 412.512251523
+    },
+    {
+      "oldest_pending_s": 138.33,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 414.514359801
+    },
+    {
+      "oldest_pending_s": 140.332,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 416.516544142
+    },
+    {
+      "oldest_pending_s": 142.334,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 418.518682873
+    },
+    {
+      "oldest_pending_s": 144.336,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 420.521044621
+    },
+    {
+      "oldest_pending_s": 146.339,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 422.524487088
+    },
+    {
+      "oldest_pending_s": 148.342,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 424.527125471
+    },
+    {
+      "oldest_pending_s": 150.344,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 426.52911253
+    },
+    {
+      "oldest_pending_s": 152.347,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 428.531541023
+    },
+    {
+      "oldest_pending_s": 154.348,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 430.533144508
+    },
+    {
+      "oldest_pending_s": 156.35,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 432.53502024
+    },
+    {
+      "oldest_pending_s": 158.353,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 434.537927221
+    },
+    {
+      "oldest_pending_s": 160.356,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 436.540644907
+    },
+    {
+      "oldest_pending_s": 156.327,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 438.543013172
+    },
+    {
+      "oldest_pending_s": 158.33,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 440.545338955
+    },
+    {
+      "oldest_pending_s": 160.333,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 442.548729711
+    },
+    {
+      "oldest_pending_s": 162.335,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 444.550613132
+    },
+    {
+      "oldest_pending_s": 158.286,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 446.552972928
+    },
+    {
+      "oldest_pending_s": 160.289,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 448.556498223
+    },
+    {
+      "oldest_pending_s": 162.292,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 450.558340515
+    },
+    {
+      "oldest_pending_s": 164.293,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 452.560175565
+    },
+    {
+      "oldest_pending_s": 166.296,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 454.562495105
+    },
+    {
+      "oldest_pending_s": 162.521,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 456.565273153
+    },
+    {
+      "oldest_pending_s": 164.524,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 458.567763603
+    },
+    {
+      "oldest_pending_s": 166.526,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 460.569545863
+    },
+    {
+      "oldest_pending_s": 168.528,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 462.571831076
+    },
+    {
+      "oldest_pending_s": 164.499,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 464.574817374
+    },
+    {
+      "oldest_pending_s": 166.501,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 466.576943242
+    },
+    {
+      "oldest_pending_s": 168.504,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 468.580217107
+    },
+    {
+      "oldest_pending_s": 170.508,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 470.583644002
+    },
+    {
+      "oldest_pending_s": 172.511,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 472.586895289
+    },
+    {
+      "oldest_pending_s": 168.445,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 474.58988131
+    },
+    {
+      "oldest_pending_s": 170.448,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 476.593554929
+    },
+    {
+      "oldest_pending_s": 172.451,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 478.596120141
+    },
+    {
+      "oldest_pending_s": 174.454,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 480.599285952
+    },
+    {
+      "oldest_pending_s": 176.458,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 482.602720654
+    },
+    {
+      "oldest_pending_s": 178.46,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 484.604273344
+    },
+    {
+      "oldest_pending_s": 174.406,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 486.607060076
+    },
+    {
+      "oldest_pending_s": 176.409,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 488.609793572
+    },
+    {
+      "oldest_pending_s": 178.411,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 490.611966661
+    },
+    {
+      "oldest_pending_s": 180.414,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 492.614903946
+    },
+    {
+      "oldest_pending_s": 182.417,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 494.617559454
+    },
+    {
+      "oldest_pending_s": 184.419,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 496.619564453
+    },
+    {
+      "oldest_pending_s": 180.387,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 498.621790183
+    },
+    {
+      "oldest_pending_s": 182.389,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 500.624053622
+    },
+    {
+      "oldest_pending_s": 184.392,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 502.626692943
+    },
+    {
+      "oldest_pending_s": 186.394,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 504.629077543
+    },
+    {
+      "oldest_pending_s": 182.611,
+      "pending": 1,
+      "queue_length": 1,
+      "stream_length": 12826,
+      "t_s": 506.630520487
+    },
+    {
+      "oldest_pending_s": 184.613,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 508.632837729
+    },
+    {
+      "oldest_pending_s": 186.615,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 510.635125075
+    },
+    {
+      "oldest_pending_s": 188.618,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 512.638050377
+    },
+    {
+      "oldest_pending_s": 190.621,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 514.640893833
+    },
+    {
+      "oldest_pending_s": 186.59,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 516.643889373
+    },
+    {
+      "oldest_pending_s": 188.593,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 518.64691954
+    },
+    {
+      "oldest_pending_s": 190.596,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 520.649762961
+    },
+    {
+      "oldest_pending_s": 192.598,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 522.65191084
+    },
+    {
+      "oldest_pending_s": 188.559,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 524.65544779
+    },
+    {
+      "oldest_pending_s": 190.561,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 526.657067117
+    },
+    {
+      "oldest_pending_s": 192.564,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 528.659453003
+    },
+    {
+      "oldest_pending_s": 194.567,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 530.662483652
+    },
+    {
+      "oldest_pending_s": 196.569,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 532.664990286
+    },
+    {
+      "oldest_pending_s": 192.56,
+      "pending": 1,
+      "queue_length": 1,
+      "stream_length": 12826,
+      "t_s": 534.668116905
+    },
+    {
+      "oldest_pending_s": 194.564,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 536.671566202
+    },
+    {
+      "oldest_pending_s": 196.566,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 538.673822654
+    },
+    {
+      "oldest_pending_s": 198.568,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 540.675556305
+    },
+    {
+      "oldest_pending_s": 200.57,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 542.677358871
+    },
+    {
+      "oldest_pending_s": 202.572,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 544.679716713
+    },
+    {
+      "oldest_pending_s": 198.525,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 546.682373393
+    },
+    {
+      "oldest_pending_s": 200.528,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 548.685148284
+    },
+    {
+      "oldest_pending_s": 202.532,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 550.688584522
+    },
+    {
+      "oldest_pending_s": 204.533,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 552.689898348
+    },
+    {
+      "oldest_pending_s": 200.506,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 554.692443728
+    },
+    {
+      "oldest_pending_s": 202.508,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 556.694843569
+    },
+    {
+      "oldest_pending_s": 204.51,
+      "pending": 1,
+      "queue_length": 0,
+      "stream_length": 12826,
+      "t_s": 558.696650156
+    }
+  ],
+  "scenario": {
+    "extraction": "gemini-3.5-flash-lite",
+    "hazards_at": [
+      180
+    ],
+    "neighbours": 0.1,
+    "notes": "Real LLM extraction: Gemini gemini-3.5-flash-lite through its OpenAI-compatible endpoint with the strict JSON schema, free tier, one triage worker paced at INFERENCE_MAX_RPM=10 (the landmark refinement can make a second call per report). Synthetic surge reports only (no ground-truth tags); each caller says they are on scene and which vehicle they need. One matcher, simulated driver at SIM_TIME_SCALE=0.1, fleet of 43 vehicles. Traces exported to Jaeger.",
+    "repeats": 0.1,
+    "run_id": "run-b-gemini",
+    "seed": 2026,
+    "steps": [
+      {
+        "rate": 0.16667,
+        "seconds": 360
+      }
+    ]
+  },
+  "started_at": "2026-11-02T12:33:49.294924814+00:00"
+}

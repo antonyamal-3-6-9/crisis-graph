@@ -1,0 +1,60 @@
+# Alert rules from the pipeline design (§4.11). Shown on Prometheus's
+# Alerts page; no Alertmanager is needed for the local pilot.
+groups:
+  - name: crisisgraph
+    rules:
+      - alert: DeadLetters
+        expr: max(crisisgraph_dead_letters) > 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Intake messages were dead-lettered"
+          description: "{{ $value }} message(s) in sos:extract:dead could not be processed; check them in the console's Alerts view."
+
+      - alert: CriticalWaitTooLong
+        expr: max(crisisgraph_matcher_oldest_wait_seconds{tier="CRITICAL"}) > 180
+        for: 30s
+        labels: { severity: critical }
+        annotations:
+          summary: "A CRITICAL task has waited more than 3 minutes"
+          description: "Oldest CRITICAL wait is {{ $value | humanizeDuration }}."
+
+      - alert: OutboxLag
+        expr: max(crisisgraph_outbox_oldest_unpublished_seconds) > 5
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Outbox events are not being published"
+          description: "Oldest unpublished event is {{ $value | humanizeDuration }} old; is a relay leader running?"
+
+      - alert: NoMatcherLeader
+        expr: (sum(crisisgraph_matcher_is_leader) or vector(0)) < 1
+        for: 15s
+        labels: { severity: critical }
+        annotations:
+          summary: "No matcher leader: nothing is being assigned"
+          description: "No matcher process holds the lease."
+
+      - alert: InferenceBreakerOpen
+        expr: max(crisisgraph_triage_breaker_state) >= 2
+        for: 0s
+        labels: { severity: warning }
+        annotations:
+          summary: "Inference circuit breaker is open"
+          description: "Reports go to manual triage until the model recovers."
+
+      - alert: HazardOverlayStale
+        expr: max(crisisgraph_graph_overlay_age_seconds) > 60
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Hazard overlay older than twice the refresh interval"
+          description: "Overlay age is {{ $value | humanizeDuration }}."
+
+      - alert: RoleDown
+        expr: up{job="crisisgraph"} == 0
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "A CrisisGraph role is not responding"
+          description: "{{ $labels.role }} at {{ $labels.instance }} is down (an expected standby or optional role can be ignored)."

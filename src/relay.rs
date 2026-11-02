@@ -74,18 +74,19 @@ impl OutboxRelay {
     pub async fn publish(&self, events: &[OutboxRecord]) -> RelayResult<Vec<String>> {
         let mut published = Vec::with_capacity(events.len());
         for event in events {
-            self.redis
-                .xadd_fields(
-                    self.stream_for(&event.event_type),
-                    &[
-                        ("event_id", &event.event_id),
-                        ("type", &event.event_type),
-                        ("aggregate_id", &event.aggregate_id),
-                        ("payload", &event.payload_json),
-                        ("created_at", &event.created_at.to_rfc3339()),
-                    ],
-                )
-                .await?;
+            let created_at = event.created_at.to_rfc3339();
+            let mut fields: Vec<(&str, &str)> = vec![
+                ("event_id", &event.event_id),
+                ("type", &event.event_type),
+                ("aggregate_id", &event.aggregate_id),
+                ("payload", &event.payload_json),
+                ("created_at", &created_at),
+            ];
+            // Carry the trace on so the consumer continues it (M8).
+            if let Some(traceparent) = &event.traceparent {
+                fields.push(("traceparent", traceparent));
+            }
+            self.redis.xadd_fields(self.stream_for(&event.event_type), &fields).await?;
             published.push(event.event_id.clone());
         }
         Ok(published)

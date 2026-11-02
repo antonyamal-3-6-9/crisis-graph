@@ -45,6 +45,10 @@ a { color: inherit; text-decoration: none; }
 .connection i { width: 7px; height: 7px; border-radius: 50%; background: #738079; box-shadow: 0 0 0 3px rgba(255,255,255,.04); }
 .connection i.online { background: #65c18c; box-shadow: 0 0 0 3px rgba(101,193,140,.13); }
 .connection i.warn { background: #e4a83e; }
+.monitoring-links { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 4px; font-size: 11px; }
+.monitoring-links a { color: #9fd6b6; text-decoration: none; }
+.monitoring-links a:hover { text-decoration: underline; }
+.monitoring-links[hidden] { display: none; }
 
 .content { min-width: 0; padding: 0 26px 36px; }
 .topbar { height: 90px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); margin-bottom: 24px; }

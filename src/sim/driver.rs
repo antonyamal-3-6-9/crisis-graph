@@ -11,11 +11,11 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
-use tracing::{info, warn};
+use tracing::{info, warn, Instrument};
 
 use crate::config::PipelineParams;
 use crate::db::{CompleteTaskCommand, OpsRepoError, OpsRepository, RedisClient, TriggerCommand};
-use crate::models::{ActorContext, ActorRole};
+use crate::models::{ActorContext, ActorRole, AssignedTask};
 use crate::runtime::Shutdown;
 
 pub const DRIVER_ACTOR: &str = "sim-driver";
@@ -50,7 +50,34 @@ impl SimDriver {
     /// Returns the tasks completed by this pass (replays are not counted).
     pub async fn run_once(&self, now: DateTime<Utc>) -> Result<Vec<String>, OpsRepoError> {
         let mut completed = Vec::new();
-        for (task_id, version, assigned_at, eta_s, kind) in self.repo.assigned_tasks(&self.params.graph_dataset).await? {
+        for task in self.repo.assigned_tasks(&self.params.graph_dataset).await? {
+            // A span (in the task's trace) only when the crew acts, not for
+            // every poll while the mission is still under way.
+            if !self.action_due(&task, now) {
+                continue;
+            }
+            let span = tracing::info_span!("driver.mission", task_id = %task.task_id, kind = %task.kind);
+            crate::runtime::telemetry::set_parent(&span, task.traceparent.as_deref());
+            if let Some(id) = self.mission_step(task, now).instrument(span).await? {
+                completed.push(id);
+            }
+        }
+        Ok(completed)
+    }
+
+    /// One assigned task: report "victim aboard" halfway through a boat
+    /// mission, complete it when due. Returns the task ID if completed now.
+    /// Whether the crew reports something now: completion, or "victim
+    /// aboard" from halfway through a boat mission.
+    fn action_due(&self, task: &AssignedTask, now: DateTime<Utc>) -> bool {
+        let due = mission_secs(task.eta_s, self.params.sim_on_scene_secs, self.params.sim_time_scale);
+        let elapsed = (now - task.assigned_at).num_milliseconds() as f64 / 1000.0;
+        elapsed >= due || (task.kind == "WATER_EXTRACTION" && elapsed >= due / 2.0)
+    }
+
+    async fn mission_step(&self, task: AssignedTask, now: DateTime<Utc>) -> Result<Option<String>, OpsRepoError> {
+        let AssignedTask { task_id, version, assigned_at, eta_s, kind, .. } = task;
+        {
             let due = mission_secs(eta_s, self.params.sim_on_scene_secs, self.params.sim_time_scale);
             let elapsed = (now - assigned_at).num_milliseconds() as f64 / 1000.0;
             // A boat crew reports "victim aboard" halfway through, so the
@@ -69,7 +96,7 @@ impl SimDriver {
                 }
             }
             if elapsed < due {
-                continue;
+                return Ok(None);
             }
             let command = CompleteTaskCommand {
                 request_id: format!("sim:{task_id}:{version}"),
@@ -80,15 +107,14 @@ impl SimDriver {
             match self.repo.complete_task(&self.actor, &command).await {
                 Ok(outcome) if !outcome.replayed => {
                     info!(task_id = %task_id, vehicle = ?outcome.outcome["vehicle_id"], "Simulated mission completed");
-                    completed.push(task_id);
+                    Ok(Some(task_id))
                 }
-                Ok(_) => {}
+                Ok(_) => Ok(None),
                 // Changed meanwhile (dispatcher completed it, breakdown): skip.
-                Err(OpsRepoError::NotAvailable(_) | OpsRepoError::NotFound(_)) => {}
-                Err(error) => return Err(error),
+                Err(OpsRepoError::NotAvailable(_) | OpsRepoError::NotFound(_)) => Ok(None),
+                Err(error) => Err(error),
             }
         }
-        Ok(completed)
     }
 
     /// Run passes until shutdown, refreshing the heartbeat key.

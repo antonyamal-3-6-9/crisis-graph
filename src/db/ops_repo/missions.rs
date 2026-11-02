@@ -89,12 +89,12 @@ impl OpsRepository {
                      task_id: $water_id, incident_id: i.incident_id, kind: 'WATER_EXTRACTION', status: 'QUEUED', \
                      required_asset: 'RESCUE_BOAT', urgency: t.urgency, priority_rank: t.priority_rank, version: 0, \
                      target_junction_id: $staging, staging_junction_id: $staging, water_legs_json: $legs, \
-                     water_eta_s: $water_eta, created_at: datetime(), queued_at: t.queued_at }) \
+                     water_eta_s: $water_eta, created_at: datetime(), queued_at: t.queued_at, traceparent: t.traceparent }) \
                  CREATE (i)-[:HAS_TASK {seq: 3}]->(:Task { \
                      task_id: $road_id, incident_id: i.incident_id, kind: 'ROAD_EVACUATION', status: 'PENDING_TRIGGER', \
                      required_asset: $road_asset, urgency: t.urgency, priority_rank: t.priority_rank, version: 0, \
                      target_junction_id: $staging, staging_junction_id: $staging, depends_on: $water_id, \
-                     created_at: datetime() }) \
+                     created_at: datetime(), traceparent: t.traceparent }) \
                  SET i.mission = 'BOAT_THEN_ROAD', i.staging_junction_id = $staging, \
                      i.version = i.version + 1, i.updated_at = datetime() \
                  CREATE (t)-[:HAS_AUDIT_EVENT]->(:AuditEvent { \

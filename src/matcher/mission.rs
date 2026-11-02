@@ -8,7 +8,7 @@
 //! decision 2026-11-01: automatic, with a dispatcher alert). A fragmented
 //! cut, or no plan at all, is escalated `NO_SURFACE_ROUTE` instead.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
@@ -37,9 +37,14 @@ impl Matcher {
             return Ok(());
         }
         let dataset = self.snapshot.dataset().to_string();
-        let depots = self.repo.depot_junctions(&dataset).await?;
-        let reachable = self.reachable_by_road(depots, now).await?;
-        let cut_off: Vec<&QueuedTask> = candidates.into_iter().filter(|t| !reachable.contains(&t.incident_junction_id)).collect();
+        // Cut off: no road vehicle type can reach the victims from any depot,
+        // with the same per-type access rules the routes use (an unsuitable
+        // track or an hgv=no lane counts as closed to that type). The same
+        // reachability decides group plans (T8), so a task is never left
+        // between the two checks.
+        let reach = self.reach_by_type(now).await?;
+        let reachable = |junction: &str| reach.values().any(|r| r.contains(junction));
+        let cut_off: Vec<&QueuedTask> = candidates.into_iter().filter(|t| !reachable(&t.incident_junction_id)).collect();
         if cut_off.is_empty() {
             return Ok(());
         }
@@ -78,22 +83,6 @@ impl Matcher {
             }
         }
         Ok(())
-    }
-
-    /// Every junction reachable by road from any of `starts` (hazards in
-    /// force masked), for any road vehicle.
-    async fn reachable_by_road(&self, starts: Vec<String>, now: DateTime<Utc>) -> MatcherResult<HashSet<String>> {
-        let snapshot = self.snapshot.clone();
-        Ok(tokio::task::spawn_blocking(move || {
-            let mut reachable = HashSet::new();
-            for start in starts {
-                if let Ok((costs, _)) = snapshot.costs_from(&RoutingQuery::new(start, String::new()), now) {
-                    reachable.extend(costs.into_keys());
-                }
-            }
-            reachable
-        })
-        .await?)
     }
 
     /// The fastest terminal or island plan from any boat start, with the

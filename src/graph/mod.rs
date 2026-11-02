@@ -13,6 +13,7 @@
 //! arrived after the route was computed.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -89,6 +90,8 @@ pub struct GraphSnapshot {
     baseline: Arc<RoutingGraph>,
     overlay: ArcSwap<HazardOverlay>,
     repo: OpsRepository,
+    /// When the overlay was last confirmed current against Neo4j (Unix ms).
+    checked_at_ms: AtomicI64,
 }
 
 impl GraphSnapshot {
@@ -115,7 +118,13 @@ impl GraphSnapshot {
             elapsed_ms = started.elapsed().as_millis() as u64,
             "Graph snapshot loaded"
         );
-        let snapshot = Self { dataset: dataset.to_string(), baseline, overlay: ArcSwap::from_pointee(overlay), repo };
+        let snapshot = Self {
+            dataset: dataset.to_string(),
+            baseline,
+            overlay: ArcSwap::from_pointee(overlay),
+            repo,
+            checked_at_ms: AtomicI64::new(Utc::now().timestamp_millis()),
+        };
         snapshot.publish_metrics();
         Ok(snapshot)
     }
@@ -176,6 +185,7 @@ impl GraphSnapshot {
     pub async fn refresh(&self) -> Result<bool, OpsRepoError> {
         let current = self.overlay.load().version;
         if self.repo.overlay_version(&self.dataset).await? == current {
+            self.checked_at_ms.store(Utc::now().timestamp_millis(), Ordering::Relaxed);
             self.publish_metrics();
             return Ok(false);
         }
@@ -185,6 +195,7 @@ impl GraphSnapshot {
         }
         info!(dataset = %self.dataset, from = current, to = fresh.version, hazards = fresh.len(), "Hazard overlay swapped");
         self.overlay.store(Arc::new(fresh));
+        self.checked_at_ms.store(Utc::now().timestamp_millis(), Ordering::Relaxed);
         self.publish_metrics();
         Ok(true)
     }
@@ -193,7 +204,10 @@ impl GraphSnapshot {
         let overlay = self.overlay.load();
         metrics::gauge!("crisisgraph_graph_overlay_version").set(overlay.version as f64);
         metrics::gauge!("crisisgraph_graph_overlay_hazards").set(overlay.len() as f64);
-        let age = (Utc::now() - overlay.loaded_at).num_milliseconds().max(0) as f64 / 1000.0;
+        // Staleness: time since the overlay was last confirmed current (a
+        // refresh that found no change still counts), not since it changed.
+        let checked = self.checked_at_ms.load(Ordering::Relaxed);
+        let age = (Utc::now().timestamp_millis() - checked).max(0) as f64 / 1000.0;
         metrics::gauge!("crisisgraph_graph_overlay_age_seconds").set(age);
     }
 
@@ -210,6 +224,7 @@ impl GraphSnapshot {
         let mut last_refresh = Instant::now();
         if let Err(e) = self.refresh().await {
             warn!(error = %e, "Overlay refresh failed");
+            self.publish_metrics();
         }
         info!(dataset = %self.dataset, stream = %events_stream, "Overlay refresher started");
 
@@ -236,7 +251,10 @@ impl GraphSnapshot {
             if changed || last_refresh.elapsed() >= every {
                 match self.refresh().await {
                     Ok(_) => last_refresh = Instant::now(),
-                    Err(e) => warn!(error = %e, "Overlay refresh failed"),
+                    Err(e) => {
+                        warn!(error = %e, "Overlay refresh failed");
+                        self.publish_metrics();
+                    }
                 }
             }
         }

@@ -26,6 +26,9 @@ pub struct Config {
     /// Maximum concurrent inference requests per worker. Keep low for
     /// llama.cpp on CPU; match llama-server `-np` slots.
     pub inference_max_concurrency: usize,
+    /// Most inference requests per minute (0 = unlimited). Keeps a hosted
+    /// endpoint such as Gemini's free tier under its rate limit (M8).
+    pub inference_max_rpm: u32,
 
     // Application
     pub app_env: String,
@@ -95,6 +98,9 @@ pub struct PipelineParams {
     pub role_drain_timeout_secs: u64,
     /// Longest `POST /api/v1/dispatch` waits for an outcome (M7).
     pub dispatch_wait_secs: u64,
+    /// Monitoring links shown in the console (M8); empty hides them.
+    pub grafana_url: String,
+    pub jaeger_url: String,
 
     // Simulated driver (demo only, M6a)
     /// Mission time multiplier: 0.1 runs missions ten times faster.
@@ -105,6 +111,10 @@ pub struct PipelineParams {
     // Boat-then-road missions (M6b)
     /// Assumed boat speed through flooded streets, for water-leg estimates.
     pub boat_speed_kmh: f64,
+
+    // Load tests (M8)
+    /// Median latency of the simulated extraction engine.
+    pub sim_extraction_median_ms: u64,
 
     // Streams
     /// Stream the outbox relay feeds with new reports (extraction queue).
@@ -149,9 +159,12 @@ impl Default for PipelineParams {
             graph_dataset: "aluva-periyar-pilot".to_string(),
             role_drain_timeout_secs: 10,
             dispatch_wait_secs: 180,
+            grafana_url: String::new(),
+            jaeger_url: String::new(),
             sim_time_scale: 0.1,
             sim_on_scene_secs: 300,
             boat_speed_kmh: 8.0,
+            sim_extraction_median_ms: 800,
             extract_stream: "sos:extract".to_string(),
             events_stream: "ops:events".to_string(),
         }
@@ -233,9 +246,12 @@ impl PipelineParams {
             graph_dataset: stream_or("GRAPH_DATASET", &d.graph_dataset),
             role_drain_timeout_secs: u64_or("ROLE_DRAIN_TIMEOUT_SECS", d.role_drain_timeout_secs),
             dispatch_wait_secs: u64_or("DISPATCH_WAIT_SECS", d.dispatch_wait_secs),
+            grafana_url: std::env::var("GRAFANA_URL").unwrap_or_default().trim().to_string(),
+            jaeger_url: std::env::var("JAEGER_URL").unwrap_or_default().trim().to_string(),
             sim_time_scale: f64_or("SIM_TIME_SCALE", d.sim_time_scale, 10.0),
             sim_on_scene_secs: u64_or("SIM_ON_SCENE_SECS", d.sim_on_scene_secs),
             boat_speed_kmh: f64_or("BOAT_SPEED_KMH", d.boat_speed_kmh, 80.0),
+            sim_extraction_median_ms: u64_or("SIM_EXTRACTION_MEDIAN_MS", d.sim_extraction_median_ms),
             extract_stream: stream_or("EXTRACT_STREAM", &d.extract_stream),
             events_stream: stream_or("EVENTS_STREAM", &d.events_stream),
         };
@@ -292,6 +308,10 @@ impl Config {
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|value| (1..=300).contains(value))
             .unwrap_or(60);
+        let inference_max_rpm = env::var("INFERENCE_MAX_RPM")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0);
         let triage_adapter_id = env::var("TRIAGE_ADAPTER_ID")
             .ok()
             .filter(|value| !value.is_empty());
@@ -324,6 +344,7 @@ impl Config {
             triage_adapter_id,
             triage_adapter_sha256,
             inference_max_concurrency,
+            inference_max_rpm,
             app_env,
             log_level,
             params: PipelineParams::from_env(),

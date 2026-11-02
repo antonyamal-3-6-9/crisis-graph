@@ -20,7 +20,7 @@ use neo4rs::query;
 use uuid::Uuid;
 
 use crisis_graph::config::{Config, PipelineParams};
-use crisis_graph::db::{ensure_ops_schema, Neo4jClient, OpsRepoError, OpsRepository, RedisClient, StateManager};
+use crisis_graph::db::{ensure_ops_schema, MergeCommand, Neo4jClient, OpsRepoError, OpsRepository, RedisClient, StateManager};
 use crisis_graph::graph::GraphSnapshot;
 use crisis_graph::matcher::Matcher;
 use crisis_graph::models::{ActorContext, ActorRole, HazardCommand, HazardSource, HazardStatus};
@@ -214,6 +214,13 @@ impl Ctx {
 
     async fn cleanup(&self) {
         let statements = [
+            // Tasks added by a group plan (T8) have plain UUIDs: found through their incident.
+            "MATCH (t:Task) WHERE t.incident_id STARTS WITH $d \
+             OPTIONAL MATCH (r:Reservation {task_id: t.task_id}) OPTIONAL MATCH (r)-[:HAS_AUDIT_EVENT]->(ra:AuditEvent) \
+             OPTIONAL MATCH (e:OutboxEvent {aggregate_id: t.task_id}) OPTIONAL MATCH (t)-[:HAS_AUDIT_EVENT]->(ta:AuditEvent) \
+             DETACH DELETE r, ra, e, ta, t",
+            "MATCH (r:Report) WHERE r.request_id STARTS WITH $d DETACH DELETE r",
+            "MATCH (c:Command) WHERE c.request_id STARTS WITH $d DELETE c",
             "MATCH (r:Reservation) WHERE r.task_id STARTS WITH $d \
              OPTIONAL MATCH (r)-[:HAS_AUDIT_EVENT]->(a:AuditEvent) DETACH DELETE r, a",
             "MATCH (n) WHERE (n:Task OR n:OpsIncident OR n:Vehicle) \
@@ -253,6 +260,52 @@ impl Ctx {
         ] {
             let _: Result<(), _> = redis::cmd("DEL").arg(key).query_async(&mut conn).await;
         }
+    }
+}
+
+impl Ctx {
+    /// A report on the incident whose extraction lists a medical condition.
+    async fn medical_report(&self, incident_name: &str) {
+        self.run(
+            "MATCH (i:OpsIncident {incident_id: $d + '/I-' + $name}) \
+             CREATE (:Report {report_id: $d + '/R-' + $name, request_id: $d + '-R-' + $name, received_at: datetime(), \
+                 extraction_json: '{\"triage\":{\"victim_profile\":{\"medical_conditions\":[\"UNCONSCIOUS\"]}}}'})-[:REPORTS]->(i)",
+            &[("name", incident_name.into())],
+        )
+        .await;
+    }
+
+    /// `(required_asset, persons, status, asset_switched_from)` of every
+    /// road pickup of the incident, by seq.
+    async fn pickups(&self, incident_name: &str) -> Vec<(String, i64, String, Option<String>)> {
+        let mut result = self
+            .neo4j
+            .graph
+            .execute(
+                query(
+                    "MATCH (:OpsIncident {incident_id: $d + '/I-' + $name})-[h:HAS_TASK]->(t:Task {kind: 'ROAD_PICKUP'}) \
+                     RETURN t.required_asset AS asset, coalesce(t.persons, -1) AS persons, t.status AS status, \
+                            t.asset_switched_from AS switched ORDER BY h.seq",
+                )
+                .param("d", self.dataset.clone())
+                .param("name", incident_name),
+            )
+            .await
+            .unwrap();
+        let mut rows = Vec::new();
+        while let Some(row) = result.next().await.unwrap() {
+            rows.push((row.get("asset").unwrap(), row.get("persons").unwrap(), row.get("status").unwrap(), row.get("switched").unwrap()));
+        }
+        rows
+    }
+
+    /// Close every road into D to heavy vehicles (`hgv=no`).
+    async fn no_trucks_into_d(&self) {
+        self.run(
+            "MATCH ()-[r:CONNECTS_TO {dataset: $d}]->(:Junction {id: $d + '/JD'}) SET r.hgv = false",
+            &[],
+        )
+        .await;
     }
 }
 
@@ -507,7 +560,7 @@ async fn escalates_unservable_and_overdue_tasks_once() {
     let Some(ctx) = setup(50).await else { return };
     // The only vehicle sits at D, from where nothing is reachable.
     ctx.vehicle("AMB-1", "AMBULANCE", 4, "D").await;
-    let too_many = ctx.task("crowd", 1, "AMBULANCE", 30, "B", 0).await;
+    let too_many = ctx.task("crowd", 1, "RESCUE_BOAT", 30, "B", 0).await;
     let overdue = ctx.task("late", 1, "AMBULANCE", 1, "B", 11 * 60).await;
     let fresh = ctx.task("fresh", 1, "AMBULANCE", 1, "C", 0).await;
     let matcher = ctx.matcher().await;
@@ -524,6 +577,208 @@ async fn escalates_unservable_and_overdue_tasks_once() {
     assert_eq!(reasons.as_deref(), Some("NO_ELIGIBLE_VEHICLE"));
     let reasons = ctx.string("MATCH (t:Task) WHERE t.task_id = $d + '/T-late' RETURN head(t.escalations) AS v").await;
     assert_eq!(reasons.as_deref(), Some("OVERDUE"));
+    ctx.cleanup().await;
+}
+
+/// Tasks no vehicle could ever carry do not starve the queue (found in the
+/// M8 surge run): with a window of 2 and two CRITICAL tasks no vehicle can
+/// carry at the head (boat pickups, with no boat in the fleet; road
+/// pickups for road vehicles get a group plan instead, T8), the URGENT task behind them is still in the window and assigned;
+/// the oversized ones stay queued, escalated once.
+#[tokio::test]
+async fn unservable_tasks_at_the_head_do_not_starve_the_queue() {
+    let Some(ctx) = setup(50).await else { return };
+    let vehicle = ctx.vehicle("AMB-1", "AMBULANCE", 4, "A").await;
+    let crowd_a = ctx.task("crowd-a", 2, "RESCUE_BOAT", 6, "D", 0).await;
+    let crowd_b = ctx.task("crowd-b", 2, "RESCUE_BOAT", 5, "D", 0).await;
+    let urgent = ctx.task("urgent", 1, "AMBULANCE", 2, "D", 0).await;
+    let snapshot = GraphSnapshot::load(ctx.repo.clone(), &StateManager::new(ctx.neo4j.clone()), &ctx.dataset)
+        .await
+        .expect("snapshot");
+    let matcher = Matcher::new(
+        ctx.repo.clone(),
+        ctx.redis.clone(),
+        StateManager::new(ctx.neo4j.clone()),
+        Arc::new(snapshot),
+        PipelineParams { matcher_batch_cap: 2, ..PipelineParams::default() },
+    );
+    let token = leader(&matcher).await;
+    matcher.sync_queue().await.unwrap();
+    let head = matcher.queue().first(2).await.unwrap();
+    assert!(head.contains(&crowd_a) && head.contains(&crowd_b), "CRITICAL tasks are served first: {head:?}");
+
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.assigned, vec![(urgent.clone(), vehicle)]);
+    assert_eq!(report.unservable, 2);
+    for crowd in [&crowd_a, &crowd_b] {
+        assert_eq!(ctx.task_status(crowd).await, "QUEUED");
+        assert_eq!(ctx.outbox("TASK_ESCALATED", crowd).await, 1);
+    }
+    // Later cycles keep skipping them without escalating again.
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.unservable, 2);
+    assert_eq!(report.escalated, 0);
+    ctx.cleanup().await;
+}
+
+/// T8: a truck pickup on roads closed to trucks is switched to ambulances
+/// (as many as the group needs), both are assigned, and beds match.
+#[tokio::test]
+async fn truck_pickup_on_a_no_truck_lane_switches_to_ambulances() {
+    let Some(ctx) = setup(50).await else { return };
+    ctx.no_trucks_into_d().await;
+    let amb_1 = ctx.vehicle("AMB-1", "AMBULANCE", 4, "A").await;
+    let amb_2 = ctx.vehicle("AMB-2", "AMBULANCE", 4, "A").await;
+    ctx.vehicle("TRK-1", "EVAC_TRUCK", 20, "A").await;
+    let task = ctx.task("lane", 1, "EVAC_TRUCK", 5, "D", 0).await;
+    let matcher = ctx.matcher().await;
+    let token = leader(&matcher).await;
+    matcher.sync_queue().await.unwrap();
+
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.grouped, 1, "{report:?}");
+    assert_eq!(report.assigned.len(), 2, "{report:?}");
+    let assigned: HashSet<String> = report.assigned.iter().map(|(_, v)| v.clone()).collect();
+    assert_eq!(assigned, HashSet::from([amb_1, amb_2]));
+    let truck = Some("EVAC_TRUCK".to_string());
+    assert_eq!(
+        ctx.pickups("lane").await,
+        vec![
+            ("AMBULANCE".into(), 4, "ASSIGNED".into(), truck.clone()),
+            ("AMBULANCE".into(), 1, "ASSIGNED".into(), truck),
+        ]
+    );
+    assert_eq!(ctx.outbox("ASSET_SWITCHED", &ctx.id("I-lane")).await, 1);
+    assert_eq!(ctx.outbox("TASK_ESCALATED", &task).await, 0, "fixed, not escalated");
+    assert_eq!(ctx.count("MATCH (s:Shelter {id: $d + '/S_D'}) RETURN s.current_occupancy AS n").await, 5, "beds per task");
+    // Planned once: a further cycle changes nothing.
+    assert_eq!(matcher.run_cycle(token).await.unwrap().grouped, 0);
+    ctx.assert_no_overbooking().await;
+    ctx.cleanup().await;
+}
+
+/// T8: a group too big for one ambulance gets two ambulances when someone
+/// has a medical need, and one truck otherwise.
+#[tokio::test]
+async fn big_groups_get_ambulances_for_a_medical_need_else_one_truck() {
+    let Some(ctx) = setup(50).await else { return };
+    ctx.vehicle("AMB-1", "AMBULANCE", 4, "A").await;
+    ctx.vehicle("AMB-2", "AMBULANCE", 4, "A").await;
+    let truck = ctx.vehicle("TRK-1", "EVAC_TRUCK", 20, "A").await;
+    ctx.task("medical", 2, "AMBULANCE", 6, "D", 0).await;
+    ctx.medical_report("medical").await;
+    ctx.task("family", 1, "AMBULANCE", 6, "B", 0).await;
+    let matcher = ctx.matcher().await;
+    let token = leader(&matcher).await;
+    matcher.sync_queue().await.unwrap();
+
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.grouped, 2, "{report:?}");
+    assert_eq!(report.assigned.len(), 3, "{report:?}");
+    assert_eq!(
+        ctx.pickups("medical").await,
+        vec![("AMBULANCE".into(), 4, "ASSIGNED".into(), None), ("AMBULANCE".into(), 2, "ASSIGNED".into(), None)]
+    );
+    assert_eq!(ctx.pickups("family").await, vec![("EVAC_TRUCK".into(), 6, "ASSIGNED".into(), Some("AMBULANCE".into()))]);
+    assert!(report.assigned.iter().any(|(_, v)| *v == truck));
+    assert_eq!(ctx.outbox("GROUP_SPLIT", &ctx.id("I-medical")).await, 1);
+    assert_eq!(ctx.outbox("ASSET_SWITCHED", &ctx.id("I-family")).await, 1);
+    ctx.assert_no_overbooking().await;
+    ctx.cleanup().await;
+}
+
+/// T8: when a planned incident's headcount rises (follow-up call or merge),
+/// the next cycle adds a vehicle for the people not yet covered.
+#[tokio::test]
+async fn rising_headcount_tops_up_a_planned_group() {
+    let Some(ctx) = setup(50).await else { return };
+    ctx.vehicle("AMB-1", "AMBULANCE", 4, "A").await;
+    ctx.task("medical", 2, "AMBULANCE", 6, "D", 0).await;
+    ctx.medical_report("medical").await;
+    let matcher = ctx.matcher().await;
+    let token = leader(&matcher).await;
+    matcher.sync_queue().await.unwrap();
+    matcher.run_cycle(token).await.unwrap();
+    assert_eq!(ctx.pickups("medical").await.iter().map(|p| p.1).sum::<i64>(), 6);
+
+    ctx.run("MATCH (i:OpsIncident {incident_id: $d + '/I-medical'}) SET i.headcount = 9", &[]).await;
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.grouped, 1, "{report:?}");
+    let pickups = ctx.pickups("medical").await;
+    assert_eq!(pickups.iter().map(|p| p.1).collect::<Vec<_>>(), vec![4, 2, 3], "the 3 new people get their own ambulance");
+    assert_eq!(ctx.outbox("GROUP_SPLIT", &ctx.id("I-medical")).await, 2);
+    // Covered: nothing more is added.
+    assert_eq!(matcher.run_cycle(token).await.unwrap().grouped, 0);
+    ctx.assert_no_overbooking().await;
+    ctx.cleanup().await;
+}
+
+/// T8 with a merge: the absorbed incident had the only ambulance, so its
+/// assignment moves to the planned survivor (T4) and the survivor's queued
+/// pickups are cancelled. The moved task keeps the absorbed group's people,
+/// so the next cycle tops the survivor up for the rest of its headcount.
+#[tokio::test]
+async fn merge_into_a_planned_group_keeps_its_headcount_covered() {
+    let Some(ctx) = setup(50).await else { return };
+    ctx.vehicle("AMB-1", "AMBULANCE", 4, "A").await;
+    ctx.task("big", 1, "AMBULANCE", 6, "D", 0).await; // URGENT, medical: 2 ambulances
+    ctx.medical_report("big").await;
+    ctx.task("small", 2, "AMBULANCE", 3, "B", 0).await; // CRITICAL: gets the ambulance
+    let matcher = ctx.matcher().await;
+    let token = leader(&matcher).await;
+    matcher.sync_queue().await.unwrap();
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.assigned.len(), 1, "{report:?}");
+    assert_eq!(ctx.pickups("small").await[0].2, "ASSIGNED");
+    assert_eq!(ctx.pickups("big").await.iter().map(|p| p.1).collect::<Vec<_>>(), vec![4, 2]);
+
+    let version = |name: &str| format!("MATCH (i:OpsIncident {{incident_id: $d + '/I-{name}'}}) RETURN i.version AS n");
+    let merge = MergeCommand {
+        request_id: ctx.id("merge-1"),
+        survivor_id: ctx.id("I-big"),
+        survivor_version: ctx.count(&version("big")).await as u64,
+        absorbed_id: ctx.id("I-small"),
+        absorbed_version: ctx.count(&version("small")).await as u64,
+        reason: "same family, two callers".into(),
+    };
+    ctx.repo.merge_incidents(&ActorContext::new("dispatcher", [ActorRole::Dispatcher]), &merge).await.unwrap();
+
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.grouped, 1, "top-up after the merge: {report:?}");
+    let mut live: Vec<(i64, String)> =
+        ctx.pickups("big").await.into_iter().filter(|p| p.2 != "CANCELLED").map(|p| (p.1, p.2)).collect();
+    live.sort();
+    assert_eq!(live, vec![(3, "ASSIGNED".to_string()), (3, "QUEUED".to_string())], "the moved ambulance carries 3, one more for the other 3");
+    ctx.assert_no_overbooking().await;
+    ctx.cleanup().await;
+}
+
+/// Found in the M8 surge run: victims reachable only over roads unsuitable
+/// for every road vehicle type (farm tracks) were neither re-planned (T8)
+/// nor treated as cut off, and waited with only OVERDUE. Both checks now use
+/// the same per-type reachability, so the task goes to the boat-then-road
+/// check and, with no boat plan, to a person at once.
+#[tokio::test]
+async fn pickup_reachable_only_over_unsuitable_tracks_is_escalated_at_once() {
+    let Some(ctx) = setup(50).await else { return };
+    ctx.run(
+        "MATCH ()-[r:CONNECTS_TO {dataset: $d}]->(:Junction {id: $d + '/JD'}) SET r.baseline_status = 'UNSUITABLE'",
+        &[],
+    )
+    .await;
+    ctx.vehicle("AMB-1", "AMBULANCE", 4, "A").await;
+    ctx.vehicle("TRK-1", "EVAC_TRUCK", 20, "A").await;
+    let task = ctx.task("track", 1, "AMBULANCE", 2, "D", 0).await;
+    let matcher = ctx.matcher().await;
+    let token = leader(&matcher).await;
+    matcher.sync_queue().await.unwrap();
+
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert!(report.assigned.is_empty(), "{report:?}");
+    assert_eq!(report.grouped, 0, "no road type reaches: nothing to re-plan");
+    let reasons = ctx.string("MATCH (t:Task) WHERE t.task_id = $d + '/T-track' RETURN head(t.escalations) AS v").await;
+    assert_eq!(reasons.as_deref(), Some("NO_SURFACE_ROUTE"));
+    assert_eq!(ctx.outbox("TASK_ESCALATED", &task).await, 1);
     ctx.cleanup().await;
 }
 

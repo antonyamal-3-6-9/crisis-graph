@@ -49,6 +49,8 @@ const EVENT_EFFECTS = {
   VEHICLE_STATUS_CHANGED: ["vehicles", "queue", "selected"],
   MISSION_CONVERTED: ["incidents", "selected", "queue", "alerts", "routes"],
   MISSION_CANCELLED: ["incidents", "selected", "queue", "vehicles", "routes"],
+  ASSET_SWITCHED: ["incidents", "selected", "queue", "alerts"],
+  GROUP_SPLIT: ["incidents", "selected", "queue", "alerts"],
 };
 
 const scenarios = {
@@ -211,11 +213,28 @@ async function loadSystem() {
     dot("relay", data.relay_leader, data.relay_leader ? "Relay: leader running" : "Relay: no leader (events delayed)");
     dot("matcher", data.matcher_leader, data.matcher_leader ? `Matcher: leader · queue ${data.queue_length}` : "Matcher: no leader (no assignment)");
     dot("driver", data.simulated_driver ? null : false, data.simulated_driver ? "Simulated driver: completing missions (demo)" : "Simulated driver: off");
+    renderMonitoringLinks(data.monitoring || {});
   } catch (error) {
     dot("relay", false, "Relay: API unreachable");
     dot("matcher", false, "Matcher: API unreachable");
     dot("driver", false, "Simulated driver: unknown");
   }
+}
+
+// Grafana and Jaeger links when the api role has GRAFANA_URL / JAEGER_URL.
+function renderMonitoringLinks(monitoring) {
+  const box = document.getElementById("monitoring-links");
+  const links = [["grafana", "Dashboards (Grafana)"], ["jaeger", "Traces (Jaeger)"]]
+    .filter(([key]) => typeof monitoring[key] === "string" && /^https?:\/\//.test(monitoring[key]));
+  box.replaceChildren(...links.map(([key, label]) => {
+    const a = document.createElement("a");
+    a.href = monitoring[key];
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = label;
+    return a;
+  }));
+  box.hidden = links.length === 0;
 }
 
 async function loadIncidents() {
@@ -325,6 +344,8 @@ function onEvent(type, message) {
   queueRefresh(...EVENT_EFFECTS[type], "system");
   if (type === "INCIDENT_CRITICAL") showToast("CRITICAL incident", "A critical incident was created or raised.", true);
   if (type === "MISSION_CONVERTED") showToast("Boat-then-road mission", "Victims are cut off by water: a boat goes to the staging point, the road leg waits for 'victim aboard'.", true);
+  if (type === "ASSET_SWITCHED") showToast("Vehicle type switched", groupText(event.payload), true);
+  if (type === "GROUP_SPLIT") showToast("More vehicles sent", groupText(event.payload), true);
   if (type === "DROPOFF_UNRESOLVED") showToast("Drop-off unresolved", "A vehicle was dispatched without free beds; choose a drop-off.", true);
   if (type === "TASK_ESCALATED") showToast("Task escalated", event.payload?.reason ? `Reason: ${event.payload.reason}` : "A task needs a person.", true);
 }
@@ -690,12 +711,28 @@ function openCancelMission(i) {
   });
 }
 
+const GROUP_REASONS = {
+  NO_ROUTE_FOR_ASSET: "the requested vehicle type cannot reach the victims",
+  GROUP_TOO_BIG: "the group is larger than one vehicle",
+  HEADCOUNT_ROSE: "more people were reported",
+};
+
+// One line for a group-plan alert (T8): what was sent and why.
+function groupText(p) {
+  if (!p) return "The matcher re-planned a pickup.";
+  const shares = (p.shares || []).join(" + ");
+  const why = GROUP_REASONS[p.reason] || p.reason || "";
+  const from = p.requested_asset && p.requested_asset !== p.asset ? `${p.requested_asset} → ` : "";
+  return `${from}${p.asset}${shares ? ` · ${(p.shares || []).length} vehicle(s): ${shares} people` : ""}${why ? ` · ${why}` : ""}`;
+}
+
 function taskHtml(t) {
   const canComplete = t.status === "ASSIGNED";
   const action = canComplete ? `<button class="button primary compact" data-complete-task="${escapeHtml(t.task_id)}" data-version="${t.version}" ${token() ? "" : 'disabled title="Paste an operator token to act"'}>Mark complete</button>` : statusBadge(t.status);
   return `<div class="task-row"><div><b>${escapeHtml(t.kind)}</b> <code class="report-meta">${escapeHtml(shortId(t.task_id))} · v${t.version}</code>
     <dl><dt>Asset</dt><dt>Vehicle</dt><dt>ETA</dt><dt>Overlay</dt>
         <dd>${escapeHtml(t.required_asset || "—")}</dd><dd>${escapeHtml(t.assigned_vehicle_id || "—")}</dd><dd>${t.eta_s != null ? duration(t.eta_s) : "—"}</dd><dd>${t.overlay_version ?? "—"}</dd></dl>
+    ${t.persons != null || t.asset_switched_from ? `<div class="badge-row" style="margin-top:6px">${t.persons != null ? `<span class="flag">${t.persons} people</span>` : ""}${t.asset_switched_from ? `<span class="flag warn" title="${escapeHtml(GROUP_REASONS[t.group_reason] || "")}">switched from ${escapeHtml(t.asset_switched_from)}</span>` : ""}</div>` : ""}
     ${(t.escalations || []).length ? `<div class="badge-row" style="margin-top:6px">${t.escalations.map((e) => `<span class="flag warn">${escapeHtml(e)}</span>`).join("")}</div>` : ""}
     </div>${action}</div>`;
 }

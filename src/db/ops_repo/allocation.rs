@@ -15,7 +15,7 @@ use serde_json::json;
 
 use super::beds::reserve_beds_query;
 use super::{new_id, parse_asset, parse_enum, parse_time, txn_first_row, OpsRepoError, OpsRepository, SYSTEM_ACTOR};
-use crate::models::{AssetType, DropoffShelter, OrphanedHold, QueuedTask, TaskKind};
+use crate::models::{AssetType, AssignedTask, DropoffShelter, OrphanedHold, QueuedTask, TaskKind};
 
 /// Escalation reasons (each raised at most once per task).
 pub const ESCALATION_OVERDUE: &str = "OVERDUE";
@@ -24,10 +24,11 @@ pub const ESCALATION_ROUTE_VERIFICATION_FAILED: &str = "ROUTE_VERIFICATION_FAILE
 
 const QUEUED_TASK_FIELDS: &str = "t.task_id AS task_id, t.incident_id AS incident_id, t.version AS version, \
      t.required_asset AS required_asset, coalesce(t.priority_rank, 1) AS priority_rank, \
-     toString(coalesce(t.queued_at, t.created_at)) AS queued_at, i.headcount AS headcount, \
+     toString(coalesce(t.queued_at, t.created_at)) AS queued_at, coalesce(t.persons, i.headcount) AS headcount, \
      coalesce(t.target_junction_id, j.id) AS junction_id, j.id AS incident_junction_id, t.kind AS kind, \
      coalesce(t.water_eta_s, 0.0) AS water_eta_s, coalesce(i.boat_plan_declined, false) AS declined, \
-     coalesce(t.verify_failures, 0) AS verify_failures, coalesce(t.escalations, []) AS escalations";
+     coalesce(t.verify_failures, 0) AS verify_failures, coalesce(t.escalations, []) AS escalations, \
+     t.traceparent AS traceparent";
 
 /// Everything the T2 commit records.
 #[derive(Debug, Clone)]
@@ -57,6 +58,8 @@ pub struct AssignmentCommit {
 pub struct AssignmentOutcome {
     /// Shelter whose beds were reserved; `None` raised `DROPOFF_UNRESOLVED`.
     pub dropoff_shelter: Option<String>,
+    /// When the incident's first report arrived (for time-to-assignment).
+    pub first_report_at: Option<DateTime<Utc>>,
 }
 
 impl OpsRepository {
@@ -96,27 +99,28 @@ impl OpsRepository {
         Ok(capacities)
     }
 
-    /// `ASSIGNED` tasks in `dataset`: `(task_id, version, assigned_at,
-    /// eta_s, kind)`. Read by the simulated driver.
-    pub async fn assigned_tasks(&self, dataset: &str) -> Result<Vec<(String, u64, DateTime<Utc>, f64, String)>, OpsRepoError> {
+    /// `ASSIGNED` tasks in `dataset`, for the simulated driver.
+    pub async fn assigned_tasks(&self, dataset: &str) -> Result<Vec<AssignedTask>, OpsRepoError> {
         let q = query(
             "MATCH (i:OpsIncident)-[:HAS_TASK]->(t:Task {status: 'ASSIGNED'}), \
                    (i)-[:LOCATED_AT]->(:Junction {dataset: $dataset}) \
              WHERE t.assigned_at IS NOT NULL \
              RETURN t.task_id AS task_id, t.version AS version, toString(t.assigned_at) AS assigned_at, \
-                    coalesce(t.eta_s, 0.0) AS eta_s, t.kind AS kind ORDER BY t.assigned_at",
+                    coalesce(t.eta_s, 0.0) AS eta_s, t.kind AS kind, t.traceparent AS traceparent \
+             ORDER BY t.assigned_at",
         )
         .param("dataset", dataset);
         let mut result = self.neo4j.graph.execute(q).await?;
         let mut tasks = Vec::new();
         while let Some(row) = result.next().await? {
-            tasks.push((
-                row.get("task_id")?,
-                row.get::<i64>("version")? as u64,
-                parse_time(&row.get::<String>("assigned_at")?)?,
-                row.get::<f64>("eta_s")?,
-                row.get::<String>("kind")?,
-            ));
+            tasks.push(AssignedTask {
+                task_id: row.get("task_id")?,
+                version: row.get::<i64>("version")? as u64,
+                assigned_at: parse_time(&row.get::<String>("assigned_at")?)?,
+                eta_s: row.get::<f64>("eta_s")?,
+                kind: row.get("kind")?,
+                traceparent: row.get("traceparent")?,
+            });
         }
         Ok(tasks)
     }
@@ -313,7 +317,8 @@ async fn commit_in(txn: &mut Txn, commit: &AssignmentCommit) -> Result<Assignmen
                  previous_version: $task_version, new_version: t.version, \
                  reason: 'matcher assigned vehicle ' + $vehicle_id, occurred_at: datetime(), \
                  details_json: '{\"overlay_version\":' + toString($overlay_version) + '}' }) \
-             RETURN t.incident_id AS incident_id",
+             RETURN t.incident_id AS incident_id, \
+                    [(rep:Report)-[:REPORTS]->(i) WHERE rep.received_at IS NOT NULL | toString(rep.received_at)] AS received",
         )
         .param("reservation_id", commit.reservation_id.clone())
         .param("vehicle_id", commit.vehicle_id.clone())
@@ -334,6 +339,11 @@ async fn commit_in(txn: &mut Txn, commit: &AssignmentCommit) -> Result<Assignmen
         )));
     };
     let incident_id: String = assigned.get("incident_id")?;
+    let first_report_at = assigned
+        .get::<Vec<String>>("received")?
+        .iter()
+        .filter_map(|t| parse_time(t).ok())
+        .min();
 
     // Drop-off beds. A shelter that filled up meanwhile does not stop the
     // pickup (owner decision): the dispatcher resolves the drop-off.
@@ -382,7 +392,7 @@ async fn commit_in(txn: &mut Txn, commit: &AssignmentCommit) -> Result<Assignmen
         .param("unresolved", unresolved),
     )
     .await?;
-    Ok(AssignmentOutcome { dropoff_shelter })
+    Ok(AssignmentOutcome { dropoff_shelter, first_report_at })
 }
 
 fn queued_task_from_row(row: &Row) -> Result<QueuedTask, OpsRepoError> {
@@ -403,5 +413,6 @@ fn queued_task_from_row(row: &Row) -> Result<QueuedTask, OpsRepoError> {
         incident_junction_id: row.get("incident_junction_id")?,
         water_eta_s: row.get("water_eta_s")?,
         boat_plan_declined: row.get("declined")?,
+        traceparent: row.get("traceparent")?,
     })
 }
