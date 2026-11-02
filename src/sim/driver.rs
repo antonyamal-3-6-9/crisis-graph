@@ -51,6 +51,11 @@ impl SimDriver {
     pub async fn run_once(&self, now: DateTime<Utc>) -> Result<Vec<String>, OpsRepoError> {
         let mut completed = Vec::new();
         for task in self.repo.assigned_tasks(&self.params.graph_dataset).await? {
+            // A span (in the task's trace) only when the crew acts, not for
+            // every poll while the mission is still under way.
+            if !self.action_due(&task, now) {
+                continue;
+            }
             let span = tracing::info_span!("driver.mission", task_id = %task.task_id, kind = %task.kind);
             crate::runtime::telemetry::set_parent(&span, task.traceparent.as_deref());
             if let Some(id) = self.mission_step(task, now).instrument(span).await? {
@@ -62,6 +67,14 @@ impl SimDriver {
 
     /// One assigned task: report "victim aboard" halfway through a boat
     /// mission, complete it when due. Returns the task ID if completed now.
+    /// Whether the crew reports something now: completion, or "victim
+    /// aboard" from halfway through a boat mission.
+    fn action_due(&self, task: &AssignedTask, now: DateTime<Utc>) -> bool {
+        let due = mission_secs(task.eta_s, self.params.sim_on_scene_secs, self.params.sim_time_scale);
+        let elapsed = (now - task.assigned_at).num_milliseconds() as f64 / 1000.0;
+        elapsed >= due || (task.kind == "WATER_EXTRACTION" && elapsed >= due / 2.0)
+    }
+
     async fn mission_step(&self, task: AssignedTask, now: DateTime<Utc>) -> Result<Option<String>, OpsRepoError> {
         let AssignedTask { task_id, version, assigned_at, eta_s, kind, .. } = task;
         {
