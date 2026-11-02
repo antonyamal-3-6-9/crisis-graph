@@ -674,18 +674,53 @@ fn validate_verified_route(route: &VerifiedRouteInput) -> Result<(), ControlPlan
     Ok(())
 }
 
+/// Whether an extraction may be dispatched without a person: the victims
+/// are located, headcount and vehicle type are known, and no blocking review
+/// reason remains (`blocking_review_reasons`). The extractor sets
+/// `needs_human_review` for any reason, including our own satisfied checks,
+/// so readiness is decided from the reasons; a review the model asked for
+/// without a reason is recorded as "Model requested human review", which
+/// blocks. A mentioned hazard's missing details do not block the rescue: the
+/// hazard stays a candidate for a verifier.
 pub fn triage_is_dispatch_ready(triage: &TriageReport) -> bool {
-    !triage.needs_human_review
-        && triage.uncertainty_reasons.is_empty()
-        && triage.resolved_junction_id.is_some()
+    triage.resolved_junction_id.is_some()
         && triage.headcount.is_some()
         && triage.required_asset.is_some()
-        && triage.hazards.iter().all(|hazard| {
-            hazard.road_segment.is_some()
-                && hazard.status.is_some()
-                && hazard.duration_hours.is_some()
-        })
+        && blocking_review_reasons(&triage.uncertainty_reasons).is_empty()
+        && (!triage.needs_human_review || !triage.uncertainty_reasons.is_empty())
 }
+
+/// Our own extraction checks that no longer block automatic dispatch once
+/// the location policy (finding F-1) has placed the victims (owner decision
+/// 2026-11-02, after the M8 Gemini run):
+/// - a missing headcount is covered by the waterfall's baseline unit;
+/// - "no place named" is satisfied when the victims were located anyway
+///   (e.g. an on-scene caller's GPS);
+/// - missing details of a mentioned hazard concern the hazard report, which
+///   stays a candidate for a verifier and never changes the overlay, not the
+///   rescue.
+///
+/// Everything else blocks: a missing vehicle type (never guessed, finding
+/// F-2) and any doubt the model raised in its own words.
+pub const SATISFIED_ONCE_LOCATED: [&str; 5] = [
+    "Headcount was not provided",
+    "Victim location was not provided",
+    "Hazard road was not specifically identified",
+    "Hazard status was not confirmed",
+    "Hazard duration was not provided",
+];
+
+/// The review reasons that still block dispatch for victims already located.
+pub fn blocking_review_reasons(reasons: &[String]) -> Vec<String> {
+    let mut blocking: Vec<String> = Vec::new();
+    for reason in reasons {
+        if !SATISFIED_ONCE_LOCATED.contains(&reason.as_str()) && !blocking.contains(reason) {
+            blocking.push(reason.clone());
+        }
+    }
+    blocking
+}
+
 
 fn permission_for_transition(
     from: IncidentStatus,
@@ -747,4 +782,65 @@ pub enum ControlPlaneError {
     DedicatedRouteVerificationActionRequired,
     #[error("invalid verified route: {0}")]
     InvalidVerifiedRoute(&'static str),
+}
+
+#[cfg(test)]
+mod dispatch_ready_tests {
+    use super::*;
+    use crate::models::{AssetType, CandidateHazardReport, TriageInferenceMetadata};
+
+    fn located(reasons: &[&str], needs_review: bool, hazards: Vec<CandidateHazardReport>) -> TriageReport {
+        TriageReport {
+            victim_location_raw: None,
+            resolved_junction_id: Some("node/1".into()),
+            headcount: Some(3),
+            required_asset: Some(AssetType::Ambulance),
+            hazards,
+            confidence_score: 0.9,
+            needs_human_review: needs_review,
+            uncertainty_reasons: reasons.iter().map(|r| r.to_string()).collect(),
+            inference: TriageInferenceMetadata {
+                backend: "test".into(),
+                model: "test".into(),
+                adapter_id: None,
+                adapter_sha256: None,
+                prompt_version: "test".into(),
+                schema_version: "triage-extraction-v3".into(),
+                latency_ms: 1,
+                tokens_per_second: None,
+                prompt_eval_ms: None,
+                completion_tokens: None,
+            },
+            victim_profile: None,
+            urgency: None,
+            location_source: None,
+        }
+    }
+
+    /// The gate found by the M8 Gemini run: located victims (on-scene GPS)
+    /// with only our own satisfied checks are dispatch-ready.
+    #[test]
+    fn located_victims_with_only_satisfied_checks_are_ready() {
+        let vague_hazard = CandidateHazardReport { road_segment: None, status: None, duration_hours: None };
+        let triage = located(
+            &["Victim location was not provided", "Hazard duration was not provided"],
+            true,
+            vec![vague_hazard],
+        );
+        assert!(triage_is_dispatch_ready(&triage));
+        assert!(triage_is_dispatch_ready(&located(&[], false, vec![])));
+    }
+
+    #[test]
+    fn missing_facts_and_model_doubts_still_block() {
+        assert!(!triage_is_dispatch_ready(&located(&["Victim location was not specified"], true, vec![])), "the model's own doubt");
+        assert!(!triage_is_dispatch_ready(&located(&["Model requested human review"], true, vec![])));
+        assert!(!triage_is_dispatch_ready(&located(&[], true, vec![])), "review asked for without a reason");
+        let mut no_asset = located(&[], false, vec![]);
+        no_asset.required_asset = None;
+        assert!(!triage_is_dispatch_ready(&no_asset), "a vehicle type is never guessed (F-2)");
+        let mut unlocated = located(&["Victim location was not provided"], true, vec![]);
+        unlocated.resolved_junction_id = None;
+        assert!(!triage_is_dispatch_ready(&unlocated), "not located: review");
+    }
 }

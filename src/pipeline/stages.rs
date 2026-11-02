@@ -153,7 +153,7 @@ impl PipelineStages {
                     state.errors.push("TriageRequiresHumanReview: Victim location was not provided".to_string());
                 } else {
                     // Location is known: see `blocking_review_reasons`.
-                    let remaining_blocking_reasons = blocking_review_reasons(&triage.uncertainty_reasons);
+                    let remaining_blocking_reasons = crate::models::blocking_review_reasons(&triage.uncertainty_reasons);
 
                     if !remaining_blocking_reasons.is_empty() {
                         state.errors.push(format!(
@@ -878,40 +878,10 @@ impl PipelineStages {
     }
 }
 
-/// Our own extraction checks that no longer block automatic dispatch once
-/// the location policy (finding F-1) has placed the victims (owner decision
-/// 2026-11-02, after the M8 Gemini run):
-/// - a missing headcount is covered by the waterfall's baseline unit;
-/// - "no place named" is satisfied when the victims were located anyway
-///   (e.g. an on-scene caller's GPS);
-/// - missing details of a mentioned hazard concern the hazard report, which
-///   stays a candidate for a verifier and never changes the overlay, not the
-///   rescue.
-///
-/// Everything else blocks: a missing vehicle type (never guessed, finding
-/// F-2) and any doubt the model raised in its own words.
-const SATISFIED_ONCE_LOCATED: [&str; 5] = [
-    "Headcount was not provided",
-    "Victim location was not provided",
-    "Hazard road was not specifically identified",
-    "Hazard status was not confirmed",
-    "Hazard duration was not provided",
-];
-
-/// The review reasons that still block dispatch for victims already located.
-fn blocking_review_reasons(reasons: &[String]) -> Vec<String> {
-    let mut blocking: Vec<String> = Vec::new();
-    for reason in reasons {
-        if !SATISFIED_ONCE_LOCATED.contains(&reason.as_str()) && !blocking.contains(reason) {
-            blocking.push(reason.clone());
-        }
-    }
-    blocking
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{blocking_review_reasons, PipelineStages};
+    use super::PipelineStages;
+    use crate::models::blocking_review_reasons;
 
     #[test]
     fn located_victims_are_not_held_for_our_own_satisfied_checks() {
