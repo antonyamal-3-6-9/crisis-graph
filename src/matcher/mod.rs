@@ -76,6 +76,9 @@ pub struct CycleReport {
     pub dropoff_unresolved: usize,
     /// Cut-off tasks converted to boat-then-road missions (M6b).
     pub converted: usize,
+    /// Tasks in the window that no vehicle in the fleet could carry (they
+    /// do not count against `matcher_batch_cap`).
+    pub unservable: usize,
 }
 
 impl CycleReport {
@@ -173,26 +176,12 @@ impl Matcher {
         }
 
         let now = Utc::now();
-        let ids = self.queue.first(self.params.matcher_batch_cap).await?;
-        let order: HashMap<&str, usize> = ids.iter().enumerate().map(|(i, id)| (id.as_str(), i)).collect();
-        let mut tasks = self.repo.queued_tasks(&dataset, Some(&ids)).await?;
-        tasks.sort_by_key(|t| order.get(t.task_id.as_str()).copied().unwrap_or(usize::MAX));
+        let fleet = self.repo.fleet_max_capacity(&dataset).await?;
+        let tasks = self.window(&dataset, &fleet, &mut report).await?;
+        metrics::gauge!("crisisgraph_matcher_unservable_tasks").set(report.unservable as f64);
         let vehicles = self.repo.list_available_vehicles_in(&dataset).await?;
         report.tasks = tasks.len();
         report.vehicles = vehicles.len();
-
-        // A task no vehicle in the fleet could ever serve goes to a person now.
-        let fleet = self.repo.fleet_max_capacity(&dataset).await?;
-        for task in &tasks {
-            let capacity = fleet.get(&task.required_asset.to_string()).copied();
-            if capacity.is_none_or(|c| c < task.persons()) && !escalated(task, ESCALATION_NO_ELIGIBLE_VEHICLE) {
-                let details = json!({ "required_asset": task.required_asset.to_string(), "persons": task.persons(),
-                                      "largest_capacity": capacity });
-                if self.repo.escalate_task(&task.task_id, ESCALATION_NO_ELIGIBLE_VEHICLE, details).await? {
-                    report.escalated += 1;
-                }
-            }
-        }
 
         let tiers: Vec<Tier> = tasks
             .iter()
@@ -243,6 +232,57 @@ impl Matcher {
 
         self.publish_metrics(&tasks, &tiers, now, &report, started.elapsed());
         Ok(report)
+    }
+
+    /// The cycle's window: the first `matcher_batch_cap` tasks in queue order
+    /// that some vehicle in the fleet could carry, plus up to as many that no
+    /// vehicle could carry (more people than the largest vehicle of its
+    /// type). Those are escalated to a person once and still considered for
+    /// a boat-then-road mission (M6b), but they never take the place of a
+    /// servable task, so they cannot hold the head of the queue and starve
+    /// the tasks behind it (found in the M8 surge run).
+    async fn window(
+        &self,
+        dataset: &str,
+        fleet: &HashMap<String, u32>,
+        report: &mut CycleReport,
+    ) -> MatcherResult<Vec<QueuedTask>> {
+        let cap = self.params.matcher_batch_cap;
+        let mut window = Vec::with_capacity(cap);
+        let mut unservable = Vec::new();
+        let mut offset = 0;
+        while window.len() < cap {
+            let ids = self.queue.page(offset, cap).await?;
+            if ids.is_empty() {
+                break;
+            }
+            offset += ids.len();
+            let order: HashMap<&str, usize> = ids.iter().enumerate().map(|(i, id)| (id.as_str(), i)).collect();
+            let mut tasks = self.repo.queued_tasks(dataset, Some(&ids)).await?;
+            tasks.sort_by_key(|t| order.get(t.task_id.as_str()).copied().unwrap_or(usize::MAX));
+            for task in tasks {
+                let capacity = fleet.get(&task.required_asset.to_string()).copied();
+                if capacity.is_some_and(|c| c >= task.persons()) {
+                    if window.len() < cap {
+                        window.push(task);
+                    }
+                    continue;
+                }
+                if !escalated(&task, ESCALATION_NO_ELIGIBLE_VEHICLE) {
+                    let details = json!({ "required_asset": task.required_asset.to_string(), "persons": task.persons(),
+                                          "largest_capacity": capacity });
+                    if self.repo.escalate_task(&task.task_id, ESCALATION_NO_ELIGIBLE_VEHICLE, details).await? {
+                        report.escalated += 1;
+                    }
+                }
+                if unservable.len() < cap {
+                    unservable.push(task);
+                }
+            }
+        }
+        report.unservable = unservable.len();
+        window.extend(unservable);
+        Ok(window)
     }
 
     /// The rest of T2 for a held vehicle: route on the snapshot, verify live,

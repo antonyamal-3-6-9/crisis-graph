@@ -527,6 +527,46 @@ async fn escalates_unservable_and_overdue_tasks_once() {
     ctx.cleanup().await;
 }
 
+/// Tasks no vehicle could ever carry do not starve the queue (found in the
+/// M8 surge run): with a window of 2 and two oversized CRITICAL tasks at the
+/// head, the URGENT task behind them is still in the window and assigned;
+/// the oversized ones stay queued, escalated once.
+#[tokio::test]
+async fn unservable_tasks_at_the_head_do_not_starve_the_queue() {
+    let Some(ctx) = setup(50).await else { return };
+    let vehicle = ctx.vehicle("AMB-1", "AMBULANCE", 4, "A").await;
+    let crowd_a = ctx.task("crowd-a", 2, "AMBULANCE", 6, "D", 0).await;
+    let crowd_b = ctx.task("crowd-b", 2, "AMBULANCE", 5, "D", 0).await;
+    let urgent = ctx.task("urgent", 1, "AMBULANCE", 2, "D", 0).await;
+    let snapshot = GraphSnapshot::load(ctx.repo.clone(), &StateManager::new(ctx.neo4j.clone()), &ctx.dataset)
+        .await
+        .expect("snapshot");
+    let matcher = Matcher::new(
+        ctx.repo.clone(),
+        ctx.redis.clone(),
+        StateManager::new(ctx.neo4j.clone()),
+        Arc::new(snapshot),
+        PipelineParams { matcher_batch_cap: 2, ..PipelineParams::default() },
+    );
+    let token = leader(&matcher).await;
+    matcher.sync_queue().await.unwrap();
+    let head = matcher.queue().first(2).await.unwrap();
+    assert!(head.contains(&crowd_a) && head.contains(&crowd_b), "CRITICAL tasks are served first: {head:?}");
+
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.assigned, vec![(urgent.clone(), vehicle)]);
+    assert_eq!(report.unservable, 2);
+    for crowd in [&crowd_a, &crowd_b] {
+        assert_eq!(ctx.task_status(crowd).await, "QUEUED");
+        assert_eq!(ctx.outbox("TASK_ESCALATED", crowd).await, 1);
+    }
+    // Later cycles keep skipping them without escalating again.
+    let report = matcher.run_cycle(token).await.unwrap();
+    assert_eq!(report.unservable, 2);
+    assert_eq!(report.escalated, 0);
+    ctx.cleanup().await;
+}
+
 /// No shelter with free beds: the pickup still goes out, with an alert.
 #[tokio::test]
 async fn no_free_beds_still_dispatches_with_an_alert() {

@@ -251,6 +251,8 @@ impl Ctx {
             .arg(&self.params.events_stream)
             .arg(format!("{}:dead", self.params.extract_stream))
             .arg(format!("alloc:queue:{}", self.dataset))
+            .arg(format!("lease:matcher:{}", self.dataset))
+            .arg(format!("lease:matcher:{}:fence", self.dataset))
             .query_async(&mut conn)
             .await;
     }
