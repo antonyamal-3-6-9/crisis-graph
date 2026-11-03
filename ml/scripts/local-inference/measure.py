@@ -7,8 +7,11 @@ does. Prints llama.cpp's own per-request timings.
 
 usage: python3 -I ml/scripts/local-inference/measure.py <repo_root> <base_url> <sequence>
   sequence: comma list of E (extraction) and R (refinement), e.g. E,E,R,E
+  NO_SCHEMA=1 sends extractions without the JSON-schema grammar (diagnostics only).
 """
+import hashlib
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -42,16 +45,18 @@ def post(payload):
     return body, time.time() - t
 
 
-print("step kind  wall_s  cached  new_prompt  prompt_s  prompt_tok/s  gen_tok  gen_s  gen_tok/s")
+print("step kind  wall_s  cached  new_prompt  prompt_s  prompt_tok/s  gen_tok  gen_s  gen_tok/s  answer")
 n = 0
 for i, kind in enumerate(seq):
     msg = messages[n % len(messages)]
     if kind == "E":
         n += 1
         payload = {"model": "local", "temperature": 0.0, "max_tokens": 768,
-                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": msg}],
-                   "response_format": {"type": "json_schema", "json_schema": {
-                       "name": "crisisgraph_triage_extraction", "strict": True, "schema": schema}}}
+                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": msg}]}
+        # NO_SCHEMA=1 drops the JSON-schema grammar (diagnostics only).
+        if os.environ.get("NO_SCHEMA") != "1":
+            payload["response_format"] = {"type": "json_schema", "json_schema": {
+                "name": "crisisgraph_triage_extraction", "strict": True, "schema": schema}}
     else:
         payload = {"model": "local", "temperature": 0.0, "max_tokens": 25,
                    "messages": [{"role": "system", "content": REFINE_SYSTEM},
@@ -60,4 +65,5 @@ for i, kind in enumerate(seq):
     t = body.get("timings", {})
     print(f"{i+1:>4} {kind:>4}  {wall:6.1f}  {t.get('cache_n', '-'):>6}  {t.get('prompt_n', '-'):>10}  "
           f"{t.get('prompt_ms', 0)/1000:8.1f}  {t.get('prompt_per_second', 0):12.1f}  {t.get('predicted_n', '-'):>7}  "
-          f"{t.get('predicted_ms', 0)/1000:5.1f}  {t.get('predicted_per_second', 0):9.1f}", flush=True)
+          f"{t.get('predicted_ms', 0)/1000:5.1f}  {t.get('predicted_per_second', 0):9.1f}  "
+          f"{hashlib.sha256(body['choices'][0]['message']['content'].encode()).hexdigest()[:10]}", flush=True)

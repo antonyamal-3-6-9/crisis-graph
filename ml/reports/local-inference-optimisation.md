@@ -1,6 +1,14 @@
 # Local inference optimisation: Qwen3-4B + SFT-V4 on the laptop CPU
 
-Status: **in progress** (2026-11-02). This report records the measurements so far. Later steps are listed at the end and will be added here.
+Status: **in progress** (2026-11-02 to 2026-11-03). This report records the measurements so far. Later steps are listed at the end and will be added here.
+
+**Summary so far:**
+- A warm extraction takes about 16–19 s. Almost all of it is generating about 110 JSON tokens at about 7–8 tokens/s.
+- The system prompt is already cached.
+- Device, thread and llama.cpp runtime options do not speed up the real request: at the real context length (about 2,400 cached tokens), **attention over the cached system prompt** costs roughly half the generation speed on the CPU, and every setting lands at about 7–8 tokens/s.
+- The adapter costs about 3–10% and the JSON grammar nothing.
+- Changing device (iGPU to CPU) changes some greedy answers, so it is not a speed-only setting.
+- The remaining levers are cheaper or shorter attention (KV-cache quantization, a shorter prompt) and fewer passes per token (speculative or schema-aware decoding).
 
 ## Why
 
@@ -77,7 +85,71 @@ Raw data: `local-inference/matrix-ac-2026-11-02.tsv`, plus one llama-bench CSV p
 4. **Memory bandwidth.** At 11.6 tokens/s the model reads about 2.5 GB of weights per token, about **29 GB/s**. That is likely below what this machine's memory can deliver, so some headroom may remain for build and kernel options (step 2 below).
 5. **Caveat:** with `-ngl 0` this Vulkan build may still offload large prompt batches to the iGPU ("op offload"), so the CPU prompt-reading numbers may not be purely CPU. A strictly CPU-only run (`-dev none`) comes next.
 
-**Practical consequence:** running `llama-server` with `-ngl 0 --threads 4` (optionally `taskset -c 0,2,4,6`) should cut warm generation from about 15–17 s to about 11–12 s, without changing the model or its answers. This will be confirmed with the real server request.
+**Practical consequence: superseded.** This table suggested that `-ngl 0 --threads 4` would speed up the server. The real server request (Finding 4) showed it does not: llama-bench's `tg64` generates into an empty context, unlike the real request (Finding 5).
+
+## Finding 3: llama.cpp runtime options (pass 2, mains power, 5 repetitions)
+
+Base: CPU, 4 threads, one per performance core (`taskset -c 0,2,4,6 … -ngl 0 -t 4`). Raw data: `local-inference/pass2-2026-11-02.tsv` and `pass2-2026-11-02-raw/`.
+
+| Option | Prompt pp512 (tokens/s) | Generation tg64 (tokens/s) |
+|---|---:|---:|
+| base | 117.0 ± 0.8 | 11.96 ± 0.23 |
+| `-nopo 1` (no op offload to the iGPU) | 69.7 ± 0.6 | **16.11** ± 0.07 |
+| `-dev none` (no device at all) | 73.0 ± 0.2 | 14.97 ± 0.14 |
+| `--repack 0` | 116.6 | 12.04 |
+| `-fa on` / `-fa off` | 117.6 / 113.3 | 11.93 / 11.52 |
+| `--poll 0` / `--poll 100` | 117.3 / 117.4 | 11.89 / 11.98 |
+| `-C 0x55 --cpu-strict 1` | 117.5 | 11.44 ± 0.65 |
+| `--prio 2` | 117.4 | 11.98 |
+| `-ub 256` / `-ub 1024 -b 2048` | 110.6 / 117.4 | 11.90 / 11.72 |
+| base, repeated at the end | 117.4 | 11.79 |
+
+- **Hidden op offload.** Even with `-ngl 0`, this Vulkan build sends some operations to the iGPU by default. That helps prompt reading but slows single-token generation. Turning it off gave +35% in this test, but only at an empty context; see Finding 5.
+- **No measurable effect:** repacking, polling, priority and strict pinning. Flash attention is already on through `auto`. The default prompt batch of 512 is best.
+- **Build facts found along the way:**
+  - the package's CPU backend is already the Alder/Raptor Lake variant (`libggml-cpu-alderlake.so`, with AVX2 and AVX-VNNI), so a "native" rebuild for CPU instructions is unlikely to gain much;
+  - the package is built **with assertions enabled** (`warning: asserts enabled, performance may be affected`). A release build without them is the remaining build-level option to test.
+
+## Finding 4: the real server request (mains power)
+
+`ml/scripts/local-inference/server_compare.sh` sends the same 9 requests to each configuration: a cold extraction, then warm extractions with refinement calls in between. Output: `local-inference/server-compare-2026-11-02/`.
+
+| Configuration | Warm extraction (wall time) | Generation in the server | Cold first request |
+|---|---|---|---|
+| **Default** (iGPU, 8 threads) | **15.5–19.5 s** | 7.0–7.3 tokens/s | 49.9 s |
+| CPU, 4 threads, `--no-op-offload` | 16.2–19.0 s | 7.3–7.6 tokens/s | 68.6 s |
+| CPU, 4 threads, `-dev none` | 16.1–18.6 s | 7.1–7.4 tokens/s | 64.9 s |
+
+- **No configuration is faster for warm requests.** The CPU configurations have a slower cold start, as their slower prompt reading predicts.
+- **Answers are not identical across devices.** Each answer's content is fingerprinted (SHA-256, first 10 characters):
+  - within each configuration, the same message always gives the same answer;
+  - between the iGPU and CPU configurations, 2 of 5 messages produced a different JSON answer.
+
+  The two code paths compute slightly different numbers, and at temperature 0 a tiny difference can flip a token. **A device change is therefore an answer-changing setting** and needs a blind-set accuracy run before adoption.
+
+## Finding 5: why the server is slower than llama-bench
+
+`ml/scripts/local-inference/diagnose_generation.sh` isolates the three differences between llama-bench's `tg64` and the real request. Output: `local-inference/diagnose-2026-11-03/`.
+
+**Context depth (llama-bench tg64, 3 repetitions):**
+
+| Configuration | Empty context | 2,400 tokens in context | Change |
+|---|---:|---:|---:|
+| iGPU (Vulkan) | 8.79 ± 0.11 | 8.09 ± 0.01 | −8% |
+| CPU, op offload | 11.84 ± 0.08 | 6.82 ± 0.03 | −42% |
+| CPU, `--no-op-offload` | 16.29 ± 0.09 | 7.87 ± 0.02 | −52% |
+
+**Adapter and grammar (server, 4 extractions each):**
+
+| Server | Generation |
+|---|---|
+| CPU with `--lora` / without | 7.2–7.6 / 7.2–8.0 tokens/s (adapter about 3–5%) |
+| iGPU with `--lora` / without | 7.1–7.3 / 7.9–8.0 tokens/s (adapter about 10%) |
+| CPU with `--lora`, no JSON-schema grammar | 7.3–7.5 tokens/s (grammar costs nothing; answers identical to those with the grammar) |
+
+- **The cause is attention over the cached context.** Every generated token attends to all about 2,400 cached tokens. On the CPU this halves generation speed, and the iGPU handles it far better. At the real depth, all configurations run at about 7–8 tokens/s, which matches the server.
+- **The default iGPU configuration stays.** It is as fast at the real depth, has the faster cold start, and is the configuration the SFT-V4 accuracy numbers were measured with.
+- **The fine-tuned model produced schema-valid JSON for all 4 messages without the grammar.** The grammar is kept as a free safety net.
 
 ## Measurement pitfall: battery power
 
@@ -85,9 +157,18 @@ The first round of measurements was taken **on battery**. On battery the CPU's p
 
 ## Next steps (to be added to this report)
 
-1. **Pass 2 (llama.cpp options):** a strictly CPU-only run (`-dev none`), weight repacking on/off, flash attention, thread polling, strict pinning and priority, batch sizes for the cold start.
-2. **End-to-end server request** with the best configuration against the current default, on mains power.
-3. **Forced-token share:** how many of the about 110 generated tokens are dictated by the JSON schema (field names, quotes, punctuation). That share is the potential of schema-aware ("jump-forward") decoding.
-4. **Speculative decoding** with a small draft model (Qwen3-0.6B): speed, acceptance rate, identical answers.
-5. **Optional native build** of llama.cpp for this CPU (`GGML_NATIVE`, no Vulkan, BLAS), mainly for the cold start.
-6. **Changes that alter the answers** (other quantizations, a merged adapter) only with a blind-set accuracy run against the SFT-V4 gates.
+Done: pass 2 (Finding 3), the end-to-end server request (Finding 4), and the cause of slow generation (Finding 5).
+
+Order revised on 2026-11-03: the steps that address the real pipeline come first.
+
+1. **The real pipeline, end to end (mains power).** In the running CrisisGraph pipeline, an extraction was quoted at about 60–70 s, while the isolated warm request takes about 17–20 s (Finding 1). Measure SOS to assignment with the per-request timings, and attribute the gap: cold starts, memory pressure with all roles running, earlier battery runs, or the pipeline's own retries and waits. If cold starts explain it, add a warm-up request and measure again.
+2. **Speculative decoding** with a small draft model (Qwen3-0.6B): speed, acceptance rate, identical answers. Each verification pass checks several draft tokens against the same cached context, so this also spreads the attention cost identified in Finding 5. It is the only remaining lever aimed directly at generation.
+3. **Write up the local study**, then move to the vLLM study on a Kaggle T4.
+
+Lower priority, possibly skipped:
+
+- **KV-cache quantization** at `-d 2400` (`-ctk/-ctv` q8_0, q4_0). The cache at 2,400 tokens is about 350 MB, against about 2.5 GB of weights read per token, so the expected gain is a few percent, and it changes the arithmetic (answers must be checked). At most one short check.
+- **Forced-token share** of the JSON output: a measurement only, since llama-server has no schema-aware ("jump-forward") decoding to act on it.
+- **A shorter system prompt** (an ML change: a new prompt version, with a full blind-set accuracy run against the SFT-V4 gates).
+- **Optional release build** of llama.cpp **without assertions**, compared with the package build. The CPU-specific code is already present (Finding 3).
+- **Changes that alter the answers** (other quantizations, a merged adapter) only with a blind-set accuracy run against the SFT-V4 gates.
