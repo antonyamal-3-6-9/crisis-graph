@@ -21,6 +21,10 @@ const TRIAGE_JSON_SCHEMA: &str = include_str!("../../schemas/triage-extraction-v
 const TRIAGE_SYSTEM_PROMPT: &str = include_str!("../../ml/prompts/triage-extraction-v3.2.txt");
 // V3 outputs are longer than V2; the evaluation used the same limit.
 const TRIAGE_MAX_TOKENS: u32 = 768;
+/// How long the start-up warm-up may take. A cold request reads the whole
+/// system prompt (about 54 s on the development laptop), which can exceed
+/// the extraction timeout, so the warm-up has its own.
+const WARM_UP_TIMEOUT: Duration = Duration::from_secs(300);
 
 type ExtractResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -183,6 +187,38 @@ impl TriageExtractor {
             tracing::warn!(attempt, %status, wait_s = wait.as_secs(), "Inference endpoint busy; retrying");
             tokio::time::sleep(wait.min(Duration::from_secs(60))).await;
         }
+    }
+
+    /// Whether a start-up warm-up helps: the model runs on our own server
+    /// (llama.cpp or vLLM), where the first request after a restart reads the
+    /// whole system prompt. Hosted endpoints are skipped: the call would only
+    /// spend quota.
+    pub fn warms_up(&self) -> bool {
+        matches!(self.inference_backend.trim().to_ascii_lowercase().as_str(), "llama-cpp" | "llama.cpp" | "vllm")
+    }
+
+    /// Send one throwaway request with the real system prompt and schema and
+    /// a single output token, so the server caches the prompt before the first
+    /// report arrives. The answer is discarded and never used for a report.
+    /// Returns how long the request took.
+    pub async fn warm_up(&self) -> ExtractResult<Duration> {
+        let mut payload = self.request_payload("Warm-up request at start-up. Not an emergency.")?;
+        payload["max_tokens"] = json!(1);
+        let url = format!("{}/chat/completions", self.inference_base_url.trim_end_matches('/'));
+        let mut request = self.http_client.post(&url).timeout(WARM_UP_TIMEOUT).json(&payload);
+        if let Some(api_key) = &self.inference_api_key {
+            request = request.bearer_auth(api_key);
+        }
+        let started = Instant::now();
+        let response = request
+            .send()
+            .await
+            .map_err(|error| format!("Warm-up request to {url} failed: {error}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("Warm-up request returned HTTP {status}").into());
+        }
+        Ok(started.elapsed())
     }
 
     /// Extract an unverified candidate triage report from natural-language SOS
@@ -719,6 +755,53 @@ mod tests {
         let payload = extractor.request_payload("test report").unwrap();
         assert_eq!(payload["response_format"]["type"], "json_schema");
         assert!(payload.get("structured_outputs").is_none());
+    }
+
+    #[test]
+    fn only_self_hosted_backends_warm_up() {
+        let mut extractor = extractor();
+        for (backend, expected) in [("llama-cpp", true), ("llama.cpp", true), ("vllm", true), ("openai", false), ("simulated", false)] {
+            extractor.inference_backend = backend.to_string();
+            assert_eq!(extractor.warms_up(), expected, "{backend}");
+        }
+    }
+
+    #[tokio::test]
+    async fn warm_up_sends_the_real_system_prompt_for_one_token() {
+        let seen = Arc::new(std::sync::Mutex::new(None::<Value>));
+        let sink = seen.clone();
+        let fail = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let failing = fail.clone();
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let sink = sink.clone();
+                let failing = failing.clone();
+                async move {
+                    *sink.lock().unwrap() = Some(body);
+                    if failing.load(std::sync::atomic::Ordering::SeqCst) {
+                        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+                    } else {
+                        reqwest::StatusCode::OK
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let mut extractor = extractor();
+        extractor.inference_backend = "llama-cpp".to_string();
+        extractor.inference_base_url = base;
+        extractor.warm_up().await.unwrap();
+        let body = seen.lock().unwrap().take().unwrap();
+        assert_eq!(body["max_tokens"], 1);
+        assert_eq!(body["messages"][0]["content"], TRIAGE_SYSTEM_PROMPT, "same prefix as a real extraction");
+        assert_eq!(body["response_format"]["type"], "json_schema");
+
+        fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(extractor.warm_up().await.is_err(), "a server error is reported, not hidden");
     }
 
     #[test]
