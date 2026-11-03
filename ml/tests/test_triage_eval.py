@@ -136,3 +136,26 @@ def test_fail_closed_policy_recovers_review_when_critical_field_is_null():
 
     assert report["human_review_recall"] == 0.0
     assert report["effective_human_review_recall"] == 1.0
+
+
+def test_vllm_grammar_drops_only_keywords_a_grammar_cannot_enforce():
+    import json
+    from pathlib import Path
+
+    from crisisgraph_ml.triage_eval import grammar_schema
+
+    full = json.loads((Path(__file__).resolve().parents[2] / "schemas" / "triage-extraction-v3.json").read_text())
+    assert '"uniqueItems"' in json.dumps(full)
+    payload = request_payload("vllm", "model", "prompt", full, "help")
+    grammar = payload["structured_outputs"]["json"]
+    assert '"uniqueItems"' not in json.dumps(grammar)
+    # Nothing else changes: putting the keywords back gives the full schema.
+    profile = grammar["properties"]["victim_profile"]["properties"]
+    for name in ("medical_conditions", "vulnerable_groups"):
+        profile[name]["uniqueItems"] = True
+    assert grammar == full
+    # Property names are never treated as keywords.
+    assert grammar_schema({"properties": {"uniqueItems": {"type": "string"}}}) == \
+        {"properties": {"uniqueItems": {"type": "string"}}}
+    # llama.cpp and hosted endpoints still get the full schema (llama.cpp ignores the keyword itself).
+    assert request_payload("llama-cpp", "m", "p", full, "help")["response_format"]["json_schema"]["schema"] == full

@@ -28,6 +28,35 @@ const WARM_UP_TIMEOUT: Duration = Duration::from_secs(300);
 
 type ExtractResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+/// JSON-schema keywords a decoding grammar cannot enforce. llama.cpp's grammar
+/// builder ignores them; vLLM's grammar backends reject the request.
+const GRAMMAR_UNSUPPORTED_KEYWORDS: &[&str] = &["uniqueItems"];
+
+/// The schema as a decoding grammar for vLLM: the same constraints llama.cpp
+/// applies, i.e. without [`GRAMMAR_UNSUPPORTED_KEYWORDS`]. The model output is
+/// still validated by the typed parser and the triage checks.
+fn grammar_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .filter(|(key, _)| !GRAMMAR_UNSUPPORTED_KEYWORDS.contains(&key.as_str()))
+                .map(|(key, value)| {
+                    let value = match (key.as_str(), value) {
+                        // Keys here are property or definition names, not keywords.
+                        ("properties" | "$defs" | "definitions", Value::Object(named)) => Value::Object(
+                            named.iter().map(|(name, sub)| (name.clone(), grammar_schema(sub))).collect(),
+                        ),
+                        _ => grammar_schema(value),
+                    };
+                    (key.clone(), value)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(grammar_schema).collect()),
+        other => other.clone(),
+    }
+}
+
 #[derive(Clone)]
 pub struct TriageExtractor {
     http_client: Client,
@@ -402,7 +431,7 @@ impl TriageExtractor {
                 });
             }
             "vllm" => {
-                payload["structured_outputs"] = json!({"json": schema});
+                payload["structured_outputs"] = json!({"json": grammar_schema(&schema)});
             }
             unsupported => {
                 return Err(format!(
@@ -755,6 +784,29 @@ mod tests {
         let payload = extractor.request_payload("test report").unwrap();
         assert_eq!(payload["response_format"]["type"], "json_schema");
         assert!(payload.get("structured_outputs").is_none());
+    }
+
+    #[test]
+    fn vllm_grammar_drops_only_keywords_a_grammar_cannot_enforce() {
+        let mut extractor = extractor();
+        extractor.inference_backend = "vllm".to_string();
+        let full: Value = serde_json::from_str(TRIAGE_JSON_SCHEMA).unwrap();
+        assert!(full.to_string().contains("\"uniqueItems\""));
+        let payload = extractor.request_payload("test report").unwrap();
+        let mut grammar = payload["structured_outputs"]["json"].clone();
+        assert!(!grammar.to_string().contains("\"uniqueItems\""));
+        // Nothing else changes: putting the keyword back gives the full schema.
+        for name in ["medical_conditions", "vulnerable_groups"] {
+            grammar["properties"]["victim_profile"]["properties"][name]["uniqueItems"] = json!(true);
+        }
+        assert_eq!(grammar, full);
+        // A property that happens to be named like the keyword is kept.
+        let named = json!({"properties": {"uniqueItems": {"type": "string"}}});
+        assert_eq!(grammar_schema(&named), named);
+        // llama.cpp still gets the full schema.
+        extractor.inference_backend = "llama-cpp".to_string();
+        let payload = extractor.request_payload("test report").unwrap();
+        assert_eq!(payload["response_format"]["json_schema"]["schema"], full);
     }
 
     #[test]
