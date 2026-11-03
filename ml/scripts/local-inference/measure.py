@@ -45,7 +45,7 @@ def post(payload):
     return body, time.time() - t
 
 
-print("step kind  wall_s  cached  new_prompt  prompt_s  prompt_tok/s  gen_tok  gen_s  gen_tok/s  answer")
+print("step kind  wall_s  cached  new_prompt  prompt_s  prompt_tok/s  gen_tok  gen_s  gen_tok/s  answer      draft  accepted")
 n = 0
 for i, kind in enumerate(seq):
     msg = messages[n % len(messages)]
@@ -66,4 +66,6 @@ for i, kind in enumerate(seq):
     print(f"{i+1:>4} {kind:>4}  {wall:6.1f}  {t.get('cache_n', '-'):>6}  {t.get('prompt_n', '-'):>10}  "
           f"{t.get('prompt_ms', 0)/1000:8.1f}  {t.get('prompt_per_second', 0):12.1f}  {t.get('predicted_n', '-'):>7}  "
           f"{t.get('predicted_ms', 0)/1000:5.1f}  {t.get('predicted_per_second', 0):9.1f}  "
-          f"{hashlib.sha256(body['choices'][0]['message']['content'].encode()).hexdigest()[:10]}", flush=True)
+          f"{hashlib.sha256(body['choices'][0]['message']['content'].encode()).hexdigest()[:10]}  "
+          # Speculative decoding only: tokens drafted and accepted by the target model.
+          f"{t.get('draft_n', '-'):>5}  {t.get('draft_n_accepted', '-'):>8}", flush=True)

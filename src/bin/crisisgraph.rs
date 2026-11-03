@@ -127,7 +127,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let repo_neo4j = neo4j.clone();
 
     let snapshot_gate = ReadyGate::new("graph_snapshot");
-    let gates = if matches!(role, Role::Graph | Role::Matcher) { vec![snapshot_gate.clone()] } else { Vec::new() };
+    // Triage is ready once the model server has the system prompt cached.
+    let model_gate = ReadyGate::new("model_warm");
+    let gates = match role {
+        Role::Graph | Role::Matcher => vec![snapshot_gate.clone()],
+        Role::Triage => vec![model_gate.clone()],
+        _ => Vec::new(),
+    };
     let mut routes = ops_routes(OpsState {
         role,
         neo4j,
@@ -180,8 +186,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             Some(tokio::spawn(relay.run(shutdown.clone())))
         }
         Role::Triage => {
+            let extractor = TriageExtractor::new(&config);
             let stages = PipelineStages::new(
-                TriageExtractor::new(&config),
+                extractor.clone(),
                 StateManager::new(repo_neo4j.clone()),
                 redis.clone(),
             )
@@ -194,7 +201,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 shutdown.clone(),
             ));
             // Load tests only: facts come from the report's ground-truth tag.
-            let engine: Arc<dyn TriageEngine> = if config.inference_backend.eq_ignore_ascii_case("simulated") {
+            let simulated = config.inference_backend.eq_ignore_ascii_case("simulated");
+            let engine: Arc<dyn TriageEngine> = if simulated {
                 warn!(median_ms = config.params.sim_extraction_median_ms, "SIMULATED extraction engine (load tests only)");
                 Arc::new(SimulatedEngine::new(config.params.sim_extraction_median_ms))
             } else {
@@ -209,7 +217,25 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 consumer,
             )
             .with_reader(redis.dedicated().await?);
-            Some(tokio::spawn(worker.run(shutdown.clone())))
+            let gate = model_gate.clone();
+            let shutdown = shutdown.clone();
+            Some(tokio::spawn(async move {
+                // Warm the model's prompt cache before taking reports, so the
+                // first SOS after a restart is not a cold request. A failed
+                // warm-up only costs speed: extraction failures still go to
+                // review, so the worker starts anyway.
+                if !simulated && extractor.warms_up() {
+                    tokio::select! {
+                        result = extractor.warm_up() => match result {
+                            Ok(took) => info!(secs = took.as_secs_f64(), "Model warm-up done; system prompt cached"),
+                            Err(error) => warn!(%error, "Model warm-up failed; starting anyway"),
+                        },
+                        _ = shutdown.wait() => return,
+                    }
+                }
+                gate.set_ready();
+                worker.run(shutdown).await
+            }))
         }
         Role::Graph => {
             let repo = repo.clone();

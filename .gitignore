@@ -32,3 +32,6 @@ Thumbs.db
 
 # Local monitoring data (Prometheus, Grafana)
 /.ops-data/
+
+# Internal ML material: raw benchmark runs, logs, machine details (local only)
+/ml/internal/

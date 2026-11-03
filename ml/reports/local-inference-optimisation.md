@@ -1,6 +1,6 @@
 # Local inference optimisation: Qwen3-4B + SFT-V4 on the laptop CPU
 
-Status: **in progress** (2026-11-02 to 2026-11-03). This report records the measurements so far. Later steps are listed at the end and will be added here.
+Status: **complete** (2026-11-02 to 2026-11-03). Raw benchmark data and logs are kept locally and not published; the scripts in `ml/scripts/local-inference/` reproduce every table.
 
 **Summary so far:**
 - A warm extraction takes about 16–19 s. Almost all of it is generating about 110 JSON tokens at about 7–8 tokens/s.
@@ -8,7 +8,9 @@ Status: **in progress** (2026-11-02 to 2026-11-03). This report records the meas
 - Device, thread and llama.cpp runtime options do not speed up the real request: at the real context length (about 2,400 cached tokens), **attention over the cached system prompt** costs roughly half the generation speed on the CPU, and every setting lands at about 7–8 tokens/s.
 - The adapter costs about 3–10% and the JSON grammar nothing.
 - Changing device (iGPU to CPU) changes some greedy answers, so it is not a speed-only setting.
-- The remaining levers are cheaper or shorter attention (KV-cache quantization, a shorter prompt) and fewer passes per token (speculative or schema-aware decoding).
+- **In the real pipeline (Finding 6),** extraction takes about 20 s, not the 60–70 s quoted earlier. The only slow report was the first after a server restart (54 s, close to the 60 s timeout). A start-up warm-up in the triage role removed it: the slowest report went from 54 s to 21.5 s.
+- **Speculative decoding (Finding 7) does not help on this laptop.** A Qwen3-0.6B draft is accepted 55–86% of the time, but a pass that checks several tokens costs so much here that every draft configuration is slower. The one faster variant (`ngram-mod`, up to +37%) changed one answer, so it is not adopted without a blind-set accuracy run.
+- The remaining local lever is shorter attention (a shorter system prompt, an ML change with a blind-set accuracy run). Speculative decoding moves to the T4 study, where GPU batching is cheap.
 
 ## Why
 
@@ -59,7 +61,7 @@ The warm request is the normal case. The system prompt is already cached:
 
 ## Finding 2: device and threads (mains power, 5 repetitions each)
 
-Raw data: `local-inference/matrix-ac-2026-11-02.tsv`, plus one llama-bench CSV per configuration in `local-inference/matrix-ac-2026-11-02-raw/`.
+Raw data (kept locally, not published): the summary TSV and one llama-bench CSV per configuration.
 
 **Generation (`tg64`, tokens/s)**, the phase that dominates each request:
 
@@ -89,7 +91,7 @@ Raw data: `local-inference/matrix-ac-2026-11-02.tsv`, plus one llama-bench CSV p
 
 ## Finding 3: llama.cpp runtime options (pass 2, mains power, 5 repetitions)
 
-Base: CPU, 4 threads, one per performance core (`taskset -c 0,2,4,6 … -ngl 0 -t 4`). Raw data: `local-inference/pass2-2026-11-02.tsv` and `pass2-2026-11-02-raw/`.
+Base: CPU, 4 threads, one per performance core (`taskset -c 0,2,4,6 … -ngl 0 -t 4`). Raw data kept locally.
 
 | Option | Prompt pp512 (tokens/s) | Generation tg64 (tokens/s) |
 |---|---:|---:|
@@ -112,7 +114,7 @@ Base: CPU, 4 threads, one per performance core (`taskset -c 0,2,4,6 … -ngl 0 -
 
 ## Finding 4: the real server request (mains power)
 
-`ml/scripts/local-inference/server_compare.sh` sends the same 9 requests to each configuration: a cold extraction, then warm extractions with refinement calls in between. Output: `local-inference/server-compare-2026-11-02/`.
+`ml/scripts/local-inference/server_compare.sh` sends the same 9 requests to each configuration: a cold extraction, then warm extractions with refinement calls in between. Raw output kept locally.
 
 | Configuration | Warm extraction (wall time) | Generation in the server | Cold first request |
 |---|---|---|---|
@@ -129,7 +131,7 @@ Base: CPU, 4 threads, one per performance core (`taskset -c 0,2,4,6 … -ngl 0 -
 
 ## Finding 5: why the server is slower than llama-bench
 
-`ml/scripts/local-inference/diagnose_generation.sh` isolates the three differences between llama-bench's `tg64` and the real request. Output: `local-inference/diagnose-2026-11-03/`.
+`ml/scripts/local-inference/diagnose_generation.sh` isolates the three differences between llama-bench's `tg64` and the real request. Raw output kept locally.
 
 **Context depth (llama-bench tg64, 3 repetitions):**
 
@@ -151,6 +153,76 @@ Base: CPU, 4 threads, one per performance core (`taskset -c 0,2,4,6 … -ngl 0 -
 - **The default iGPU configuration stays.** It is as fast at the real depth, has the faster cold start, and is the configuration the SFT-V4 accuracy numbers were measured with.
 - **The fine-tuned model produced schema-valid JSON for all 4 messages without the grammar.** The grammar is kept as a free safety net.
 
+## Finding 6: the real pipeline, end to end (mains power)
+
+**Where the 60–70 s figure came from.** It was never measured in the pipeline. It first appeared in the run instructions on 2026-10-31, next to "≈35 tokens/s prompt evaluation". At that speed, reading the 2,400-token system prompt alone takes about 68 s. So it most likely describes a request that read the whole prompt each time, from an older setup.
+
+**The run.** `ml/scripts/local-inference/pipeline_run.sh` starts a fresh `llama-server` (default iGPU configuration, one slot), the six roles from the release build, and a `surge` run of 13 reports over 10 minutes (one every 45 s, below capacity, so reports do not queue). Synthetic reports only, `.env` settings unchanged, including `INFERENCE_TIMEOUT_SECS=60`. It samples memory and charger state every 5 s. It ran twice: before and after the warm-up below. Raw output kept locally. Both runs were cleaned up with `surge cleanup`.
+
+| | Without warm-up | With warm-up |
+|---|---:|---:|
+| Model time per report, median | 19.8 s | 19.1 s |
+| Model time per report, slowest | **53.8 s** (the first, cold request) | **21.5 s** |
+| Triage time per report, median / slowest | 21.5 s / 54.0 s | 19.8 s / 25.3 s |
+| Time to assignment, median / slowest | 20.4 s / 55.5 s | 20.2 s / 25.9 s |
+| Matcher queue wait, median | 0.6 s | — (under 1 s) |
+| Failed extractions, dead letters, verification failures | 0 / 0 / 0 | 0 / 0 / 0 |
+| Lowest available memory during the run | 2.1 GB | 3.8 GB |
+
+The llama.cpp log of the first run shows the split:
+
+- **First request:** 2,387 prompt tokens in 38.4 s, then 106 tokens generated in 15.4 s.
+- **Every later extraction:** 40–130 new prompt tokens (1.1–3.7 s) and 106–119 generated tokens at 6.3–7.2 tokens/s (15–18.5 s).
+- **Landmark-refinement calls:** about 1.3–3.4 s each.
+
+**What this shows:**
+
+- **A warm extraction in the pipeline costs the same as in isolation** (Finding 1). Memory pressure, prompt eviction and the pipeline itself add nothing measurable. The matcher commits in under a second.
+- **The cold first request was the only slow one.** At 54 s it was close to the 60 s client timeout. Under memory pressure or on battery it would have timed out, and the report would have gone to review.
+
+**Fix: a start-up warm-up** (`TriageExtractor::warm_up`, called by the triage role). For a self-hosted backend (llama.cpp or vLLM), the role sends one request with the real system prompt and schema and `max_tokens: 1` before it reads any report. This request has its own 300 s timeout. The answer is discarded. `/readyz` reports `model_warm` once the warm-up has finished. If the warm-up fails, the role starts anyway with a warning, since extraction failures already go to review. Hosted endpoints (Gemini) skip it, because the call would only spend quota.
+
+In the second run the warm-up took 40.1 s (2,363 prompt tokens). The first report after it reused the cached prompt: 40 new tokens in 1.6 s. **The slowest report fell from 54 s to 21.5 s.**
+
+Generation, about 110 tokens at 6.3–7.2 tokens/s, is now the whole remaining cost. It is the target of speculative decoding (Finding 7).
+
+## Finding 7: speculative decoding (mains power)
+
+`ml/scripts/local-inference/spec_compare.sh` (target on the iGPU, the default) and `spec_compare_cpu.sh` (target on 4 performance-core threads, `--no-op-offload`) send the same 6 extractions to each configuration (the first one is cold) and fingerprint every answer. `measure.py` now also prints llama.cpp's draft counts. Raw output kept locally.
+
+- **Draft model:** Qwen3-0.6B Q8_0 (`Qwen/Qwen3-0.6B-GGUF`, `sha256 9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031`, same tokenizer as the 4B, no adapter), stored in the git-ignored `ml/model-cache/drafts/`.
+- **N-gram speculation:** needs no draft model. It guesses from text already in the context.
+
+**Warm extractions (requests 2–6):**
+
+| Target | Speculation | Generation (tokens/s) | Accepted draft tokens | Answers vs. its own baseline |
+|---|---|---:|---:|---|
+| **iGPU** | none (baseline) | **6.7–6.8** | — | — |
+| iGPU | draft, up to 3 tokens | 5.6–6.4 | 72–86% | identical |
+| iGPU | draft, up to 8 | 2.8–3.3 | 55–74% | identical |
+| iGPU | draft, up to 16 | 2.3–3.5 | 38–59% | identical |
+| iGPU | `ngram-simple` | 4.6–5.1 | 8–15% | identical |
+| iGPU | `ngram-mod` | 6.4 → **9.3** (rising per request) | 29–45% | **1 of 5 changed** |
+| CPU | none (baseline) | 6.0–6.3 | — | — (2 of 5 differ from the iGPU, as in Finding 4) |
+| CPU | draft on the iGPU, up to 3 | 4.8–5.3 | 72–86% | identical |
+| CPU | draft on the iGPU, up to 8 | 3.3–4.2 | 55–74% | identical |
+| CPU | draft on the CPU, up to 3 | 4.5–5.1 | 72–86% | identical |
+
+**What this shows:**
+
+- **The draft model predicts the fine-tuned JSON well.** It is not fine-tuned, yet with up to 8 tokens the target accepts about 6.5 tokens per verification pass.
+- **Every draft-model configuration is still slower, on both devices.** A pass that checks several tokens costs far more here than one single-token step. On the iGPU, a pass over about 7 tokens takes about 2 s, against about 150 ms for one token. Two causes are likely:
+  - the Vulkan build takes a slower route for small multi-token batches (compare the hidden op offload in Finding 3);
+  - attention over the 2,400 cached tokens is roughly half of each step (Finding 5), and that part grows with every token in the pass instead of being shared.
+- **`ngram-mod` is the only variant that sped up.** It learns from earlier answers and reached 9.3 tokens/s by the sixth request, about 37% faster. **But it changed one answer.** Request 4 produced different JSON (103 tokens instead of 105): the same answer the CPU baseline gives for that message.
+  - Greedy speculative decoding is lossless only in exact arithmetic. Checking several tokens in one batch computes slightly different numbers, and at temperature 0 that can flip a token on a borderline message.
+
+**Decision so far:** no speculative configuration is adopted.
+
+- The draft-model variants are slower everywhere on this hardware.
+- `ngram-mod` changes answers, so it could only be adopted after a full blind-set accuracy run against the SFT-V4 gates. Its gain also depends on a stream of similar requests warming it up.
+- The idea is not dead for the T4. A GPU verifies a batch of tokens at nearly the cost of one, which is where speculative decoding normally pays off, so the T4 serving study tests it there (vLLM n-gram speculation is already in plan ML-S1).
+
 ## Measurement pitfall: battery power
 
 The first round of measurements was taken **on battery**. On battery the CPU's power limits change from minute to minute, so the same setting gave 8.6 tokens/s at one moment and 3.4–5.3 a few minutes later. Those numbers are discarded. Every number in Finding 2 was measured on mains power in the performance profile, with the charger state checked before and after the run.
@@ -161,8 +233,8 @@ Done: pass 2 (Finding 3), the end-to-end server request (Finding 4), and the cau
 
 Order revised on 2026-11-03: the steps that address the real pipeline come first.
 
-1. **The real pipeline, end to end (mains power).** In the running CrisisGraph pipeline, an extraction was quoted at about 60–70 s, while the isolated warm request takes about 17–20 s (Finding 1). Measure SOS to assignment with the per-request timings, and attribute the gap: cold starts, memory pressure with all roles running, earlier battery runs, or the pipeline's own retries and waits. If cold starts explain it, add a warm-up request and measure again.
-2. **Speculative decoding** with a small draft model (Qwen3-0.6B): speed, acceptance rate, identical answers. Each verification pass checks several draft tokens against the same cached context, so this also spreads the attention cost identified in Finding 5. It is the only remaining lever aimed directly at generation.
+1. ~~The real pipeline, end to end~~: done (Finding 6), with the start-up warm-up.
+2. ~~Speculative decoding~~: done (Finding 7). Not adopted. The draft model is slower on both devices; `ngram-mod` is faster but changed one answer.
 3. **Write up the local study**, then move to the vLLM study on a Kaggle T4.
 
 Lower priority, possibly skipped:

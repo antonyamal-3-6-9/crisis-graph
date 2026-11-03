@@ -1,5 +1,0 @@
-step kind  wall_s  cached  new_prompt  prompt_s  prompt_tok/s  gen_tok  gen_s  gen_tok/s  answer
-   1    E    66.4       0        2389      51.2          46.6      113   15.2        7.4  3ab1e4411b
-   2    E    18.3    2347          46       2.7          16.8      115   15.6        7.3  449f189ea0
-   3    E    16.0    2347          37       2.3          16.2      104   13.8        7.5  c59e38ed7d
-   4    E    15.9    2347          33       2.1          15.6      103   13.8        7.4  c480547e7a
