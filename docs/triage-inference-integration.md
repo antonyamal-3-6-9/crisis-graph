@@ -96,6 +96,20 @@ the model name supplied by `INFERENCE_MODEL`. CrisisGraph will send vLLM's
 `response_format.json_schema` constraint. Adapter loading and model aliases are
 owned by the inference server, not the Rust application.
 
+The grammar sent to vLLM leaves out `uniqueItems`, which vLLM's grammar
+libraries reject; the response is still validated against the full schema.
+
+Measured server settings for a T4 (study ML-S1,
+`ml/reports/qwen3-4b-sft-v4-serving-t4.md`):
+
+- `--structured-outputs-config '{"backend":"guidance"}'`: about 3x the
+  throughput of the default library, with identical outputs on the blind set;
+- prefix caching on (the default);
+- `VLLM_ATTENTION_BACKEND=TRITON_ATTN` on GPUs without FlashAttention 2.
+
+With these, one T4 served about 39 extractions per minute at 32 in flight, and
+p95 24 s at 8 in flight.
+
 ## Runtime provenance
 
 Every successful `TriageReport` includes:
