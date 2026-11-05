@@ -102,6 +102,13 @@ not a blind holdout, and is not training-ready. The selected next milestone is
 runtime integration and controlled end-to-end validation, not another synthetic
 fine-tuning cycle or an arbitrary expansion to 1,000 records.
 
+Update: SFT-V4 was later trained and evaluated
+(`reports/qwen3-4b-qlora-sft-v4-evaluation.md`) and is the served adapter.
+Serving it on a GPU is measured in `reports/qwen3-4b-sft-v4-serving-t4.md`:
+vLLM on one T4 with the guidance grammar library handles about 39
+extractions/min. It misses the invented-fact gate by one case against the
+local result.
+
 Runtime setup, provenance, backend-specific structured-output behavior, and the
 inference-only probe are documented in
 `../docs/triage-inference-integration.md`. The evaluated V3 PEFT/GGUF weights

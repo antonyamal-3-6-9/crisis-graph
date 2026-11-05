@@ -1,0 +1,332 @@
+{
+ "study": "ML-S1",
+ "report": "ml/reports/qwen3-4b-sft-v4-serving-t4.md",
+ "dates": "2026-11-03 to 2026-11-05",
+ "environment": {
+  "gpu": "Tesla T4, 15360 MiB, 580.178.04, 7.5\nTesla T4, 15360 MiB, 580.178.04, 7.5",
+  "cpu": "Model name:                              Intel(R) Xeon(R) CPU @ 2.00GHz",
+  "ram_gb": 31.3,
+  "vllm_stack": {
+   "vllm": "0.11.0",
+   "torch": "2.8.0+cu128",
+   "transformers": "4.57.1",
+   "peft": "0.21.2"
+  },
+  "torch_cuda": "12.8 (7, 5)",
+  "attention_backend": "TRITON_ATTN"
+ },
+ "bundle_commit": "950eb3fd79f35f86b9de75385bcd516045b35c13",
+ "gates": {
+  "usable_outputs": ">= 120",
+  "critical_under_triage": "<= 8",
+  "v2_exact_match": ">= 78",
+  "invented_fact_cases": "<= 34",
+  "v2_review_recall": ">= 0.89"
+ },
+ "local_reference": {
+  "usable_outputs": 120,
+  "critical_under_triage": 7,
+  "v2_exact_match": 81,
+  "invented_fact_cases": 31,
+  "v2_review_recall": 0.906,
+  "sensitivity_92": {
+   "v2_exact_match": 63,
+   "critical_under_triage": 5,
+   "invented_fact_cases": 22
+  }
+ },
+ "accuracy": {
+  "B": {
+   "cases": 120,
+   "usable_outputs": 120,
+   "v2_exact_match": 85,
+   "v2_review_recall": 0.925,
+   "critical_under_triage": 6,
+   "critical_recall": {
+    "UNCONSCIOUS": 0.8461538461538461,
+    "BREATHING_DIFFICULTY": 0.9090909090909091,
+    "CARDIAC": 1.0,
+    "BLEEDING": 1.0
+   },
+   "remote_caller_miss": 0.07692307692307693,
+   "invented_fact_cases": 35,
+   "latency_p50_s": 15.12,
+   "latency_p95_s": 22.14,
+   "gates_passed": {
+    "usable_outputs": true,
+    "critical_under_triage": true,
+    "v2_exact_match": true,
+    "invented_fact_cases": false,
+    "v2_review_recall": true
+   },
+   "all_gates_passed": false
+  },
+  "B-guidance": {
+   "cases": 120,
+   "usable_outputs": 120,
+   "v2_exact_match": 85,
+   "v2_review_recall": 0.925,
+   "critical_under_triage": 6,
+   "critical_recall": {
+    "UNCONSCIOUS": 0.8461538461538461,
+    "BREATHING_DIFFICULTY": 0.9090909090909091,
+    "CARDIAC": 1.0,
+    "BLEEDING": 1.0
+   },
+   "remote_caller_miss": 0.07692307692307693,
+   "invented_fact_cases": 35,
+   "latency_p50_s": 12.39,
+   "latency_p95_s": 15.19,
+   "gates_passed": {
+    "usable_outputs": true,
+    "critical_under_triage": true,
+    "v2_exact_match": true,
+    "invented_fact_cases": false,
+    "v2_review_recall": true
+   },
+   "all_gates_passed": false
+  },
+  "B_sensitivity_92": {
+   "v2_exact_match": 68,
+   "critical_under_triage": 4,
+   "invented_fact_cases": 26
+  },
+  "B_vs_B_guidance_identical_outputs": 120,
+  "B_vs_local_identical_outputs": 61,
+  "invented_cases_overlap_with_local": {
+   "both": 27,
+   "only_B": 8,
+   "only_local": 4
+  }
+ },
+ "speed": {
+  "B_sweep_session1_from_printed_output": [
+   {
+    "concurrency": 1,
+    "extractions_per_min": 3.8,
+    "output_tokens_per_s": 7.79,
+    "e2e_p50_s": 14.9
+   },
+   {
+    "concurrency": 2,
+    "extractions_per_min": 5.8,
+    "output_tokens_per_s": 11.95,
+    "e2e_p50_s": 20.3
+   },
+   {
+    "concurrency": 4,
+    "extractions_per_min": 8.0,
+    "output_tokens_per_s": 16.5,
+    "e2e_p50_s": 28.1
+   },
+   {
+    "concurrency": 8,
+    "extractions_per_min": 9.8,
+    "output_tokens_per_s": 20.3,
+    "e2e_p50_s": 45.9
+   },
+   {
+    "concurrency": 16,
+    "extractions_per_min": 10.8,
+    "output_tokens_per_s": 22.4,
+    "e2e_p50_s": 83.8
+   },
+   {
+    "concurrency": 32,
+    "extractions_per_min": 11.5,
+    "output_tokens_per_s": 23.82,
+    "e2e_p50_s": 164.0
+   }
+  ],
+  "B_reference_c1": [
+   {
+    "concurrency": 1,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 3.8,
+    "output_tokens_per_s": 7.84,
+    "e2e_p50_s": 14.9,
+    "e2e_p95_s": 22.1,
+    "ttft_p50_s": 0.15,
+    "answers_changed_vs_reference": null
+   }
+  ],
+  "B-grammar-xgrammar": [
+   {
+    "concurrency": 1,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 3.7,
+    "output_tokens_per_s": 7.7,
+    "e2e_p50_s": 15.0,
+    "e2e_p95_s": 22.4,
+    "ttft_p50_s": 0.38,
+    "answers_changed_vs_reference": 0
+   },
+   {
+    "concurrency": 8,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 10.0,
+    "output_tokens_per_s": 20.67,
+    "e2e_p50_s": 44.9,
+    "e2e_p95_s": 67.2,
+    "ttft_p50_s": 0.62,
+    "answers_changed_vs_reference": 1
+   },
+   {
+    "concurrency": 32,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 12.2,
+    "output_tokens_per_s": 25.21,
+    "e2e_p50_s": 151.3,
+    "e2e_p95_s": 180.0,
+    "ttft_p50_s": 1.44,
+    "answers_changed_vs_reference": 0
+   }
+  ],
+  "B-grammar-guidance": [
+   {
+    "concurrency": 1,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 4.7,
+    "output_tokens_per_s": 9.78,
+    "e2e_p50_s": 12.3,
+    "e2e_p95_s": 14.9,
+    "ttft_p50_s": 0.38,
+    "answers_changed_vs_reference": 1
+   },
+   {
+    "concurrency": 8,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 22.9,
+    "output_tokens_per_s": 47.51,
+    "e2e_p50_s": 19.6,
+    "e2e_p95_s": 23.8,
+    "ttft_p50_s": 0.34,
+    "answers_changed_vs_reference": 1
+   },
+   {
+    "concurrency": 32,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 39.5,
+    "output_tokens_per_s": 81.85,
+    "e2e_p50_s": 45.1,
+    "e2e_p95_s": 54.5,
+    "ttft_p50_s": 0.92,
+    "answers_changed_vs_reference": 0
+   }
+  ],
+  "B-no-prefix-cache": [
+   {
+    "concurrency": 1,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 3.1,
+    "output_tokens_per_s": 6.35,
+    "e2e_p50_s": 18.5,
+    "e2e_p95_s": 25.8,
+    "ttft_p50_s": 3.82,
+    "answers_changed_vs_reference": 1
+   },
+   {
+    "concurrency": 8,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 6.2,
+    "output_tokens_per_s": 12.83,
+    "e2e_p50_s": 75.7,
+    "e2e_p95_s": 108.6,
+    "ttft_p50_s": 5.09,
+    "answers_changed_vs_reference": 1
+   },
+   {
+    "concurrency": 32,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 5.8,
+    "output_tokens_per_s": 11.97,
+    "e2e_p50_s": 315.3,
+    "e2e_p95_s": 376.0,
+    "ttft_p50_s": 220.45,
+    "answers_changed_vs_reference": 1
+   }
+  ],
+  "B-parity-c16": [
+   {
+    "concurrency": 16,
+    "requests": 20,
+    "failed": 0,
+    "extractions_per_min": 11.5,
+    "output_tokens_per_s": 23.41,
+    "e2e_p50_s": 77.7,
+    "e2e_p95_s": 87.6,
+    "ttft_p50_s": 4.04,
+    "answers_changed_vs_reference": 0
+   }
+  ],
+  "B-guidance_session2": [
+   {
+    "concurrency": 1,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 4.7,
+    "output_tokens_per_s": 9.76,
+    "e2e_p50_s": 12.4,
+    "e2e_p95_s": 14.9,
+    "ttft_p50_s": 0.15,
+    "answers_changed_vs_reference": null
+   },
+   {
+    "concurrency": 8,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 22.5,
+    "output_tokens_per_s": 46.76,
+    "e2e_p50_s": 20.1,
+    "e2e_p95_s": 24.2,
+    "ttft_p50_s": 0.35,
+    "answers_changed_vs_reference": null
+   },
+   {
+    "concurrency": 32,
+    "requests": 64,
+    "failed": 0,
+    "extractions_per_min": 39.2,
+    "output_tokens_per_s": 81.15,
+    "e2e_p50_s": 45.5,
+    "e2e_p95_s": 54.9,
+    "ttft_p50_s": 0.87,
+    "answers_changed_vs_reference": null
+   }
+  ],
+  "diagnostic_c16_extractions_per_min": {
+   "adapter + grammar": 12.2,
+   "adapter, no grammar": 30.2,
+   "base + grammar": 7.7,
+   "base, no grammar": 36.0
+  },
+  "attention_backend_base_single_request_tokens_per_s": {
+   "FLEX_ATTENTION_default": 9.1,
+   "TRITON_ATTN": 19.4,
+   "FLASHINFER": "not installed"
+  },
+  "single_request_split_tokens_per_s_triton": {
+   "adapter + grammar": 8.5,
+   "adapter, no grammar": 9.6,
+   "base + grammar": 10.9,
+   "base, no grammar": 19.4
+  }
+ },
+ "not_run": {
+  "A": "llama.cpp b11429 CUDA build failed at CMake configure on Kaggle (CUDA 13.0 image)",
+  "C": "dropped",
+  "D": "dropped",
+  "E": "dropped",
+  "surge_run_C": "not run"
+ }
+}

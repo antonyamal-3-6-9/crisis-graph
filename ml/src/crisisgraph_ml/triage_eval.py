@@ -148,6 +148,31 @@ def error_result(
     )
 
 
+#: JSON-schema keywords a decoding grammar cannot enforce. llama.cpp's grammar
+#: builder ignores them silently; vLLM's grammar backends reject the request.
+GRAMMAR_UNSUPPORTED_KEYWORDS = frozenset({"uniqueItems"})
+
+
+def grammar_schema(schema: Any) -> Any:
+    """The schema as a decoding grammar for vLLM: the same constraints llama.cpp
+    applies, i.e. without the keywords in ``GRAMMAR_UNSUPPORTED_KEYWORDS``.
+    Outputs are still validated against the full schema."""
+    if isinstance(schema, dict):
+        out = {}
+        for key, value in schema.items():
+            if key in GRAMMAR_UNSUPPORTED_KEYWORDS:
+                continue
+            if key in ("properties", "$defs", "definitions") and isinstance(value, dict):
+                # Keys here are property or definition names, not keywords.
+                out[key] = {name: grammar_schema(sub) for name, sub in value.items()}
+            else:
+                out[key] = grammar_schema(value)
+        return out
+    if isinstance(schema, list):
+        return [grammar_schema(item) for item in schema]
+    return schema
+
+
 def request_payload(
     backend: str,
     model: str,
@@ -176,7 +201,7 @@ def request_payload(
             },
         }
     elif backend == "vllm":
-        payload["structured_outputs"] = {"json": schema}
+        payload["structured_outputs"] = {"json": grammar_schema(schema)}
     else:
         raise ValueError(f"Unsupported backend: {backend}")
     return payload
